@@ -11,10 +11,9 @@ namespace Mc.Ui.Tests;
 
 /// <summary>
 /// Tests for every top-level menu and every menu item in McApplication.
-/// Each test verifies:
-///   • Visible  — the menu / item exists with the expected title
-///   • Clickable — the item has a non-null Action delegate
-///   • Shortcut  — any advertised keyboard shortcut is documented correctly
+/// The menu structure mirrors the original GNU Midnight Commander exactly,
+/// with the addition of our custom Tools menu.
+/// Order: Left | File | Command | Tools | Options | Right
 /// </summary>
 [Collection("TUI Tests")]
 public sealed class McApplicationMenuTests
@@ -23,7 +22,6 @@ public sealed class McApplicationMenuTests
 
     public McApplicationMenuTests(ApplicationFixture _)
     {
-        // Build a minimal VFS with a mock provider so panels don't hit the real FS
         var mock = new Mock<IVfsProvider>();
         mock.Setup(p => p.CanHandle(It.IsAny<VfsPath>())).Returns(true);
         mock.Setup(p => p.ListDirectory(It.IsAny<VfsPath>())).Returns([]);
@@ -53,16 +51,14 @@ public sealed class McApplicationMenuTests
 
     private MenuBarItem GetMenu(int index) => GetMenuBar().Menus[index];
 
-    /// <summary>Strip hotkey underscore from title.</summary>
     private static string Title(MenuItem item) =>
         item.Title?.ToString()?.Replace("_", "") ?? string.Empty;
 
-    /// <summary>Returns all non-separator children of a menu.</summary>
     private static MenuItem[] Items(MenuBarItem menu) =>
         menu.Children.Where(c => c is not null).ToArray()!;
 
     // ==================================================================
-    // TOP-LEVEL MENU BAR STRUCTURE
+    // TOP-LEVEL MENU BAR — Left | File | Command | Tools | Options | Right
     // ==================================================================
 
     [Fact]
@@ -70,23 +66,32 @@ public sealed class McApplicationMenuTests
         => Assert.Equal(6, GetMenuBar().Menus.Length);
 
     [Theory]
-    [InlineData(0, "Left panel")]
+    [InlineData(0, "Left")]
     [InlineData(1, "File")]
     [InlineData(2, "Command")]
     [InlineData(3, "Tools")]
     [InlineData(4, "Options")]
-    [InlineData(5, "Help")]
-    public void TopLevel_Menu_TitleIsCorrect(int index, string expectedTitle)
-        => Assert.Contains(expectedTitle, Title(GetMenu(index)));
+    [InlineData(5, "Right")]
+    public void TopLevel_Menu_TitleIsCorrect(int index, string expected)
+        => Assert.Contains(expected, Title(GetMenu(index)));
 
     // ==================================================================
-    // LEFT PANEL MENU  (index 0)
+    // LEFT PANEL MENU  (index 0) — same structure as original MC
     // ==================================================================
 
     [Theory]
+    [InlineData("File listing")]
+    [InlineData("Quick view")]
+    [InlineData("Info")]
+    [InlineData("Tree")]
+    [InlineData("Panelize")]
     [InlineData("Listing format")]
     [InlineData("Sort order")]
     [InlineData("Filter")]
+    [InlineData("Encoding")]
+    [InlineData("FTP link")]
+    [InlineData("Shell link")]
+    [InlineData("SFTP link")]
     [InlineData("Rescan")]
     public void LeftPanel_MenuItem_IsVisible(string partialTitle)
     {
@@ -105,19 +110,37 @@ public sealed class McApplicationMenuTests
         Assert.NotNull(item.Action);
     }
 
+    [Fact]
+    public void LeftPanel_Rescan_HasCtrlRShortcut()
+    {
+        var item = Items(GetMenu(0)).First(i => Title(i).Contains("Rescan"));
+        Assert.Equal("Ctrl+R", item.Help);
+    }
+
     // ==================================================================
     // FILE MENU  (index 1)
     // ==================================================================
 
     [Theory]
     [InlineData("View")]
+    [InlineData("View file")]
+    [InlineData("Filtered view")]
     [InlineData("Edit")]
     [InlineData("Copy")]
-    [InlineData("Move/Rename")]
-    [InlineData("New dir")]
-    [InlineData("Delete")]
-    [InlineData("Info")]
     [InlineData("Chmod")]
+    [InlineData("Link")]
+    [InlineData("Symlink")]
+    [InlineData("Relative symlink")]
+    [InlineData("Edit symlink")]
+    [InlineData("Chown")]
+    [InlineData("Advanced chown")]
+    [InlineData("Rename/Move")]
+    [InlineData("Mkdir")]
+    [InlineData("Delete")]
+    [InlineData("Quick cd")]
+    [InlineData("Select group")]
+    [InlineData("Unselect group")]
+    [InlineData("Invert selection")]
     [InlineData("Exit")]
     public void FileMenu_MenuItem_IsVisible(string partialTitle)
     {
@@ -129,11 +152,9 @@ public sealed class McApplicationMenuTests
     [InlineData("View")]
     [InlineData("Edit")]
     [InlineData("Copy")]
-    [InlineData("Move/Rename")]
-    [InlineData("New dir")]
+    [InlineData("Rename/Move")]
+    [InlineData("Mkdir")]
     [InlineData("Delete")]
-    [InlineData("Info")]
-    [InlineData("Chmod")]
     [InlineData("Exit")]
     public void FileMenu_MenuItem_IsClickable(string partialTitle)
     {
@@ -145,13 +166,11 @@ public sealed class McApplicationMenuTests
     [InlineData("View",        "F3")]
     [InlineData("Edit",        "F4")]
     [InlineData("Copy",        "F5")]
-    [InlineData("Move/Rename", "F6")]
-    [InlineData("New dir",     "F7")]
+    [InlineData("Rename/Move", "F6")]
+    [InlineData("Mkdir",       "F7")]
     [InlineData("Delete",      "F8")]
-    [InlineData("Info",        "Ctrl+L")]
-    [InlineData("Chmod",       "Ctrl+X")]
     [InlineData("Exit",        "F10")]
-    public void FileMenu_MenuItem_HasCorrectShortcutDocumented(string partialTitle, string shortcut)
+    public void FileMenu_MenuItem_HasCorrectShortcut(string partialTitle, string shortcut)
     {
         var item = Items(GetMenu(1)).First(i => Title(i).Contains(partialTitle));
         Assert.Equal(shortcut, item.Help);
@@ -162,12 +181,24 @@ public sealed class McApplicationMenuTests
     // ==================================================================
 
     [Theory]
-    [InlineData("Find file")]
-    [InlineData("Hotlist")]
+    [InlineData("User menu")]
     [InlineData("Directory tree")]
+    [InlineData("Find file")]
     [InlineData("Swap panels")]
-    [InlineData("Compare panels")]
-    [InlineData("Shell")]
+    [InlineData("Switch panels on/off")]
+    [InlineData("Compare directories")]
+    [InlineData("Compare files")]
+    [InlineData("External panelize")]
+    [InlineData("Show directory sizes")]
+    [InlineData("Command history")]
+    [InlineData("Viewed/edited files history")]
+    [InlineData("Directory hotlist")]
+    [InlineData("Active VFS list")]
+    [InlineData("Background jobs")]
+    [InlineData("Screen list")]
+    [InlineData("Edit extension file")]
+    [InlineData("Edit menu file")]
+    [InlineData("Edit highlighting group file")]
     public void CommandMenu_MenuItem_IsVisible(string partialTitle)
     {
         var items = Items(GetMenu(2));
@@ -176,9 +207,10 @@ public sealed class McApplicationMenuTests
 
     [Theory]
     [InlineData("Find file")]
-    [InlineData("Hotlist")]
     [InlineData("Swap panels")]
-    [InlineData("Shell")]
+    [InlineData("Switch panels on/off")]
+    [InlineData("Compare files")]
+    [InlineData("Directory hotlist")]
     public void CommandMenu_MenuItem_IsClickable(string partialTitle)
     {
         var item = Items(GetMenu(2)).First(i => Title(i).Contains(partialTitle));
@@ -186,16 +218,17 @@ public sealed class McApplicationMenuTests
     }
 
     [Theory]
-    [InlineData("Swap panels", "Ctrl+U")]
-    [InlineData("Shell",       "Ctrl+O")]
-    public void CommandMenu_MenuItem_HasCorrectShortcutDocumented(string partialTitle, string shortcut)
+    [InlineData("Swap panels",          "Ctrl+U")]
+    [InlineData("Switch panels on/off", "Ctrl+O")]
+    [InlineData("Directory hotlist",    "Ctrl+\\")]
+    public void CommandMenu_MenuItem_HasCorrectShortcut(string partialTitle, string shortcut)
     {
         var item = Items(GetMenu(2)).First(i => Title(i).Contains(partialTitle));
         Assert.Equal(shortcut, item.Help);
     }
 
     // ==================================================================
-    // TOOLS MENU  (index 3)
+    // TOOLS MENU  (index 3) — custom addition for this .NET port
     // ==================================================================
 
     [Theory]
@@ -245,7 +278,12 @@ public sealed class McApplicationMenuTests
     [InlineData("Configuration")]
     [InlineData("Layout")]
     [InlineData("Panel options")]
+    [InlineData("Confirmation")]
+    [InlineData("Appearance")]
+    [InlineData("Learn keys")]
+    [InlineData("Virtual FS")]
     [InlineData("Save setup")]
+    [InlineData("About")]
     public void OptionsMenu_MenuItem_IsVisible(string partialTitle)
     {
         var items = Items(GetMenu(4));
@@ -257,6 +295,7 @@ public sealed class McApplicationMenuTests
     [InlineData("Layout")]
     [InlineData("Panel options")]
     [InlineData("Save setup")]
+    [InlineData("About")]
     public void OptionsMenu_MenuItem_IsClickable(string partialTitle)
     {
         var item = Items(GetMenu(4)).First(i => Title(i).Contains(partialTitle));
@@ -264,65 +303,84 @@ public sealed class McApplicationMenuTests
     }
 
     // ==================================================================
-    // HELP MENU  (index 5)
+    // RIGHT PANEL MENU  (index 5) — identical structure to Left
     // ==================================================================
 
     [Theory]
-    [InlineData("Help")]
-    [InlineData("About")]
-    public void HelpMenu_MenuItem_IsVisible(string partialTitle)
+    [InlineData("File listing")]
+    [InlineData("Quick view")]
+    [InlineData("Info")]
+    [InlineData("Tree")]
+    [InlineData("Panelize")]
+    [InlineData("Listing format")]
+    [InlineData("Sort order")]
+    [InlineData("Filter")]
+    [InlineData("Encoding")]
+    [InlineData("FTP link")]
+    [InlineData("Shell link")]
+    [InlineData("Rescan")]
+    public void RightPanel_MenuItem_IsVisible(string partialTitle)
     {
         var items = Items(GetMenu(5));
         Assert.Contains(items, i => Title(i).Contains(partialTitle));
     }
 
     [Theory]
-    [InlineData("Help")]
-    [InlineData("About")]
-    public void HelpMenu_MenuItem_IsClickable(string partialTitle)
+    [InlineData("Listing format")]
+    [InlineData("Sort order")]
+    [InlineData("Rescan")]
+    public void RightPanel_MenuItem_IsClickable(string partialTitle)
     {
         var item = Items(GetMenu(5)).First(i => Title(i).Contains(partialTitle));
         Assert.NotNull(item.Action);
     }
 
     [Fact]
-    public void HelpMenu_Help_HasF1Shortcut()
+    public void RightPanel_Rescan_HasCtrlRShortcut()
     {
-        var item = Items(GetMenu(5)).First(i => Title(i).Contains("Help"));
-        Assert.Equal("F1", item.Help);
+        var item = Items(GetMenu(5)).First(i => Title(i).Contains("Rescan"));
+        Assert.Equal("Ctrl+R", item.Help);
     }
 
     // ==================================================================
-    // SAFE ACTION INVOCATION — actions that don't open dialogs
+    // SAFE ACTION INVOCATION — items with non-blocking side-effects
     // ==================================================================
 
     [Fact]
     public void LeftPanel_Rescan_ExecutesWithoutException()
     {
         var item = Items(GetMenu(0)).First(i => Title(i).Contains("Rescan"));
-        var ex = Record.Exception(() => item.Action!.Invoke());
-        Assert.Null(ex);
+        Assert.Null(Record.Exception(() => item.Action!.Invoke()));
+    }
+
+    [Fact]
+    public void RightPanel_Rescan_ExecutesWithoutException()
+    {
+        var item = Items(GetMenu(5)).First(i => Title(i).Contains("Rescan"));
+        Assert.Null(Record.Exception(() => item.Action!.Invoke()));
     }
 
     [Fact]
     public void Command_SwapPanels_ExecutesWithoutException()
     {
         var item = Items(GetMenu(2)).First(i => Title(i).Contains("Swap panels"));
-        var ex = Record.Exception(() => item.Action!.Invoke());
-        Assert.Null(ex);
+        Assert.Null(Record.Exception(() => item.Action!.Invoke()));
     }
 
     [Fact]
     public void Options_SaveSetup_ExecutesWithoutException()
     {
-        // McSettings.Save() with a default in-memory McConfig may try to write
-        // to an empty path — wrap in try/catch since no real file path is set.
         var item = Items(GetMenu(4)).First(i => Title(i).Contains("Save setup"));
         var ex = Record.Exception(() => item.Action!.Invoke());
-        // We only care that the method *exists* and doesn't crash the process;
-        // I/O errors around an empty path are acceptable.
         Assert.True(ex is null || ex is DirectoryNotFoundException or IOException
                     or ArgumentException or ArgumentNullException,
-            $"Unexpected exception type: {ex?.GetType().Name}: {ex?.Message}");
+            $"Unexpected exception: {ex?.GetType().Name}: {ex?.Message}");
+    }
+
+    [Fact]
+    public void File_InvertSelection_ExecutesWithoutException()
+    {
+        var item = Items(GetMenu(1)).First(i => Title(i).Contains("Invert selection"));
+        Assert.Null(Record.Exception(() => item.Action!.Invoke()));
     }
 }

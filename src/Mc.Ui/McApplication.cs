@@ -51,75 +51,126 @@ public sealed class McApplication : Toplevel
     {
         ColorScheme = McTheme.Panel;
 
-        // Menu bar
+        // Menu bar — mirrors original MC: Left | File | Command | [Tools] | Options | Right
+        // Panel menu items are identical for Left and Right
+        MenuItem[] PanelMenuItems(bool left) =>
+        [
+            new MenuItem("_File listing",      string.Empty, () => { }),
+            new MenuItem("_Quick view",        string.Empty, () => { }),
+            new MenuItem("_Info",              string.Empty, () => { }),
+            new MenuItem("_Tree",              string.Empty, () => { }),
+            new MenuItem("_Panelize",          string.Empty, () => { }),
+            null!,
+            new MenuItem("_Listing format...", string.Empty, ShowSortDialog),
+            new MenuItem("_Sort order...",     string.Empty, ShowSortDialog),
+            new MenuItem("_Filter...",         string.Empty, () => { }),
+            new MenuItem("_Encoding...",       string.Empty, () => { }),
+            null!,
+            new MenuItem("_FTP link...",       string.Empty, () => { }),
+            new MenuItem("_Shell link...",     string.Empty, () => { }),
+            new MenuItem("S_FTP link...",      string.Empty, () => { }),
+            null!,
+            new MenuItem("_Rescan",            "Ctrl+R",
+                () => (left ? _controller.LeftPanel : _controller.RightPanel).Reload()),
+        ];
+
         _menuBar = new MenuBar
         {
             Menus = new[]
             {
-                new MenuBarItem("_Left panel", new[]
+                // ── Left ──────────────────────────────────────────────────
+                new MenuBarItem("_Left",  PanelMenuItems(left: true)),
+
+                // ── File ──────────────────────────────────────────────────
+                new MenuBarItem("_File", new MenuItem[]
                 {
-                    new MenuItem("_Listing format...", string.Empty, ShowSortDialog),
-                    new MenuItem("_Sort order...",     string.Empty, ShowSortDialog),
-                    new MenuItem("_Filter...",         string.Empty, () => { }),
-                    new MenuItem("_Rescan",            "Ctrl+R",     () => _controller.LeftPanel.Reload()),
+                    new("_View",                 "F3",         () => ViewCurrent()),
+                    new("View _file...",         string.Empty, () => ViewFilePrompt()),
+                    new("F_iltered view",        string.Empty, () => ViewFiltered()),
+                    new("_Edit",                 "F4",         () => EditCurrent()),
+                    new("_Copy",                 "F5",         () => CopyFiles()),
+                    new("C_hmod",                string.Empty, () => Chmod()),
+                    new("_Link",                 string.Empty, () => CreateLink()),
+                    new("_Symlink",              string.Empty, () => CreateSymlink()),
+                    new("Relati_ve symlink",      string.Empty, () => CreateRelativeSymlink()),
+                    new("Edit s_ymlink",         string.Empty, () => EditSymlink()),
+                    new("Ch_own",                string.Empty, () => Chown()),
+                    new("_Advanced chown",       string.Empty, () => AdvancedChown()),
+                    new("_Rename/Move",          "F6",         () => MoveFiles()),
+                    new("_Mkdir",                "F7",         () => MakeDir()),
+                    new("_Delete",               "F8",         () => DeleteFiles()),
+                    new("_Quick cd",             string.Empty, () => QuickCd()),
+                    null!,
+                    new("_Select group",         "+",          () => SelectGroup()),
+                    new("_Unselect group",       "-",          () => UnselectGroup()),
+                    new("_Invert selection",     "*",          () => InvertSelection()),
+                    null!,
+                    new("E_xit",                 "F10",        () => ConfirmQuit()),
                 }),
-                new MenuBarItem("_File", new[]
+
+                // ── Command ───────────────────────────────────────────────
+                new MenuBarItem("_Command", new MenuItem[]
                 {
-                    new MenuItem("_View",        "F3",  () => ViewCurrent()),
-                    new MenuItem("_Edit",        "F4",  () => EditCurrent()),
-                    new MenuItem("_Copy",        "F5",  () => CopyFiles()),
-                    new MenuItem("_Move/Rename", "F6",  () => MoveFiles()),
-                    new MenuItem("_New dir",     "F7",  () => MakeDir()),
-                    new MenuItem("_Delete",      "F8",  () => DeleteFiles()),
+                    new("_User menu",                   string.Empty, () => { }),
+                    new("_Directory tree",              string.Empty, () => { }),
+                    new("_Find file",                   string.Empty, ShowFindDialog),
+                    new("_Swap panels",                 "Ctrl+U",     () => { _controller.SwapPanels(); RefreshPanels(); }),
+                    new("Switch _panels on/off",        "Ctrl+O",     LaunchShell),
+                    new("_Compare directories",         string.Empty, () => { }),
+                    new("Compare _files",               string.Empty, ComparePanels),
+                    new("E_xternal panelize",           string.Empty, () => { }),
+                    new("Show directory si_zes",        string.Empty, () => { }),
                     null!,
-                    new MenuItem("_Info",   "Ctrl+L",  () => ShowInfo()),
-                    new MenuItem("_Chmod",  "Ctrl+X",  () => Chmod()),
+                    new("Command _history",             string.Empty, () => { }),
+                    new("Viewed/_edited files history", string.Empty, () => { }),
+                    new("Directory _hotlist",           "Ctrl+\\",    ShowHotlist),
+                    new("Active _VFS list",             string.Empty, () => { }),
+                    new("_Background jobs",             string.Empty, () => { }),
+                    new("Screen _list",                 string.Empty, () => { }),
                     null!,
-                    new MenuItem("E_xit",   "F10",     () => Application.RequestStop()),
+                    new("Edit e_xtension file",         string.Empty, () => { }),
+                    new("Edit _menu file",              string.Empty, () => { }),
+                    new("Edit hi_ghlighting group file",string.Empty, () => { }),
                 }),
-                new MenuBarItem("_Command", new[]
+
+                // ── Tools (custom addition for this .NET port) ────────────
+                new MenuBarItem("_Tools", new MenuItem[]
                 {
-                    new MenuItem("_Find file",      "F7",       ShowFindDialog),
-                    new MenuItem("_Hotlist",        "Ctrl+\\",  ShowHotlist),
-                    new MenuItem("_Directory tree", string.Empty, () => { }),
-                    new MenuItem("_Swap panels",    "Ctrl+U",   () => { _controller.SwapPanels(); RefreshPanels(); }),
-                    new MenuItem("_Compare panels", string.Empty, ComparePanels),
+                    new("Copy _path to clipboard",  string.Empty, CopyPathToClipboard),
+                    new("Copy file _name",          string.Empty, CopyNameToClipboard),
+                    new("Copy _directory path",     string.Empty, CopyDirToClipboard),
                     null!,
-                    new MenuItem("_Shell",   "Ctrl+O",  LaunchShell),
+                    new("_Checksum...",             string.Empty, ShowChecksum),
+                    new("Directory _size...",       string.Empty, ShowDirSize),
+                    new("_Touch (timestamps)...",   string.Empty, ShowTouch),
+                    null!,
+                    new("_Batch rename...",         string.Empty, ShowBatchRename),
+                    null!,
+                    new("Open _terminal here",      "Ctrl+T",     OpenTerminalHere),
+                    new("_Compare with diff tool",  string.Empty, CompareWithDiffTool),
                 }),
-                new MenuBarItem("_Tools", new[]
+
+                // ── Options ───────────────────────────────────────────────
+                new MenuBarItem("_Options", new MenuItem[]
                 {
-                    // --- Clipboard ---
-                    new MenuItem("Copy _path to clipboard",   string.Empty, CopyPathToClipboard),
-                    new MenuItem("Copy file _name",           string.Empty, CopyNameToClipboard),
-                    new MenuItem("Copy _directory path",      string.Empty, CopyDirToClipboard),
+                    new("_Configuration...", string.Empty, () => { }),
+                    new("_Layout...",        string.Empty, () => { }),
+                    new("_Panel options...", string.Empty, () => { }),
+                    new("C_onfirmation...",  string.Empty, () => { }),
+                    new("_Appearance...",    string.Empty, () => { }),
+                    new("_Learn keys...",    string.Empty, () => { }),
+                    new("_Virtual FS...",    string.Empty, () => { }),
                     null!,
-                    // --- File info ---
-                    new MenuItem("_Checksum...",              string.Empty, ShowChecksum),
-                    new MenuItem("Directory _size...",        string.Empty, ShowDirSize),
-                    new MenuItem("_Touch (timestamps)...",    string.Empty, ShowTouch),
+                    new("_Save setup",       string.Empty, () => _settings.Save()),
                     null!,
-                    // --- Operations ---
-                    new MenuItem("_Batch rename...",          string.Empty, ShowBatchRename),
-                    null!,
-                    // --- External apps ---
-                    new MenuItem("Open _terminal here",       "Ctrl+T",     OpenTerminalHere),
-                    new MenuItem("_Compare with diff tool",   string.Empty, CompareWithDiffTool),
+                    new("_About...",         string.Empty, () => MessageDialog.Show("About",
+                        "Midnight Commander for .NET\n" +
+                        ".NET 8 rewrite of GNU Midnight Commander\n" +
+                        "Built with Terminal.Gui")),
                 }),
-                new MenuBarItem("_Options", new[]
-                {
-                    new MenuItem("_Configuration...", string.Empty, () => { }),
-                    new MenuItem("_Layout...",        string.Empty, () => { }),
-                    new MenuItem("_Panel options...", string.Empty, () => { }),
-                    null!,
-                    new MenuItem("_Save setup", string.Empty, () => _settings.Save()),
-                }),
-                new MenuBarItem("_Help", new[]
-                {
-                    new MenuItem("_Help",   "F1", HelpDialog.Show),
-                    new MenuItem("_About",  string.Empty, () =>
-                        MessageDialog.Show("About", "Midnight Commander for .NET\n.NET 8 rewrite of GNU Midnight Commander\nBuilt with Terminal.Gui")),
-                }),
+
+                // ── Right ─────────────────────────────────────────────────
+                new MenuBarItem("_Right", PanelMenuItems(left: false)),
             },
         };
         Add(_menuBar);
@@ -674,6 +725,56 @@ public sealed class McApplication : Toplevel
 
         if (!ProcessHelper.OpenDiff(leftEntry.FullPath.Path, rightEntry.FullPath.Path))
             MessageDialog.Error("Could not find a diff tool.\nTried: meld, kdiff3, code, bcompare, vimdiff.");
+    }
+
+    // --- File menu: new items ---
+
+    private void ViewFilePrompt()
+    {
+        var name = MkdirDialog.Show();   // reuse single-input dialog for filename prompt
+        if (!string.IsNullOrWhiteSpace(name) && File.Exists(name))
+            ViewFile(name);
+    }
+
+    private static void ViewFiltered() { }
+    private static void CreateLink() { }
+    private static void CreateSymlink() { }
+    private static void CreateRelativeSymlink() { }
+    private static void EditSymlink() { }
+    private static void Chown() { }
+    private static void AdvancedChown() { }
+
+    private void QuickCd()
+    {
+        var path = MkdirDialog.Show();
+        if (!string.IsNullOrWhiteSpace(path))
+            _controller.NavigateTo(VfsPath.FromLocal(path));
+    }
+
+    private void SelectGroup()
+    {
+        var pattern = MkdirDialog.Show();
+        if (!string.IsNullOrWhiteSpace(pattern))
+        {
+            _controller.ActivePanel.MarkByPattern(pattern);
+            RefreshPanels();
+        }
+    }
+
+    private void UnselectGroup()
+    {
+        var pattern = MkdirDialog.Show();
+        if (!string.IsNullOrWhiteSpace(pattern))
+        {
+            _controller.ActivePanel.MarkByPattern(pattern, mark: false);
+            RefreshPanels();
+        }
+    }
+
+    private void InvertSelection()
+    {
+        _controller.ActivePanel.InvertMarking();
+        RefreshPanels();
     }
 
     private static void ShowStatus(string message)
