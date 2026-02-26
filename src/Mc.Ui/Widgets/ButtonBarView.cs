@@ -84,12 +84,15 @@ public sealed class ButtonBarView : View
         return false;
     }
 
+    private static readonly Key[] _fKeys =
+        [Key.F1, Key.F2, Key.F3, Key.F4, Key.F5,
+         Key.F6, Key.F7, Key.F8, Key.F9, Key.F10];
+
     public bool HandleKey(Key key)
     {
-        for (int i = 0; i < _buttons.Length; i++)
+        for (int i = 0; i < Math.Min(_buttons.Length, _fKeys.Length); i++)
         {
-            var fKey = (Key)(Key.F1.GetHashCode() + i); // approximate
-            if (key == fKey)
+            if (key == _fKeys[i])
             {
                 _buttons[i].Callback?.Invoke();
                 return true;
