@@ -1,0 +1,44 @@
+# .NET build output
+bin/
+obj/
+publish/
+
+# NuGet packages
+*.nupkg
+*.snupkg
+packages/
+.nuget/
+
+# Visual Studio / Rider / VS Code
+.vs/
+.vscode/
+.idea/
+*.user
+*.suo
+*.userprefs
+*.pidb
+*.swp
+
+# MSBuild crash files
+MSBuildCrash*.txt
+
+# Test results
+TestResults/
+coverage/
+*.trx
+*.coverage
+*.coveragexml
+
+# Logs
+*.log
+
+# OS artifacts
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# dotnet publish self-contained output
+/publish/
+
+# Claude Code session data — contains API tokens
+.claude/

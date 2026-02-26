@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+    <RootNamespace>Mc.Ui</RootNamespace>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Terminal.Gui" Version="2.0.0" />
+    <ProjectReference Include="..\Mc.Core\Mc.Core.csproj" />
+    <ProjectReference Include="..\Mc.FileManager\Mc.FileManager.csproj" />
+    <ProjectReference Include="..\Mc.Editor\Mc.Editor.csproj" />
+    <ProjectReference Include="..\Mc.Viewer\Mc.Viewer.csproj" />
+    <ProjectReference Include="..\Mc.DiffViewer\Mc.DiffViewer.csproj" />
+  </ItemGroup>
+</Project>

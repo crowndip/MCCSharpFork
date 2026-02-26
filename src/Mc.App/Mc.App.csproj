@@ -1,0 +1,25 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+    <OutputType>Exe</OutputType>
+    <RootNamespace>Mc.App</RootNamespace>
+    <AssemblyName>mc</AssemblyName>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="8.0.0" />
+    <PackageReference Include="Microsoft.Extensions.Logging" Version="8.0.0" />
+    <ProjectReference Include="..\Mc.Core\Mc.Core.csproj" />
+    <ProjectReference Include="..\Mc.Ui\Mc.Ui.csproj" />
+    <ProjectReference Include="..\Mc.FileManager\Mc.FileManager.csproj" />
+    <ProjectReference Include="..\Mc.Vfs.Local\Mc.Vfs.Local.csproj" />
+    <ProjectReference Include="..\Mc.Vfs.Ftp\Mc.Vfs.Ftp.csproj" />
+    <ProjectReference Include="..\Mc.Vfs.Sftp\Mc.Vfs.Sftp.csproj" />
+    <ProjectReference Include="..\Mc.Vfs.Archives\Mc.Vfs.Archives.csproj" />
+    <ProjectReference Include="..\Mc.Editor\Mc.Editor.csproj" />
+    <ProjectReference Include="..\Mc.Viewer\Mc.Viewer.csproj" />
+    <ProjectReference Include="..\Mc.DiffViewer\Mc.DiffViewer.csproj" />
+  </ItemGroup>
+</Project>

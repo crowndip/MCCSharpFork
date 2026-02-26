@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+    <RootNamespace>Mc.FileManager</RootNamespace>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\Mc.Core\Mc.Core.csproj" />
+    <ProjectReference Include="..\Mc.Vfs.Local\Mc.Vfs.Local.csproj" />
+  </ItemGroup>
+</Project>
