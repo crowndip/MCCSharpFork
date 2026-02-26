@@ -29,11 +29,21 @@ jobs:
       - name: Run tests
         run: dotnet test MidnightCommander.sln --no-build -c Release --logger "console;verbosity=normal"
 
-  publish-linux:
-    name: Publish self-contained (linux-x64)
-    runs-on: ubuntu-latest
+  publish:
+    name: Publish self-contained (${{ matrix.rid }})
+    runs-on: ${{ matrix.os }}
     needs: build-and-test
     if: github.ref == 'refs/heads/main'
+
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            rid: linux-x64
+            artifact: mc
+          - os: windows-latest
+            rid: win-x64
+            artifact: mc.exe
 
     steps:
       - name: Checkout
@@ -48,16 +58,17 @@ jobs:
         run: |
           dotnet publish src/Mc.App/Mc.App.csproj \
             -c Release \
-            -r linux-x64 \
+            -r ${{ matrix.rid }} \
             --self-contained true \
             -p:PublishSingleFile=true \
             -p:PublishTrimmed=false \
-            -o publish-linux
+            -o publish-${{ matrix.rid }}
+        shell: bash
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: mc-linux-x64
-          path: publish-linux/mc
+          name: mc-${{ matrix.rid }}
+          path: publish-${{ matrix.rid }}/${{ matrix.artifact }}
           if-no-files-found: error
           retention-days: 30
