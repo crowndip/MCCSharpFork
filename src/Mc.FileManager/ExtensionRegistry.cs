@@ -25,13 +25,18 @@ public sealed class ExtensionRegistry
 
     private void LoadDefaults()
     {
+        // Platform-specific default file opener
+        var opener = OperatingSystem.IsWindows() ? "start \"\" %f"
+                   : OperatingSystem.IsMacOS()   ? "open %f"
+                   :                               "xdg-open %f";
+
         // Images
-        Add("*.png;*.jpg;*.jpeg;*.gif;*.bmp;*.tiff;*.webp", "xdg-open %f", null, null, "Image");
-        Add("*.svg", "xdg-open %f", null, null, "SVG Image");
+        Add("*.png;*.jpg;*.jpeg;*.gif;*.bmp;*.tiff;*.webp", opener, null, null, "Image");
+        Add("*.svg", opener, null, null, "SVG Image");
 
         // Documents
-        Add("*.pdf", "xdg-open %f", null, null, "PDF Document");
-        Add("*.docx;*.doc;*.odt", "xdg-open %f", null, null, "Word Document");
+        Add("*.pdf", opener, null, null, "PDF Document");
+        Add("*.docx;*.doc;*.odt", opener, null, null, "Word Document");
 
         // Archives
         Add("*.tar.gz;*.tgz", null, null, null, "GZipped tar archive");

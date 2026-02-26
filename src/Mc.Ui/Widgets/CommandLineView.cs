@@ -77,15 +77,16 @@ public sealed class CommandLineView : View
     public void SetDirectory(string dir)
     {
         var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
-        var display = dir.StartsWith(home)
+        var display = dir.StartsWith(home, StringComparison.OrdinalIgnoreCase)
             ? "~" + dir[home.Length..]
             : dir;
         // Keep prompt short: show only last two path components
-        var parts = display.TrimEnd('/').Split('/');
+        var sep   = System.IO.Path.DirectorySeparatorChar;
+        var parts = display.TrimEnd('/', '\\').Split(sep);
         display = parts.Length > 2
-            ? "…/" + string.Join("/", parts[^2..])
+            ? "…" + sep + string.Join(sep.ToString(), parts[^2..])
             : display;
-        _prompt.Text = display + "$ ";
+        _prompt.Text = display + "> ";
     }
 
     public void Focus() => _input.SetFocus();

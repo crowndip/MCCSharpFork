@@ -10,7 +10,8 @@ namespace Mc.Core.Vfs;
 /// </summary>
 public sealed class VfsPath : IEquatable<VfsPath>
 {
-    public static readonly VfsPath Root = FromLocal("/");
+    public static readonly VfsPath Root = FromLocal(
+        OperatingSystem.IsWindows() ? "C:\\" : "/");
     public static readonly VfsPath Empty = new(string.Empty, null, null, null, null, string.Empty, null);
 
     public string Scheme { get; }        // "local", "ftp", "sftp", "tar", "zip", "cpio", "shell"
@@ -23,7 +24,8 @@ public sealed class VfsPath : IEquatable<VfsPath>
 
     public bool IsLocal => Scheme is "local" or "";
     public bool IsRemote => !IsLocal;
-    public bool IsRoot => Path is "/" or "";
+    public bool IsRoot => Path is "/" or ""
+        || (IsLocal && System.IO.Path.GetPathRoot(Path) is { } r && r == Path);
     public string FileName => System.IO.Path.GetFileName(Path.TrimEnd('/'));
     public string Extension => System.IO.Path.GetExtension(FileName);
 
@@ -83,16 +85,25 @@ public sealed class VfsPath : IEquatable<VfsPath>
 
     public VfsPath Parent()
     {
-        var parent = System.IO.Path.GetDirectoryName(Path.TrimEnd('/'));
+        var sep    = IsLocal ? System.IO.Path.DirectorySeparatorChar : '/';
+        var trimmed = Path.TrimEnd('/', '\\');
+        var parent  = System.IO.Path.GetDirectoryName(trimmed);
         if (string.IsNullOrEmpty(parent))
-            parent = IsLocal ? "/" : string.Empty;
+        {
+            // Stay at filesystem root rather than returning empty
+            parent = IsLocal
+                ? (System.IO.Path.GetPathRoot(Path) ?? (OperatingSystem.IsWindows() ? "C:\\" : "/"))
+                : string.Empty;
+        }
         return new VfsPath(Scheme, Host, Port, User, Password, parent, Encoding);
     }
 
     public VfsPath Combine(string name)
     {
-        var sep = Path.EndsWith('/') ? string.Empty : "/";
-        return new VfsPath(Scheme, Host, Port, User, Password, Path + sep + name, Encoding);
+        // Remote paths always use '/', local paths use the OS separator
+        var sep  = IsLocal ? System.IO.Path.DirectorySeparatorChar : '/';
+        var base_ = Path.TrimEnd('/', '\\');
+        return new VfsPath(Scheme, Host, Port, User, Password, base_ + sep + name, Encoding);
     }
 
     public VfsPath WithPath(string newPath)

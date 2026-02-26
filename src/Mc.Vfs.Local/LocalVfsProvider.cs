@@ -22,8 +22,10 @@ public sealed class LocalVfsProvider : IVfsProvider
         var dir = path.Path;
         var entries = new List<VfsDirEntry>();
 
-        // Add parent directory entry (unless at root)
-        if (!string.IsNullOrEmpty(dir) && dir != "/")
+        // Add parent directory entry (unless at root
+        var isRoot = dir is "/" or ""
+            || (OperatingSystem.IsWindows() && System.IO.Path.GetPathRoot(dir) == dir);
+        if (!string.IsNullOrEmpty(dir) && !isRoot)
         {
             var parentPath = path.Parent();
             entries.Add(new VfsDirEntry
@@ -112,8 +114,12 @@ public sealed class LocalVfsProvider : IVfsProvider
 
     public VfsPath GetParent(VfsPath path)
     {
-        var parent = System.IO.Path.GetDirectoryName(path.Path.TrimEnd('/'));
-        return path.WithPath(parent ?? "/");
+        var native  = path.Path.Replace('/', System.IO.Path.DirectorySeparatorChar);
+        var parent  = System.IO.Path.GetDirectoryName(native.TrimEnd(System.IO.Path.DirectorySeparatorChar));
+        var fallback = OperatingSystem.IsWindows()
+            ? System.IO.Path.GetPathRoot(path.Path) ?? "C:\\"
+            : "/";
+        return path.WithPath(parent ?? fallback);
     }
 
     public VfsPath Combine(VfsPath directory, string name)
@@ -174,12 +180,17 @@ public sealed class LocalVfsProvider : IVfsProvider
         };
     }
 
+    // DllImport is resolved lazily in .NET JIT; the runtime guard below prevents
+    // the call on Windows, but we also wrap in try/catch for defence-in-depth.
     [System.Runtime.InteropServices.DllImport("libc", EntryPoint = "lchown")]
+    [System.Runtime.Versioning.SupportedOSPlatform("linux")]
+    [System.Runtime.Versioning.SupportedOSPlatform("macos")]
     private static extern int lchown(string path, uint owner, uint group);
 
     private static void NativeChown(string path, int uid, int gid)
     {
-        if (OperatingSystem.IsLinux() || OperatingSystem.IsMacOS())
-            lchown(path, (uint)uid, (uint)gid);
+        if (!OperatingSystem.IsLinux() && !OperatingSystem.IsMacOS()) return;
+        try { lchown(path, (uint)uid, (uint)gid); }
+        catch { /* silently ignore on unsupported platforms or missing libc */ }
     }
 }

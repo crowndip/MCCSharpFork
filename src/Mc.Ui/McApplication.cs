@@ -521,7 +521,9 @@ public sealed class McApplication : Toplevel
     {
         Application.Driver?.End();
         Console.Clear();
-        var shell = Environment.GetEnvironmentVariable("SHELL") ?? "/bin/sh";
+        var shell = OperatingSystem.IsWindows()
+            ? (Environment.GetEnvironmentVariable("COMSPEC") ?? "cmd.exe")
+            : (Environment.GetEnvironmentVariable("SHELL") ?? "/bin/sh");
         using var proc = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
         {
             FileName = shell,
