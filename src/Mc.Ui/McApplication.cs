@@ -570,7 +570,8 @@ public sealed class McApplication : Toplevel
         var startDir = _controller.ActivePanel.CurrentPath.Path;
         var opts = FindDialog.Show(startDir);
         if (opts?.Confirmed != true) return;
-        ShowFindResults(opts, startDir);
+        // Use the (possibly edited) start directory from the dialog
+        ShowFindResults(opts, opts.StartDirectory.Length > 0 ? opts.StartDirectory : startDir);
     }
 
     private void ShowFindResults(FindOptions opts, string startDir)
@@ -678,9 +679,6 @@ public sealed class McApplication : Toplevel
         {
             try
             {
-                var searchOpt = opts.SearchInSubdirs
-                    ? SearchOption.AllDirectories
-                    : SearchOption.TopDirectoryOnly;
                 var cmp = opts.CaseSensitive ? StringComparison.Ordinal : StringComparison.OrdinalIgnoreCase;
                 System.Text.RegularExpressions.Regex? rx = null;
                 if (opts.ContentRegex && !string.IsNullOrEmpty(opts.ContentPattern))
@@ -689,7 +687,37 @@ public sealed class McApplication : Toplevel
                         opts.CaseSensitive ? System.Text.RegularExpressions.RegexOptions.None
                                            : System.Text.RegularExpressions.RegexOptions.IgnoreCase);
 
-                foreach (var file in Directory.EnumerateFiles(startDir, opts.FilePattern, searchOpt))
+                // Build enumerable, optionally skipping hidden dirs and following symlinks
+                IEnumerable<string> EnumerateFiles(string root)
+                {
+                    IEnumerable<string> files;
+                    try { files = Directory.EnumerateFiles(root, opts.FilePattern); }
+                    catch { yield break; }
+                    foreach (var f in files)
+                    {
+                        if (token.IsCancellationRequested) yield break;
+                        // Skip symlinks unless FollowSymlinks is on
+                        if (!opts.FollowSymlinks && File.GetAttributes(f).HasFlag(FileAttributes.ReparsePoint))
+                            continue;
+                        yield return f;
+                    }
+                    if (!opts.SearchInSubdirs) yield break;
+                    IEnumerable<string> dirs;
+                    try { dirs = Directory.EnumerateDirectories(root); }
+                    catch { yield break; }
+                    foreach (var dir in dirs)
+                    {
+                        if (token.IsCancellationRequested) yield break;
+                        // Skip hidden directories (names starting with '.') when requested
+                        if (opts.SkipHiddenDirs && Path.GetFileName(dir).StartsWith('.')) continue;
+                        // Skip symlinked directories unless FollowSymlinks
+                        if (!opts.FollowSymlinks && new DirectoryInfo(dir).Attributes.HasFlag(FileAttributes.ReparsePoint))
+                            continue;
+                        foreach (var f in EnumerateFiles(dir)) yield return f;
+                    }
+                }
+
+                foreach (var file in EnumerateFiles(startDir))
                 {
                     if (token.IsCancellationRequested) break;
 
@@ -1116,23 +1144,30 @@ public sealed class McApplication : Toplevel
 
     private void AdvancedChown()
     {
-        var entry = GetCurrentEntry();
-        if (entry == null) return;
+        var marked  = _controller.ActivePanel.GetMarkedEntries();
+        var targets = marked.Count > 0 ? marked.ToList() : (GetCurrentEntry() is { } e ? new List<FileEntry> { e } : new List<FileEntry>());
+        if (targets.Count == 0) return;
 
-        // MC advanced chown shows chown + chmod; we call them in sequence
-        var chownResult = ChownDialog.Show(entry.Name, entry.OwnerName ?? string.Empty, entry.GroupName ?? string.Empty);
-        if (chownResult == null) return;
+        var first = targets[0];
+        var result = AdvancedChownDialog.Show(
+            first.Name,
+            first.OwnerName ?? string.Empty,
+            first.GroupName ?? string.Empty,
+            first.Permissions,
+            targets.Count);
+        if (result == null) return;
 
-        var chmodResult = ChmodDialog.Show(entry.Name, entry.Permissions);
-        if (chmodResult == null) return;
-
-        try
+        var toProcess = result.ApplyToAll ? targets : new List<FileEntry> { first };
+        foreach (var entry in toProcess)
         {
-            ApplyChown(entry.FullPath.Path, chownResult.Owner, chownResult.Group);
-            File.SetUnixFileMode(entry.FullPath.Path, chmodResult.Mode);
-            RefreshPanels();
+            try
+            {
+                ApplyChown(entry.FullPath.Path, result.Owner, result.Group);
+                File.SetUnixFileMode(entry.FullPath.Path, result.Mode);
+            }
+            catch (Exception ex) { MessageDialog.Error(ex.Message); break; }
         }
-        catch (Exception ex) { MessageDialog.Error(ex.Message); }
+        RefreshPanels();
     }
 
     private static void ApplyChown(string path, string owner, string group)

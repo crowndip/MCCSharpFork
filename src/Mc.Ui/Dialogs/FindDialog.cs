@@ -4,15 +4,21 @@ namespace Mc.Ui.Dialogs;
 
 public sealed class FindOptions
 {
+    public string StartDirectory { get; set; } = string.Empty;
     public string FilePattern { get; set; } = "*";
     public string ContentPattern { get; set; } = string.Empty;
     public bool SearchInSubdirs { get; set; } = true;
+    public bool FollowSymlinks { get; set; }
+    public bool SkipHiddenDirs { get; set; }
     public bool CaseSensitive { get; set; }
     public bool ContentRegex { get; set; }
     public bool Confirmed { get; set; }
 }
 
-/// <summary>Find file dialog. Equivalent to find.c in the original C codebase.</summary>
+/// <summary>
+/// Find file dialog. Equivalent to find.c in the original C codebase.
+/// Adds: editable start directory, Follow symlinks, Skip hidden dirs options.
+/// </summary>
 public static class FindDialog
 {
     public static FindOptions? Show(string startDir)
@@ -23,56 +29,72 @@ public static class FindDialog
         {
             Title = "Find File",
             Width = 70,
-            Height = 14,
+            Height = 18,
             ColorScheme = McTheme.Dialog,
         };
 
-        d.Add(new Label { X = 1, Y = 1, Text = $"Start directory: {startDir}" });
-        d.Add(new Label { X = 1, Y = 3, Text = "File name pattern:" });
+        // ── Start directory (editable) ────────────────────────────────
+        d.Add(new Label { X = 1, Y = 1, Text = "Start at:" });
+        var startInput = new TextField
+        {
+            X = 1, Y = 2, Width = 66, Height = 1,
+            Text = startDir, ColorScheme = McTheme.Dialog,
+        };
+        startInput.CursorPosition = startDir.Length;
+        d.Add(startInput);
 
+        // ── File name pattern ────────────────────────────────────────
+        d.Add(new Label { X = 1, Y = 4, Text = "File name pattern:" });
         var filePatternInput = new TextField
         {
-            X = 1, Y = 4, Width = 66, Height = 1,
+            X = 1, Y = 5, Width = 66, Height = 1,
             Text = "*", ColorScheme = McTheme.Dialog,
         };
         d.Add(filePatternInput);
 
-        d.Add(new Label { X = 1, Y = 6, Text = "Content (leave blank to skip):" });
-
+        // ── Content search ────────────────────────────────────────────
+        d.Add(new Label { X = 1, Y = 7, Text = "Content (leave blank to skip):" });
         var contentInput = new TextField
         {
-            X = 1, Y = 7, Width = 66, Height = 1,
+            X = 1, Y = 8, Width = 66, Height = 1,
             Text = string.Empty, ColorScheme = McTheme.Dialog,
         };
         d.Add(contentInput);
 
-        var subDirsCb = new CheckBox { X = 1, Y = 9, Text = "Search in subdirectories", CheckedState = CheckState.Checked, ColorScheme = McTheme.Dialog };
-        var caseCb = new CheckBox { X = 1, Y = 10, Text = "Case sensitive", CheckedState = CheckState.UnChecked, ColorScheme = McTheme.Dialog };
-        var regexCb = new CheckBox { X = 35, Y = 10, Text = "Use regex", CheckedState = CheckState.UnChecked, ColorScheme = McTheme.Dialog };
-        d.Add(subDirsCb, caseCb, regexCb);
+        // ── Options ───────────────────────────────────────────────────
+        var subDirsCb     = new CheckBox { X = 1,  Y = 10, Text = "Search in subdirectories", CheckedState = CheckState.Checked,   ColorScheme = McTheme.Dialog };
+        var followSymCb   = new CheckBox { X = 1,  Y = 11, Text = "Follow symlinks",          CheckedState = CheckState.UnChecked, ColorScheme = McTheme.Dialog };
+        var skipHiddenCb  = new CheckBox { X = 1,  Y = 12, Text = "Skip hidden directories",  CheckedState = CheckState.UnChecked, ColorScheme = McTheme.Dialog };
+        var caseCb        = new CheckBox { X = 1,  Y = 13, Text = "Case sensitive",            CheckedState = CheckState.UnChecked, ColorScheme = McTheme.Dialog };
+        var regexCb       = new CheckBox { X = 35, Y = 13, Text = "Use regex",                 CheckedState = CheckState.UnChecked, ColorScheme = McTheme.Dialog };
+        d.Add(subDirsCb, followSymCb, skipHiddenCb, caseCb, regexCb);
 
-        var ok = new Button { X = Pos.Center() - 10, Y = 12, Text = "Find", IsDefault = true };
+        var ok = new Button { Text = "Find", IsDefault = true };
         ok.Accepting += (_, _) =>
         {
             result = new FindOptions
             {
-                FilePattern = filePatternInput.Text?.ToString() ?? "*",
-                ContentPattern = contentInput.Text?.ToString() ?? string.Empty,
-                SearchInSubdirs = subDirsCb.CheckedState == CheckState.Checked,
-                CaseSensitive = caseCb.CheckedState == CheckState.Checked,
-                ContentRegex = regexCb.CheckedState == CheckState.Checked,
+                StartDirectory  = startInput.Text?.ToString() ?? startDir,
+                FilePattern     = filePatternInput.Text?.ToString() ?? "*",
+                ContentPattern  = contentInput.Text?.ToString() ?? string.Empty,
+                SearchInSubdirs = subDirsCb.CheckedState    == CheckState.Checked,
+                FollowSymlinks  = followSymCb.CheckedState  == CheckState.Checked,
+                SkipHiddenDirs  = skipHiddenCb.CheckedState == CheckState.Checked,
+                CaseSensitive   = caseCb.CheckedState       == CheckState.Checked,
+                ContentRegex    = regexCb.CheckedState      == CheckState.Checked,
                 Confirmed = true,
             };
             Application.RequestStop(d);
         };
 
-        var cancel = new Button { X = Pos.Center() + 2, Y = 12, Text = "Cancel" };
+        var cancel = new Button { Text = "Cancel" };
         cancel.Accepting += (_, _) => Application.RequestStop(d);
 
         d.AddButton(ok);
         d.AddButton(cancel);
         filePatternInput.SetFocus();
         Application.Run(d);
+        d.Dispose();
         return result;
     }
 }
