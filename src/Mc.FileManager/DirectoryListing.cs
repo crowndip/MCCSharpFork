@@ -96,11 +96,14 @@ public sealed class DirectoryListing
         UpdateCounts();
     }
 
-    public void MarkByPattern(string pattern, bool caseSensitive = false, bool mark = true)
+    public void MarkByPattern(string pattern, bool caseSensitive = false, bool mark = true, bool filesOnly = false)
     {
         var filter = new FilterOptions { Pattern = pattern, CaseSensitive = caseSensitive };
         foreach (var e in _entries.Where(x => !x.IsParentDir))
+        {
+            if (filesOnly && e.IsDirectory) continue;
             if (filter.Matches(e.Name)) e.IsMarked = mark;
+        }
         UpdateCounts();
     }
 

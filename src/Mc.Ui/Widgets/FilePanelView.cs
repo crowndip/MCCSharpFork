@@ -38,6 +38,10 @@ public sealed class FilePanelView : View
     private string _statusText = string.Empty;
     private PanelListingMode _listingMode = PanelListingMode.Full;
 
+    // Quick search state (equivalent to panel->searching in original MC panel.c)
+    private string _quickSearch = string.Empty;
+    private bool _quickSearchActive;
+
     public event EventHandler<FileEntry?>? EntryActivated;
     public event EventHandler<int>? CursorChanged;
     public event EventHandler? BecameActive;
@@ -114,6 +118,8 @@ public sealed class FilePanelView : View
     {
         Application.Invoke(() =>
         {
+            _quickSearchActive = false;
+            _quickSearch = string.Empty;
             if (_cursorIndex >= _listing.Entries.Count)
                 _cursorIndex = Math.Max(0, _listing.Entries.Count - 1);
             EnsureCursorVisible();
@@ -142,6 +148,11 @@ public sealed class FilePanelView : View
 
     private void UpdateStatus()
     {
+        if (_quickSearchActive)
+        {
+            _statusText = $" Quick search: {_quickSearch}_";
+            return;
+        }
         var marked = _listing.MarkedCount;
         if (marked > 0)
         {
@@ -355,10 +366,80 @@ public sealed class FilePanelView : View
         return marker + name.PadRight(nameWidth);
     }
 
+    // --- Quick search ---
+
+    /// <summary>
+    /// Searches panel entries for the first name starting with <see cref="_quickSearch"/>
+    /// and moves the cursor there.  Equivalent to panel_quick_search() in panel.c.
+    /// </summary>
+    private void SearchInPanel()
+    {
+        var entries = _listing.Entries;
+        for (int i = 0; i < entries.Count; i++)
+        {
+            if (entries[i].Name.StartsWith(_quickSearch, StringComparison.OrdinalIgnoreCase))
+            {
+                if (_cursorIndex != i)
+                {
+                    _cursorIndex = i;
+                    EnsureCursorVisible();
+                    CursorChanged?.Invoke(this, _cursorIndex);
+                }
+                break;
+            }
+        }
+        UpdateStatus();
+        SetNeedsDraw();
+    }
+
+    private void ExitQuickSearch()
+    {
+        _quickSearchActive = false;
+        _quickSearch = string.Empty;
+        UpdateStatus();
+        SetNeedsDraw();
+    }
+
     // --- Keyboard input ---
 
     protected override bool OnKeyDown(Key keyEvent)
     {
+        // ── Quick search mode ──────────────────────────────────────────────
+        if (_quickSearchActive)
+        {
+            if (keyEvent.KeyCode == KeyCode.Esc)
+            {
+                ExitQuickSearch();
+                return true;
+            }
+            if (keyEvent.KeyCode == KeyCode.Enter)
+            {
+                ExitQuickSearch();
+                EntryActivated?.Invoke(this, CurrentEntry);
+                return true;
+            }
+            if (keyEvent.KeyCode == KeyCode.Backspace)
+            {
+                if (_quickSearch.Length > 0)
+                    _quickSearch = _quickSearch[..^1];
+                if (_quickSearch.Length == 0)
+                    ExitQuickSearch();
+                else
+                    SearchInPanel();
+                return true;
+            }
+            // Printable char: extend search buffer
+            var rune = keyEvent.AsRune;
+            if (rune.Value >= 32 && !keyEvent.IsCtrl && !keyEvent.IsAlt)
+            {
+                _quickSearch += (char)rune.Value;
+                SearchInPanel();
+                return true;
+            }
+            // Any other key (navigation etc.) exits search and falls through
+            ExitQuickSearch();
+        }
+
         switch (keyEvent.KeyCode)
         {
             case KeyCode.CursorUp:
@@ -435,6 +516,18 @@ public sealed class FilePanelView : View
                 return true;
 
             default:
+                // Activate quick search on any printable character (no Ctrl/Alt modifier)
+                if (_isActive)
+                {
+                    var rune = keyEvent.AsRune;
+                    if (rune.Value >= 32 && !keyEvent.IsCtrl && !keyEvent.IsAlt)
+                    {
+                        _quickSearch = ((char)rune.Value).ToString();
+                        _quickSearchActive = true;
+                        SearchInPanel();
+                        return true;
+                    }
+                }
                 if (!_isActive) BecameActive?.Invoke(this, EventArgs.Empty);
                 return base.OnKeyDown(keyEvent);
         }

@@ -486,16 +486,21 @@ public sealed class McApplication : Toplevel
 
     private void Chmod()
     {
-        var entry = GetCurrentEntry();
-        if (entry == null) return;
-        var newMode = ChmodDialog.Show(entry.Name, entry.Permissions);
-        if (newMode == null) return;
-        try
+        var marked  = _controller.ActivePanel.GetMarkedEntries();
+        var targets = marked.Count > 0 ? marked : (GetCurrentEntry() is { } e ? [e] : []);
+        if (targets.Count == 0) return;
+
+        var first  = targets[0];
+        var result = ChmodDialog.Show(first.Name, first.Permissions, targets.Count);
+        if (result == null) return;
+
+        var entries = result.ApplyToAll ? targets : [first];
+        foreach (var target in entries)
         {
-            File.SetUnixFileMode(entry.FullPath.Path, newMode.Value);
-            RefreshPanels();
+            try { File.SetUnixFileMode(target.FullPath.Path, result.Mode); }
+            catch (Exception ex) { MessageDialog.Error($"{target.Name}: {ex.Message}"); }
         }
-        catch (Exception ex) { MessageDialog.Error(ex.Message); }
+        RefreshPanels();
     }
 
     private void ShowSortDialog()
@@ -510,87 +515,203 @@ public sealed class McApplication : Toplevel
         panel.Reload();
     }
 
+    /// <summary>
+    /// Two-phase Find File: first show the search-options dialog, then run the search
+    /// with real-time progress and Go / Panelize / View / Edit buttons.
+    /// Equivalent to find.c + find_cmd() in the original MC.
+    /// </summary>
     private void ShowFindDialog()
     {
-        var opts = FindDialog.Show(_controller.ActivePanel.CurrentPath.Path);
-        if (opts?.Confirmed != true) return;
-
         var startDir = _controller.ActivePanel.CurrentPath.Path;
-        var searchOpt = opts.SearchInSubdirs
-            ? SearchOption.AllDirectories
-            : SearchOption.TopDirectoryOnly;
+        var opts = FindDialog.Show(startDir);
+        if (opts?.Confirmed != true) return;
+        ShowFindResults(opts, startDir);
+    }
 
-        List<string> results;
-        try
-        {
-            results = Directory.EnumerateFiles(startDir, opts.FilePattern, searchOpt)
-                .Take(500)
-                .ToList();
+    private void ShowFindResults(FindOptions opts, string startDir)
+    {
+        var displayItems = new ObservableCollection<string>();
+        var resultPaths  = new List<string>();
+        var cts = new System.Threading.CancellationTokenSource();
 
-            if (!string.IsNullOrEmpty(opts.ContentPattern))
-            {
-                var cmp = opts.CaseSensitive
-                    ? StringComparison.Ordinal
-                    : StringComparison.OrdinalIgnoreCase;
-                if (opts.ContentRegex)
-                {
-                    var rx = new System.Text.RegularExpressions.Regex(
-                        opts.ContentPattern,
-                        opts.CaseSensitive ? System.Text.RegularExpressions.RegexOptions.None
-                                           : System.Text.RegularExpressions.RegexOptions.IgnoreCase);
-                    results = results.Where(f =>
-                    {
-                        try { return rx.IsMatch(File.ReadAllText(f)); } catch { return false; }
-                    }).ToList();
-                }
-                else
-                {
-                    results = results.Where(f =>
-                    {
-                        try { return File.ReadAllText(f).Contains(opts.ContentPattern, cmp); } catch { return false; }
-                    }).ToList();
-                }
-            }
-        }
-        catch (Exception ex) { MessageDialog.Error(ex.Message); return; }
-
-        if (results.Count == 0) { MessageDialog.Show("Find", "No files found."); return; }
-
-        string? selectedPath = null;
         var d = new Dialog
         {
-            Title = $"Find: {opts.FilePattern} ({results.Count} found)",
+            Title = $"Find: {opts.FilePattern}",
             Width = Dim.Fill() - 4,
             Height = Dim.Fill() - 4,
             ColorScheme = McTheme.Dialog,
         };
+
+        var statusLabel = new Label
+        {
+            X = 1, Y = 0, Width = Dim.Fill(1),
+            Text = " Searching...",
+            ColorScheme = McTheme.Dialog,
+        };
+        d.Add(statusLabel);
+
         var lv = new ListView
         {
             X = 1, Y = 1,
-            Width = Dim.Fill(1), Height = Dim.Fill(4),
+            Width = Dim.Fill(1), Height = Dim.Fill(5),
             ColorScheme = McTheme.Panel,
         };
-        lv.SetSource(new ObservableCollection<string>(
-            results.Select(r => r[startDir.TrimEnd('/').Length..].TrimStart('/'))));
+        lv.SetSource(displayItems);
         d.Add(lv);
 
-        var go = new Button { X = Pos.Center() - 8, Y = Pos.Bottom(lv), Text = "Go to", IsDefault = true };
-        go.Accepting += (_, _) =>
+        Action? afterClose = null;
+
+        var stopBtn = new Button { Text = "Stop" };
+        stopBtn.Accepting += (_, _) => cts.Cancel();
+
+        var goBtn = new Button { Text = "Go to", IsDefault = true, Enabled = false };
+        goBtn.Accepting += (_, _) =>
         {
-            if (lv.SelectedItem >= 0) selectedPath = results[lv.SelectedItem];
+            var idx = lv.SelectedItem;
+            if (idx >= 0 && idx < resultPaths.Count)
+            {
+                var path = resultPaths[idx];
+                afterClose = () =>
+                {
+                    var dir = Path.GetDirectoryName(path) ?? startDir;
+                    _controller.NavigateTo(VfsPath.FromLocal(dir));
+                    RefreshPanels();
+                };
+            }
+            cts.Cancel();
             Application.RequestStop(d);
         };
-        var close = new Button { X = Pos.Center() + 3, Y = Pos.Bottom(lv), Text = "Close" };
-        close.Accepting += (_, _) => Application.RequestStop(d);
-        d.AddButton(go); d.AddButton(close);
-        Application.Run(d); d.Dispose();
 
-        if (selectedPath != null)
+        var panelizeBtn = new Button { Text = "Panelize", Enabled = false };
+        panelizeBtn.Accepting += (_, _) =>
         {
-            var dir = Path.GetDirectoryName(selectedPath) ?? startDir;
-            _controller.NavigateTo(VfsPath.FromLocal(dir));
-            RefreshPanels();
-        }
+            var snapshot = resultPaths.ToList();
+            afterClose = () => PanelizeFoundFiles(snapshot, startDir);
+            cts.Cancel();
+            Application.RequestStop(d);
+        };
+
+        var viewBtn = new Button { Text = "View", Enabled = false };
+        viewBtn.Accepting += (_, _) =>
+        {
+            var idx = lv.SelectedItem;
+            if (idx >= 0 && idx < resultPaths.Count)
+            {
+                var path = resultPaths[idx];
+                afterClose = () => ViewFile(path);
+            }
+            cts.Cancel();
+            Application.RequestStop(d);
+        };
+
+        var editBtn = new Button { Text = "Edit", Enabled = false };
+        editBtn.Accepting += (_, _) =>
+        {
+            var idx = lv.SelectedItem;
+            if (idx >= 0 && idx < resultPaths.Count)
+            {
+                var path = resultPaths[idx];
+                afterClose = () => EditFileDirectly(path);
+            }
+            cts.Cancel();
+            Application.RequestStop(d);
+        };
+
+        var closeBtn = new Button { Text = "Close" };
+        closeBtn.Accepting += (_, _) => { cts.Cancel(); Application.RequestStop(d); };
+
+        d.AddButton(stopBtn);
+        d.AddButton(goBtn);
+        d.AddButton(panelizeBtn);
+        d.AddButton(viewBtn);
+        d.AddButton(editBtn);
+        d.AddButton(closeBtn);
+
+        // ── Background search task ─────────────────────────────────────
+        var token = cts.Token;
+        Task.Run(() =>
+        {
+            try
+            {
+                var searchOpt = opts.SearchInSubdirs
+                    ? SearchOption.AllDirectories
+                    : SearchOption.TopDirectoryOnly;
+                var cmp = opts.CaseSensitive ? StringComparison.Ordinal : StringComparison.OrdinalIgnoreCase;
+                System.Text.RegularExpressions.Regex? rx = null;
+                if (opts.ContentRegex && !string.IsNullOrEmpty(opts.ContentPattern))
+                    rx = new System.Text.RegularExpressions.Regex(
+                        opts.ContentPattern,
+                        opts.CaseSensitive ? System.Text.RegularExpressions.RegexOptions.None
+                                           : System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+
+                foreach (var file in Directory.EnumerateFiles(startDir, opts.FilePattern, searchOpt))
+                {
+                    if (token.IsCancellationRequested) break;
+
+                    // Update progress label with current directory
+                    var scanDir = Path.GetDirectoryName(file) ?? startDir;
+                    Application.Invoke(() => statusLabel.Text = $" Scanning: {scanDir}");
+
+                    // Content filter
+                    if (!string.IsNullOrEmpty(opts.ContentPattern))
+                    {
+                        bool match;
+                        try
+                        {
+                            if (rx != null) match = rx.IsMatch(File.ReadAllText(file));
+                            else            match = File.ReadAllText(file).Contains(opts.ContentPattern, cmp);
+                        }
+                        catch { match = false; }
+                        if (!match) continue;
+                    }
+
+                    var prefix = startDir.TrimEnd('/');
+                    var rel    = file.Length > prefix.Length ? file[(prefix.Length + 1)..] : file;
+                    Application.Invoke(() =>
+                    {
+                        resultPaths.Add(file);
+                        displayItems.Add(rel);
+                        statusLabel.Text = $" Found {displayItems.Count} file(s)...";
+                    });
+                }
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                Application.Invoke(() => statusLabel.Text = $" Error: {ex.Message}");
+            }
+
+            Application.Invoke(() =>
+            {
+                var n = displayItems.Count;
+                statusLabel.Text = n > 0 ? $" Found {n} file(s)." : " No files found.";
+                stopBtn.Enabled     = false;
+                goBtn.Enabled       = n > 0;
+                panelizeBtn.Enabled = n > 0;
+                viewBtn.Enabled     = n > 0;
+                editBtn.Enabled     = n > 0;
+            });
+        });
+
+        Application.Run(d);
+        cts.Cancel();  // stop search if dialog closed via Esc
+        d.Dispose();
+        afterClose?.Invoke();
+    }
+
+    /// <summary>
+    /// Navigates the active panel to <paramref name="startDir"/> and marks the
+    /// files returned by a Find search — equivalent to find_cmd()'s Panelize action.
+    /// </summary>
+    private void PanelizeFoundFiles(List<string> paths, string startDir)
+    {
+        _controller.NavigateTo(VfsPath.FromLocal(startDir));
+        RefreshPanels();
+        var panel = _controller.ActivePanel;
+        var names = new HashSet<string>(paths.Select(Path.GetFileName)!, StringComparer.OrdinalIgnoreCase);
+        panel.MarkAll(false);
+        foreach (var e in panel.Entries.Where(e => !e.IsParentDir && names.Contains(e.Name)))
+            e.IsMarked = true;
+        panel.RefreshMarking();
     }
 
     private void ShowHotlist()
@@ -919,13 +1040,20 @@ public sealed class McApplication : Toplevel
 
     private void Chown()
     {
-        var entry = GetCurrentEntry();
-        if (entry == null) return;
+        var marked  = _controller.ActivePanel.GetMarkedEntries();
+        var targets = marked.Count > 0 ? marked : (GetCurrentEntry() is { } e ? [e] : []);
+        if (targets.Count == 0) return;
 
-        var result = ChownDialog.Show(entry.Name, entry.OwnerName ?? string.Empty, entry.GroupName ?? string.Empty);
+        var first  = targets[0];
+        var result = ChownDialog.Show(first.Name, first.OwnerName ?? string.Empty, first.GroupName ?? string.Empty, targets.Count);
         if (result == null) return;
 
-        ApplyChown(entry.FullPath.Path, result.Owner, result.Group);
+        var entries = result.ApplyToAll ? targets : [first];
+        foreach (var target in entries)
+        {
+            try { ApplyChown(target.FullPath.Path, result.Owner, result.Group); }
+            catch (Exception ex) { MessageDialog.Error($"{target.Name}: {ex.Message}"); }
+        }
         RefreshPanels();
     }
 
@@ -934,17 +1062,17 @@ public sealed class McApplication : Toplevel
         var entry = GetCurrentEntry();
         if (entry == null) return;
 
-        // MC combines chown + chmod in one dialog; we call them in sequence
+        // MC advanced chown shows chown + chmod; we call them in sequence
         var chownResult = ChownDialog.Show(entry.Name, entry.OwnerName ?? string.Empty, entry.GroupName ?? string.Empty);
         if (chownResult == null) return;
 
-        var newMode = ChmodDialog.Show(entry.Name, entry.Permissions);
-        if (newMode == null) return;
+        var chmodResult = ChmodDialog.Show(entry.Name, entry.Permissions);
+        if (chmodResult == null) return;
 
         try
         {
             ApplyChown(entry.FullPath.Path, chownResult.Owner, chownResult.Group);
-            File.SetUnixFileMode(entry.FullPath.Path, newMode.Value);
+            File.SetUnixFileMode(entry.FullPath.Path, chmodResult.Mode);
             RefreshPanels();
         }
         catch (Exception ex) { MessageDialog.Error(ex.Message); }
@@ -1005,24 +1133,70 @@ public sealed class McApplication : Toplevel
         catch (Exception ex) { MessageDialog.Error(ex.Message); }
     }
 
-    private void SelectGroup()
-    {
-        var pattern = InputDialog.Show("Select Group", "Pattern (+):", "*");
-        if (!string.IsNullOrWhiteSpace(pattern))
-        {
-            _controller.ActivePanel.MarkByPattern(pattern);
-            RefreshPanels();
-        }
-    }
+    private void SelectGroup()   => SelectUnselect(mark: true);
+    private void UnselectGroup() => SelectUnselect(mark: false);
 
-    private void UnselectGroup()
+    /// <summary>
+    /// Shows the Select/Unselect group dialog matching original MC's panel_select_files() dialog:
+    /// pattern input + "Files only", "Case sensitive", "Using shell patterns" checkboxes.
+    /// </summary>
+    private void SelectUnselect(bool mark)
     {
-        var pattern = InputDialog.Show("Unselect Group", "Pattern (-):", "*");
-        if (!string.IsNullOrWhiteSpace(pattern))
+        var title = mark ? "Select" : "Unselect";
+
+        var d = new Dialog
         {
-            _controller.ActivePanel.MarkByPattern(pattern, mark: false);
+            Title = title,
+            Width = 50,
+            Height = 11,
+            ColorScheme = McTheme.Dialog,
+        };
+        d.Add(new Label { X = 1, Y = 1, Text = "Pattern:" });
+        var patInput = new TextField
+        {
+            X = 1, Y = 2, Width = 46, Height = 1,
+            Text = "*", ColorScheme = McTheme.Dialog,
+        };
+        d.Add(patInput);
+
+        var filesOnlyCb = new CheckBox
+        {
+            X = 1, Y = 4, Text = "Files only",
+            CheckedState = CheckState.Checked, ColorScheme = McTheme.Dialog,
+        };
+        var caseCb = new CheckBox
+        {
+            X = 1, Y = 5, Text = "Case sensitive",
+            CheckedState = CheckState.UnChecked, ColorScheme = McTheme.Dialog,
+        };
+        var shellCb = new CheckBox
+        {
+            X = 1, Y = 6, Text = "Using shell patterns",
+            CheckedState = CheckState.Checked, ColorScheme = McTheme.Dialog,
+        };
+        d.Add(filesOnlyCb, caseCb, shellCb);
+
+        var ok = new Button { Text = title, IsDefault = true };
+        ok.Accepting += (_, _) =>
+        {
+            var pat = patInput.Text?.ToString() ?? "*";
+            if (string.IsNullOrWhiteSpace(pat)) pat = "*";
+            // Shell patterns use glob syntax; regex mode passes the pattern as-is.
+            // FilterOptions in DirectoryListing already uses glob matching.
+            _controller.ActivePanel.MarkByPattern(
+                pat,
+                caseSensitive: caseCb.CheckedState == CheckState.Checked,
+                mark: mark,
+                filesOnly: filesOnlyCb.CheckedState == CheckState.Checked);
             RefreshPanels();
-        }
+            Application.RequestStop(d);
+        };
+        var cancel = new Button { Text = "Cancel" };
+        cancel.Accepting += (_, _) => Application.RequestStop(d);
+        d.AddButton(ok); d.AddButton(cancel);
+        patInput.SetFocus();
+        Application.Run(d);
+        d.Dispose();
     }
 
     private void InvertSelection()
@@ -1037,8 +1211,39 @@ public sealed class McApplication : Toplevel
     /// Marks files that differ (name or size) between left and right panels.
     /// Equivalent to compare_dirs_cmd() / compare_dir_select() in the original C codebase.
     /// </summary>
+    /// <summary>
+    /// Compare directories using a method the user selects — matches original MC's
+    /// compare_dirs_cmd() which offers Quick / Size only / Thorough via query_dialog().
+    /// </summary>
     private void CompareDirs()
     {
+        // Method selector dialog (Quick / Size only / Thorough / Cancel)
+        int method = -1;
+        var dlg = new Dialog
+        {
+            Title = "Compare directories",
+            Width = 38,
+            Height = 9,
+            ColorScheme = McTheme.Dialog,
+        };
+        dlg.Add(new Label { X = 1, Y = 1, Text = "Select comparison method:" });
+        var rg = new RadioGroup
+        {
+            X = 2, Y = 2,
+            RadioLabels = ["Quick (timestamps)", "Size only", "Thorough (byte-by-byte)"],
+            SelectedItem = 0,
+            ColorScheme = McTheme.Dialog,
+        };
+        dlg.Add(rg);
+        var ok = new Button { Text = "OK", IsDefault = true };
+        ok.Accepting += (_, _) => { method = rg.SelectedItem; Application.RequestStop(dlg); };
+        var cancel = new Button { Text = "Cancel" };
+        cancel.Accepting += (_, _) => Application.RequestStop(dlg);
+        dlg.AddButton(ok); dlg.AddButton(cancel);
+        Application.Run(dlg);
+        dlg.Dispose();
+        if (method < 0) return;
+
         var leftLookup  = _controller.LeftPanel.Entries
             .Where(e => !e.IsParentDir)
             .ToDictionary(e => e.Name);
@@ -1046,14 +1251,48 @@ public sealed class McApplication : Toplevel
             .Where(e => !e.IsParentDir)
             .ToDictionary(e => e.Name);
 
-        foreach (var e in _controller.LeftPanel.Entries.Where(x => !x.IsParentDir))
-            e.IsMarked = !rightLookup.TryGetValue(e.Name, out var match) || e.Size != match.Size;
+        bool IsDifferent(Mc.Core.Models.FileEntry left, Mc.Core.Models.FileEntry right) => method switch
+        {
+            0 => left.ModificationTime != right.ModificationTime || left.Size != right.Size, // Quick
+            1 => left.Size != right.Size,                                             // Size only
+            _ => !FilesAreIdentical(left.FullPath.Path, right.FullPath.Path),        // Thorough
+        };
 
+        foreach (var e in _controller.LeftPanel.Entries.Where(x => !x.IsParentDir))
+        {
+            e.IsMarked = !rightLookup.TryGetValue(e.Name, out var match)
+                || IsDifferent(e, match);
+        }
         foreach (var e in _controller.RightPanel.Entries.Where(x => !x.IsParentDir))
-            e.IsMarked = !leftLookup.TryGetValue(e.Name, out var match) || e.Size != match.Size;
+        {
+            e.IsMarked = !leftLookup.TryGetValue(e.Name, out var match)
+                || IsDifferent(e, match);
+        }
 
         _controller.LeftPanel.RefreshMarking();
         _controller.RightPanel.RefreshMarking();
+    }
+
+    private static bool FilesAreIdentical(string a, string b)
+    {
+        try
+        {
+            var infoA = new FileInfo(a);
+            var infoB = new FileInfo(b);
+            if (!infoA.Exists || !infoB.Exists || infoA.Length != infoB.Length) return false;
+            const int BUF = 65536;
+            using var fa = File.OpenRead(a);
+            using var fb = File.OpenRead(b);
+            var bufA = new byte[BUF]; var bufB = new byte[BUF];
+            int r;
+            while ((r = fa.Read(bufA, 0, BUF)) > 0)
+            {
+                fb.ReadExactly(bufB, 0, r);
+                if (!bufA.AsSpan(0, r).SequenceEqual(bufB.AsSpan(0, r))) return false;
+            }
+            return true;
+        }
+        catch { return false; }
     }
 
     // --- Command menu: External panelize ---
