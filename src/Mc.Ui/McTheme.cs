@@ -15,6 +15,18 @@ public static class McTheme
     public static ColorScheme ButtonBar { get; private set; } = new();
     public static ColorScheme Error { get; private set; } = new();
 
+    // Low-level drawing attributes for the file panel (matches MC default.ini skin)
+    public static Terminal.Gui.Attribute PanelFrame { get; private set; }
+    public static Terminal.Gui.Attribute PanelHeader { get; private set; }
+    public static Terminal.Gui.Attribute PanelFile { get; private set; }
+    public static Terminal.Gui.Attribute PanelDirectory { get; private set; }
+    public static Terminal.Gui.Attribute PanelExecutable { get; private set; }
+    public static Terminal.Gui.Attribute PanelSymlink { get; private set; }
+    public static Terminal.Gui.Attribute PanelMarked { get; private set; }
+    public static Terminal.Gui.Attribute PanelCursor { get; private set; }
+    public static Terminal.Gui.Attribute PanelMarkedCursor { get; private set; }
+    public static Terminal.Gui.Attribute PanelStatus { get; private set; }
+
     public static void ApplyDefault()
     {
         // Classic MC blue skin
@@ -80,6 +92,20 @@ public static class McTheme
             HotFocus  = new Terminal.Gui.Attribute(Color.BrightYellow,Color.Red),
             Disabled  = new Terminal.Gui.Attribute(Color.Gray,        Color.Red),
         };
+
+        // Panel drawing attributes (from MC default.ini skin)
+        // _default_=lightgray;blue  selected=black;cyan  marked=yellow;blue
+        // header=yellow;blue  frame=lightgray;blue
+        PanelFrame        = new Terminal.Gui.Attribute(Color.Gray,         Color.Blue);
+        PanelHeader       = new Terminal.Gui.Attribute(Color.BrightYellow, Color.Blue);
+        PanelFile         = new Terminal.Gui.Attribute(Color.Gray,         Color.Blue);
+        PanelDirectory    = new Terminal.Gui.Attribute(Color.White,        Color.Blue);
+        PanelExecutable   = new Terminal.Gui.Attribute(Color.BrightGreen,  Color.Blue);
+        PanelSymlink      = new Terminal.Gui.Attribute(Color.Cyan,         Color.Blue);
+        PanelMarked       = new Terminal.Gui.Attribute(Color.BrightYellow, Color.Blue);
+        PanelCursor       = new Terminal.Gui.Attribute(Color.Black,        Color.Cyan);
+        PanelMarkedCursor = new Terminal.Gui.Attribute(Color.BrightYellow, Color.Cyan);
+        PanelStatus       = new Terminal.Gui.Attribute(Color.Black,        Color.Cyan);
 
         // Apply to global colors
         Colors.ColorSchemes["Base"]   = Panel;

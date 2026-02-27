@@ -89,5 +89,13 @@ public sealed class CommandLineView : View
         _prompt.Text = display + "> ";
     }
 
+    public IReadOnlyList<string> History => _history;
+
+    public void SetText(string text)
+    {
+        _input.Text = text;
+        _input.CursorPosition = _input.Text?.Length ?? 0;
+    }
+
     public void Focus() => _input.SetFocus();
 }

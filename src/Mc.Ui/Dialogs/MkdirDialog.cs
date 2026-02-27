@@ -4,5 +4,5 @@ namespace Mc.Ui.Dialogs;
 public static class MkdirDialog
 {
     public static string? Show()
-        => InputDialog.Show("Create Directory", "Directory name:", string.Empty);
+        => InputDialog.Show("Create a new Directory", "Enter directory name:", string.Empty);
 }

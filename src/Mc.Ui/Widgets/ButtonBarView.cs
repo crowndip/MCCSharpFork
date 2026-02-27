@@ -37,10 +37,10 @@ public sealed class ButtonBarView : View
             ("3View",   "F3",  onView),
             ("4Edit",   "F4",  onEdit),
             ("5Copy",   "F5",  onCopy),
-            ("6Move",   "F6",  onMove),
+            ("6RenMov", "F6",  onMove),
             ("7Mkdir",  "F7",  onMkdir),
             ("8Delete", "F8",  onDelete),
-            ("9Menu",   "F9",  onMenu),
+            ("9PullDn", "F9",  onMenu),
             ("10Quit",  "F10", onQuit)
         );
     }

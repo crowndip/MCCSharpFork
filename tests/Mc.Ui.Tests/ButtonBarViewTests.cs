@@ -96,7 +96,7 @@ public sealed class ButtonBarViewTests
     public void F6_Button_HasCorrectLabel()
     {
         var (bar, _) = BuildBar();
-        Assert.Equal("6Move", GetButtons(bar)[5].Label);
+        Assert.Equal("6RenMov", GetButtons(bar)[5].Label);
     }
 
     [Fact]
@@ -117,7 +117,7 @@ public sealed class ButtonBarViewTests
     public void F9_Button_HasCorrectLabel()
     {
         var (bar, _) = BuildBar();
-        Assert.Equal("9Menu", GetButtons(bar)[8].Label);
+        Assert.Equal("9PullDn", GetButtons(bar)[8].Label);
     }
 
     [Fact]

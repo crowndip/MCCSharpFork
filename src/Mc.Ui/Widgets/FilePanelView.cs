@@ -1,4 +1,3 @@
-using System.Collections.ObjectModel;
 using Mc.Core.Models;
 using Mc.Core.Utilities;
 using Mc.FileManager;
@@ -7,17 +6,37 @@ using Terminal.Gui;
 namespace Mc.Ui.Widgets;
 
 /// <summary>
-/// One file panel — shows path header, file list, and status footer.
+/// Panel listing display mode.
+/// Equivalent to list_type in the original C codebase (src/filemanager/panel.h).
+/// </summary>
+public enum PanelListingMode
+{
+    /// <summary>Name + size + modification time (default).</summary>
+    Full,
+    /// <summary>Names only — more files visible at once.</summary>
+    Brief,
+}
+
+/// <summary>
+/// One file panel drawn in classic MC style:
+///   ┌────── /path ──────┐
+///   │ Name   Size Modify │  ← column header
+///   │ ..                 │  ← entries
+///   │ /Documents         │
+///   │ file.c   1.2k Jan 1│
+///   │ file.txt  1234 Jan 2│ ← selected (black on cyan)
+///   │ info line          │  ← status
+///   └────────────────────┘
 /// Equivalent to WPanel in the original C codebase (lib/widget + src/filemanager/panel.c).
 /// </summary>
 public sealed class FilePanelView : View
 {
     private readonly DirectoryListing _listing;
-    private readonly ListView _listView;
-    private readonly Label _pathLabel;
-    private readonly Label _statusLabel;
     private int _cursorIndex;
+    private int _scrollOffset;
     private bool _isActive;
+    private string _statusText = string.Empty;
+    private PanelListingMode _listingMode = PanelListingMode.Full;
 
     public event EventHandler<FileEntry?>? EntryActivated;
     public event EventHandler<int>? CursorChanged;
@@ -29,7 +48,16 @@ public sealed class FilePanelView : View
         set
         {
             _isActive = value;
-            ColorScheme = value ? McTheme.PanelSelected : McTheme.Panel;
+            SetNeedsDraw();
+        }
+    }
+
+    public PanelListingMode ListingMode
+    {
+        get => _listingMode;
+        set
+        {
+            _listingMode = value;
             SetNeedsDraw();
         }
     }
@@ -44,113 +72,72 @@ public sealed class FilePanelView : View
     public FilePanelView(DirectoryListing listing)
     {
         _listing = listing;
+        CanFocus = true;
         ColorScheme = McTheme.Panel;
 
-        // Path header
-        _pathLabel = new Label
-        {
-            X = 0, Y = 0,
-            Width = Dim.Fill(),
-            Height = 1,
-            ColorScheme = McTheme.StatusBar,
-            TextAlignment = Alignment.Center,
-        };
-
-        // File list
-        _listView = new ListView
-        {
-            X = 0, Y = 1,
-            Width = Dim.Fill(),
-            Height = Dim.Fill(1),
-            ColorScheme = McTheme.Panel,
-            AllowsMarking = false,
-        };
-
-        // Status footer
-        _statusLabel = new Label
-        {
-            X = 0, Y = Pos.Bottom(_listView),
-            Width = Dim.Fill(),
-            Height = 1,
-            ColorScheme = McTheme.StatusBar,
-        };
-
-        Add(_pathLabel, _listView, _statusLabel);
-
-        _listView.SelectedItemChanged += OnSelectedItemChanged;
-        _listView.OpenSelectedItem += OnItemActivated;
         _listing.Changed += OnListingChanged;
-        MouseClick += (_, _) => { if (!_isActive) BecameActive?.Invoke(this, EventArgs.Empty); };
+        MouseClick += OnMouseClick;
 
-        RefreshDisplay();
-    }
-
-    private void OnSelectedItemChanged(object? sender, ListViewItemEventArgs e)
-    {
-        _cursorIndex = e.Item;
         UpdateStatus();
-        CursorChanged?.Invoke(this, _cursorIndex);
     }
 
-    private void OnItemActivated(object? sender, ListViewItemEventArgs e)
+    // --- Event handlers ---
+
+    private void OnMouseClick(object? sender, MouseEventArgs e)
     {
-        EntryActivated?.Invoke(this, CurrentEntry);
+        if (!_isActive)
+        {
+            BecameActive?.Invoke(this, EventArgs.Empty);
+            return;
+        }
+
+        // Click inside the file-entry area (rows 2 .. h-3)
+        int clickY = e.Position.Y;
+        int h = Viewport.Height;
+        int fileAreaStart = 2;
+        int fileAreaEnd = h - 2; // exclusive (h-2 = status line, h-1 = bottom border)
+
+        if (clickY >= fileAreaStart && clickY < fileAreaEnd)
+        {
+            int idx = _scrollOffset + (clickY - fileAreaStart);
+            if (idx >= 0 && idx < _listing.Entries.Count)
+            {
+                _cursorIndex = idx;
+                UpdateStatus();
+                CursorChanged?.Invoke(this, _cursorIndex);
+                SetNeedsDraw();
+            }
+        }
     }
 
     private void OnListingChanged(object? sender, EventArgs e)
     {
-        Application.Invoke(RefreshDisplay);
+        Application.Invoke(() =>
+        {
+            if (_cursorIndex >= _listing.Entries.Count)
+                _cursorIndex = Math.Max(0, _listing.Entries.Count - 1);
+            EnsureCursorVisible();
+            UpdateStatus();
+            SetNeedsDraw();
+        });
     }
 
-    private void RefreshDisplay()
+    // --- Layout helpers ---
+
+    // Number of file-entry rows visible between the column header and the status line.
+    // Layout: row 0 = top border, row 1 = column header,
+    //         rows 2 .. h-3 = entries,
+    //         row h-2 = status, row h-1 = bottom border.
+    private int ContentRows => Math.Max(0, Viewport.Height - 4);
+
+    private void EnsureCursorVisible()
     {
-        var path = PathUtils.TildePath(_listing.CurrentPath.ToString());
-        _pathLabel.Text = $" {path} ";
-
-        var items = new List<string>(_listing.Entries.Count);
-        foreach (var entry in _listing.Entries)
-            items.Add(FormatEntry(entry));
-
-        _listView.SetSource(new ObservableCollection<string>(items));
-
-        if (_cursorIndex >= items.Count)
-            _cursorIndex = Math.Max(0, items.Count - 1);
-        if (items.Count > 0)
-            _listView.SelectedItem = _cursorIndex;
-
-        UpdateStatus();
-        SetNeedsDraw();
-    }
-
-    private string FormatEntry(FileEntry entry)
-    {
-        // Get available width (approximate)
-        var available = Viewport.Width > 10 ? Viewport.Width - 2 : 40;
-        int sizeWidth = 8;
-        int dateWidth = 12;
-        int nameWidth = Math.Max(12, available - sizeWidth - dateWidth - 3);
-
-        var marker = entry.IsMarked ? "*" : " ";
-
-        string name;
-        if (entry.IsParentDir)
-            name = "..";
-        else if (entry.IsDirectory)
-            name = "/" + entry.Name;
-        else if (entry.IsSymlink)
-            name = "~" + entry.Name;
-        else
-            name = entry.Name;
-
-        if (name.Length > nameWidth) name = name[..(nameWidth - 1)] + "~";
-        name = name.PadRight(nameWidth);
-
-        var size = FileSizeFormatter.FormatPanelSize(entry.Size, entry.IsDirectory).PadLeft(sizeWidth);
-        var date = entry.ModificationTime == DateTime.MinValue
-            ? string.Empty.PadRight(dateWidth)
-            : entry.ModificationTime.ToString("MMM dd HH:mm").PadRight(dateWidth);
-
-        return $"{marker}{name}{size} {date}";
+        int contentRows = ContentRows;
+        if (contentRows <= 0) return;
+        if (_cursorIndex < _scrollOffset)
+            _scrollOffset = _cursorIndex;
+        else if (_cursorIndex >= _scrollOffset + contentRows)
+            _scrollOffset = _cursorIndex - contentRows + 1;
     }
 
     private void UpdateStatus()
@@ -158,24 +145,282 @@ public sealed class FilePanelView : View
         var marked = _listing.MarkedCount;
         if (marked > 0)
         {
-            _statusLabel.Text = $" {marked} files, {FileSizeFormatter.Format(_listing.TotalMarkedSize)} marked";
+            _statusText = $" {marked} files, {FileSizeFormatter.Format(_listing.TotalMarkedSize)} marked";
         }
         else
         {
             var entry = CurrentEntry;
             if (entry != null && !entry.IsParentDir)
-                _statusLabel.Text = $" {entry.Name}  {FileSizeFormatter.Format(entry.Size)}  {entry.ModificationTime:yyyy-MM-dd HH:mm}";
+                _statusText = $" {entry.Name}  {FileSizeFormatter.Format(entry.Size)}  {entry.ModificationTime:yyyy-MM-dd HH:mm}";
             else
-                _statusLabel.Text = $" {_listing.TotalFiles} files, {_listing.TotalDirectories} dirs";
+                _statusText = $" {_listing.TotalFiles} files, {_listing.TotalDirectories} dirs";
         }
     }
 
-    // --- Input handling ---
+    // --- Custom drawing ---
+
+    protected override bool OnDrawingContent(DrawContext? context)
+    {
+        base.OnDrawingContent(context);
+        int w = Viewport.Width;
+        int h = Viewport.Height;
+        if (w < 4 || h < 4) return false;
+
+        DrawBorderAndPath(w, h);
+        DrawColumnHeader(w);
+        DrawFileEntries(w, h);
+        DrawStatusLine(w, h);
+        return false;
+    }
+
+    private void DrawBorderAndPath(int w, int h)
+    {
+        var frameAttr = McTheme.PanelFrame;
+        // Active panel: path shown in bright header color; inactive: frame color (dimmer)
+        var pathAttr = _isActive ? McTheme.PanelHeader : McTheme.PanelFrame;
+
+        // ── Top border: ┌─── /path ───┐ ──────────────────────────────
+        var pathStr     = PathUtils.TildePath(_listing.CurrentPath.ToString());
+        var displayPath = $" {pathStr} ";
+        int available   = w - 2; // width between the two corner chars
+        int dashTotal   = available - displayPath.Length;
+        int dashLeft, dashRight;
+
+        if (dashTotal < 0)
+        {
+            // Truncate path to fit
+            int maxPathLen = available - 2; // leave at least " " + " "
+            if (maxPathLen > 0)
+                displayPath = " " + pathStr[..Math.Min(pathStr.Length, maxPathLen)] + " ";
+            else
+                displayPath = string.Empty;
+            dashLeft  = 0;
+            dashRight = available - displayPath.Length;
+            if (dashRight < 0) { displayPath = displayPath[..available]; dashRight = 0; }
+        }
+        else
+        {
+            dashLeft  = dashTotal / 2;
+            dashRight = dashTotal - dashLeft;
+        }
+
+        Move(0, 0);
+        Driver.SetAttribute(frameAttr);
+        Driver.AddStr("┌" + new string('─', dashLeft));
+        Driver.SetAttribute(pathAttr);
+        Driver.AddStr(displayPath);
+        Driver.SetAttribute(frameAttr);
+        Driver.AddStr(new string('─', dashRight) + "┐");
+
+        // ── Left and right side bars ──────────────────────────────────
+        for (int y = 1; y < h - 1; y++)
+        {
+            Driver.SetAttribute(frameAttr);
+            Move(0,     y); Driver.AddStr("│");
+            Move(w - 1, y); Driver.AddStr("│");
+        }
+
+        // ── Bottom border: └────────────┘ ────────────────────────────
+        Move(0, h - 1);
+        Driver.SetAttribute(frameAttr);
+        Driver.AddStr("└" + new string('─', w - 2) + "┘");
+    }
+
+    private void DrawColumnHeader(int w)
+    {
+        int innerWidth = w - 2;
+        Move(1, 1);
+        Driver.SetAttribute(McTheme.PanelHeader);
+
+        if (_listingMode == PanelListingMode.Brief)
+        {
+            Driver.AddStr(" Name".PadRight(innerWidth));
+            return;
+        }
+
+        (int nameWidth, int sizeWidth, int dateWidth) = ColumnWidths(innerWidth);
+        var header = " "
+            + "Name".PadRight(nameWidth)
+            + "Size".PadLeft(sizeWidth) + " "
+            + "Modify time".PadRight(dateWidth);
+
+        if (header.Length > innerWidth) header = header[..innerWidth];
+        Driver.AddStr(header.PadRight(innerWidth));
+    }
+
+    private void DrawFileEntries(int w, int h)
+    {
+        int innerWidth  = w - 2;
+        int contentRows = h - 4;
+        if (contentRows <= 0) return;
+
+        var entries    = _listing.Entries;
+        var normalAttr = McTheme.PanelFile;
+
+        for (int row = 0; row < contentRows; row++)
+        {
+            int entryIdx = _scrollOffset + row;
+            int screenY  = row + 2; // 0=top border, 1=header, 2=first entry
+
+            Move(1, screenY);
+
+            if (entryIdx >= entries.Count)
+            {
+                Driver.SetAttribute(normalAttr);
+                Driver.AddStr(new string(' ', innerWidth));
+                continue;
+            }
+
+            var  entry    = entries[entryIdx];
+            bool isCursor = _isActive && entryIdx == _cursorIndex;
+
+            Terminal.Gui.Attribute attr;
+            if      (isCursor && entry.IsMarked) attr = McTheme.PanelMarkedCursor;
+            else if (isCursor)                   attr = McTheme.PanelCursor;
+            else if (entry.IsMarked)             attr = McTheme.PanelMarked;
+            else if (entry.IsDirectory || entry.IsParentDir) attr = McTheme.PanelDirectory;
+            else if (entry.IsSymlink)            attr = McTheme.PanelSymlink;
+            else if (entry.IsExecutable)         attr = McTheme.PanelExecutable;
+            else                                 attr = normalAttr;
+
+            Driver.SetAttribute(attr);
+            var text = _listingMode == PanelListingMode.Brief
+                ? FormatBriefEntry(entry, innerWidth)
+                : FormatEntry(entry, innerWidth);
+            Driver.AddStr(text);
+            // FormatEntry/FormatBriefEntry fills innerWidth-1 chars; pad the last cell
+            Driver.AddStr(" ");
+        }
+    }
+
+    private void DrawStatusLine(int w, int h)
+    {
+        int innerWidth = w - 2;
+        Move(1, h - 2);
+        Driver.SetAttribute(McTheme.PanelStatus);
+        var text = _statusText.Length <= innerWidth
+            ? _statusText.PadRight(innerWidth)
+            : _statusText[..innerWidth];
+        Driver.AddStr(text);
+    }
+
+    // --- Entry formatting ---
+
+    private static (int nameWidth, int sizeWidth, int dateWidth) ColumnWidths(int innerWidth)
+    {
+        const int sizeWidth = 8;
+        const int dateWidth = 12;
+        int nameWidth = Math.Max(12, innerWidth - sizeWidth - dateWidth - 3);
+        return (nameWidth, sizeWidth, dateWidth);
+    }
+
+    private static string FormatEntry(FileEntry entry, int innerWidth)
+    {
+        var (nameWidth, sizeWidth, dateWidth) = ColumnWidths(innerWidth);
+
+        var marker = entry.IsMarked ? "*" : " ";
+
+        string name;
+        if      (entry.IsParentDir)  name = "..";
+        else if (entry.IsDirectory)  name = "/" + entry.Name;
+        else if (entry.IsSymlink)    name = "~" + entry.Name;
+        else                         name = entry.Name;
+
+        if (name.Length > nameWidth) name = name[..(nameWidth - 1)] + "~";
+        name = name.PadRight(nameWidth);
+
+        var size = FileSizeFormatter.FormatPanelSize(entry.Size, entry.IsDirectory)
+                                    .PadLeft(sizeWidth);
+        var date = entry.ModificationTime == DateTime.MinValue
+            ? string.Empty.PadRight(dateWidth)
+            : entry.ModificationTime.ToString("MMM dd HH:mm").PadRight(dateWidth);
+
+        // Total: 1 + nameWidth + sizeWidth + 1 + dateWidth = innerWidth - 1
+        return $"{marker}{name}{size} {date}";
+    }
+
+    private static string FormatBriefEntry(FileEntry entry, int innerWidth)
+    {
+        var marker = entry.IsMarked ? "*" : " ";
+        string name;
+        if      (entry.IsParentDir)  name = "..";
+        else if (entry.IsDirectory)  name = "/" + entry.Name;
+        else if (entry.IsSymlink)    name = "~" + entry.Name;
+        else                         name = entry.Name;
+
+        int nameWidth = innerWidth - 1; // 1 for marker
+        if (name.Length > nameWidth) name = name[..(nameWidth - 1)] + "~";
+        // Total: 1 + nameWidth = innerWidth; DrawFileEntries pads one extra space → innerWidth+1
+        // but that is fine because the right border is at column w-1
+        return marker + name.PadRight(nameWidth);
+    }
+
+    // --- Keyboard input ---
 
     protected override bool OnKeyDown(Key keyEvent)
     {
         switch (keyEvent.KeyCode)
         {
+            case KeyCode.CursorUp:
+                if (_cursorIndex > 0)
+                {
+                    _cursorIndex--;
+                    EnsureCursorVisible();
+                    UpdateStatus();
+                    CursorChanged?.Invoke(this, _cursorIndex);
+                    SetNeedsDraw();
+                }
+                return true;
+
+            case KeyCode.CursorDown:
+                if (_cursorIndex < _listing.Entries.Count - 1)
+                {
+                    _cursorIndex++;
+                    EnsureCursorVisible();
+                    UpdateStatus();
+                    CursorChanged?.Invoke(this, _cursorIndex);
+                    SetNeedsDraw();
+                }
+                return true;
+
+            case KeyCode.PageUp:
+            {
+                int step = Math.Max(1, ContentRows);
+                _cursorIndex = Math.Max(0, _cursorIndex - step);
+                EnsureCursorVisible();
+                UpdateStatus();
+                CursorChanged?.Invoke(this, _cursorIndex);
+                SetNeedsDraw();
+                return true;
+            }
+
+            case KeyCode.PageDown:
+            {
+                int step = Math.Max(1, ContentRows);
+                _cursorIndex = Math.Min(_listing.Entries.Count - 1, _cursorIndex + step);
+                EnsureCursorVisible();
+                UpdateStatus();
+                CursorChanged?.Invoke(this, _cursorIndex);
+                SetNeedsDraw();
+                return true;
+            }
+
+            case KeyCode.Home:
+                _cursorIndex  = 0;
+                _scrollOffset = 0;
+                UpdateStatus();
+                CursorChanged?.Invoke(this, _cursorIndex);
+                SetNeedsDraw();
+                return true;
+
+            case KeyCode.End:
+                _cursorIndex = Math.Max(0, _listing.Entries.Count - 1);
+                EnsureCursorVisible();
+                UpdateStatus();
+                CursorChanged?.Invoke(this, _cursorIndex);
+                SetNeedsDraw();
+                return true;
+
             case KeyCode.Insert:
             case KeyCode.Space:
                 ToggleMark();
@@ -186,12 +431,11 @@ public sealed class FilePanelView : View
                 return true;
 
             case KeyCode.Backspace:
-                // Navigate to parent
                 EntryActivated?.Invoke(this, _listing.Entries.FirstOrDefault(e => e.IsParentDir));
                 return true;
 
             default:
-                if (!_isActive) { BecameActive?.Invoke(this, EventArgs.Empty); }
+                if (!_isActive) BecameActive?.Invoke(this, EventArgs.Empty);
                 return base.OnKeyDown(keyEvent);
         }
     }
@@ -202,20 +446,21 @@ public sealed class FilePanelView : View
     {
         if (index < 0 || index >= _listing.Entries.Count) return;
         _cursorIndex = index;
-        _listView.SelectedItem = index;
+        EnsureCursorVisible();
+        UpdateStatus();
         SetNeedsDraw();
     }
 
     public void ToggleMark()
     {
         _listing.MarkFile(_cursorIndex);
-        // Move cursor down if MarkMovesCursor
         if (_cursorIndex < _listing.Entries.Count - 1)
         {
             _cursorIndex++;
-            _listView.SelectedItem = _cursorIndex;
+            EnsureCursorVisible();
         }
-        RefreshDisplay();
+        UpdateStatus();
+        SetNeedsDraw();
     }
 
     public void Refresh() => _listing.Reload();

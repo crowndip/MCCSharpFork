@@ -21,9 +21,10 @@ public static class ConfigPaths
     public static string MainConfigFile => Path.Combine(ConfigDir, "ini");
     public static string HotlistFile => Path.Combine(ConfigDir, "hotlist");
     public static string HistoryFile => Path.Combine(ConfigDir, "history");
-    public static string ExtFile => Path.Combine(ConfigDir, "mc.ext.ini");
-    public static string MenuFile => Path.Combine(ConfigDir, "mc.menu");
-    public static string KeymapFile => Path.Combine(ConfigDir, "mc.keymap");
+    public static string ExtFile           => Path.Combine(ConfigDir, "mc.ext.ini");
+    public static string MenuFile          => Path.Combine(ConfigDir, "mc.menu");
+    public static string FileHighlightFile => Path.Combine(ConfigDir, "mc.filehighlight.ini");
+    public static string KeymapFile        => Path.Combine(ConfigDir, "mc.keymap");
     public static string SkinsDir => Path.Combine(DataDir, "skins");
     public static string SyntaxDir => Path.Combine(DataDir, "syntax");
     public static string PanelsStateFile => Path.Combine(CacheDir, "panels.ini");

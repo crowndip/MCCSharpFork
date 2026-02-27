@@ -114,6 +114,16 @@ public sealed class DirectoryListing
     public IReadOnlyList<FileEntry> GetMarkedEntries()
         => _entries.Where(e => e.IsMarked).ToList();
 
+    /// <summary>
+    /// Recomputes the marked-file aggregates and fires Changed after external
+    /// bulk-marking (e.g. compare-directories). Equivalent to recalculate_panel_summary().
+    /// </summary>
+    public void RefreshMarking()
+    {
+        UpdateCounts();
+        Changed?.Invoke(this, EventArgs.Empty);
+    }
+
     private void SortEntries()
     {
         // Always keep ".." at top
