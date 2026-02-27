@@ -265,7 +265,8 @@ public sealed class McApplication : Toplevel
             case KeyCode.U when keyEvent.IsCtrl: _controller.SwapPanels(); RefreshPanels(); return true;
             case KeyCode.R when keyEvent.IsCtrl: _controller.Refresh(); return true;
 
-            case KeyCode.L when keyEvent.IsCtrl: ShowInfo(); return true;
+            case KeyCode.L when keyEvent.IsCtrl: Application.LayoutAndDraw(true); return true; // Refresh/redraw screen (matches original MC Ctrl+L)
+            case KeyCode.I when keyEvent.IsCtrl: ShowInfo(); return true;           // Ctrl+I → file info (original MC Ctrl+I / *)
             case KeyCode.X when keyEvent.IsCtrl: _ctrlXPrefix = true; return true; // start Ctrl+X prefix
 
             case KeyCode.T when keyEvent.IsCtrl: OpenTerminalHere(); return true;
@@ -377,8 +378,22 @@ public sealed class McApplication : Toplevel
     private void EditCurrent()
     {
         var entry = GetCurrentEntry();
-        string? path = entry?.FullPath.Path;
-        if (path != null) { _editedFiles.Remove(path); _editedFiles.Insert(0, path); }
+        string? path;
+
+        if (entry == null || entry.IsDirectory || entry.IsParentDir)
+        {
+            // F4 with no file selected: prompt for a new filename (edit_cmd_new() in original MC)
+            var newName = InputDialog.Show("Edit", "Enter file name:", string.Empty);
+            if (newName == null) return;
+            path = Path.IsPathRooted(newName)
+                ? newName
+                : Path.Combine(_controller.ActivePanel.CurrentPath.Path, newName);
+        }
+        else
+        {
+            path = entry.FullPath.Path;
+            _editedFiles.Remove(path); _editedFiles.Insert(0, path);
+        }
 
         var editorWin = new Window
         {
@@ -400,9 +415,11 @@ public sealed class McApplication : Toplevel
     private void CopyFiles()
     {
         var dest = _controller.InactivePanel.CurrentPath.Path;
-        var entry = GetCurrentEntry();
-        var sourceName = entry?.Name ?? "marked files";
-        var opts = CopyMoveDialog.Show(false, sourceName, dest);
+        var entry  = GetCurrentEntry();
+        var marked = _controller.ActivePanel.GetMarkedEntries();
+        var sourceName   = marked.Count > 0 ? $"{marked.Count} files" : (entry?.Name ?? "marked files");
+        var defaultSource = marked.Count > 0 ? "*" : (entry?.Name ?? "*");
+        var opts = CopyMoveDialog.Show(false, sourceName, dest, defaultSource);
         if (opts?.Confirmed != true) return;
 
         var progress = new ProgressDialog("Copy");
@@ -435,7 +452,8 @@ public sealed class McApplication : Toplevel
             sourceName = entry.Name;
         }
         else return;
-        var opts = CopyMoveDialog.Show(true, sourceName, dest);
+        var moveSource = marked.Count > 0 ? "*" : (entry?.Name ?? "*");
+        var opts = CopyMoveDialog.Show(true, sourceName, dest, moveSource);
         if (opts?.Confirmed != true) return;
 
         var progress = new ProgressDialog("Move");
@@ -458,13 +476,40 @@ public sealed class McApplication : Toplevel
 
     private void DeleteFiles()
     {
-        var marked = _controller.ActivePanel.GetMarkedEntries();
-        var names = marked.Count > 0
-            ? marked.Select(e => e.Name).ToList()
-            : (GetCurrentEntry() is { } e ? new List<string> { e.Name } : new List<string>());
+        var marked  = _controller.ActivePanel.GetMarkedEntries();
+        var targets = marked.Count > 0
+            ? marked.ToList()
+            : (GetCurrentEntry() is { } e ? [e] : []);
 
-        if (names.Count == 0) return;
-        if (!DeleteDialog.Confirm(names)) return;
+        if (targets.Count == 0) return;
+
+        // Primary confirmation
+        if (!DeleteDialog.Confirm(targets.Select(e => e.Name).ToList())) return;
+
+        // Secondary confirmation per directory — equivalent to original MC's erase_dir() prompt.
+        // Ask "Delete directory '<name>' recursively?" for each directory in the target list.
+        var toDelete = new List<FileEntry>();
+        foreach (var entry in targets)
+        {
+            if (entry.IsDirectory)
+            {
+                if (MessageDialog.Confirm("Delete",
+                    $"Delete directory \"{entry.Name}\" recursively?", "Yes", "No"))
+                    toDelete.Add(entry);
+                // else user declined this directory — skip it
+            }
+            else
+            {
+                toDelete.Add(entry);
+            }
+        }
+
+        if (toDelete.Count == 0) return;
+
+        // Mark exactly the confirmed entries so DeleteMarkedAsync processes the right set
+        _controller.ActivePanel.MarkAll(false);
+        foreach (var del in toDelete) del.IsMarked = true;
+        _controller.ActivePanel.RefreshMarking();
 
         var progress = new ProgressDialog("Delete");
         progress.Show();
@@ -730,21 +775,27 @@ public sealed class McApplication : Toplevel
         var leftEntry = _leftPanelView.CurrentEntry;
         var rightEntry = _rightPanelView.CurrentEntry;
 
-        if (leftEntry != null && !leftEntry.IsDirectory && rightEntry != null && !rightEntry.IsDirectory)
+        // Equivalent to original MC's diff_view_cmd() — shows an error rather than silently doing nothing
+        if (leftEntry == null || leftEntry.IsDirectory || leftEntry.IsParentDir ||
+            rightEntry == null || rightEntry.IsDirectory || rightEntry.IsParentDir)
         {
-            var win = new Window
-            {
-                X = 0, Y = 0, Width = Dim.Fill(), Height = Dim.Fill(),
-                ColorScheme = McTheme.Dialog,
-            };
-            var diff = new DiffView(leftEntry.FullPath.Path, rightEntry.FullPath.Path);
-            diff.X = 0; diff.Y = 0;
-            diff.Width = Dim.Fill(); diff.Height = Dim.Fill();
-            diff.RequestClose += (_, _) => Application.RequestStop(win);
-            win.Title = diff.Title;
-            win.Add(diff);
-            Application.Run(win);
+            MessageDialog.Show("Compare files",
+                "Please select a regular file (not a directory) in each panel.");
+            return;
         }
+
+        var win = new Window
+        {
+            X = 0, Y = 0, Width = Dim.Fill(), Height = Dim.Fill(),
+            ColorScheme = McTheme.Dialog,
+        };
+        var diff = new DiffView(leftEntry.FullPath.Path, rightEntry.FullPath.Path);
+        diff.X = 0; diff.Y = 0;
+        diff.Width = Dim.Fill(); diff.Height = Dim.Fill();
+        diff.RequestClose += (_, _) => Application.RequestStop(win);
+        win.Title = diff.Title;
+        win.Add(diff);
+        Application.Run(win);
     }
 
     private void LaunchShell()
@@ -1027,6 +1078,12 @@ public sealed class McApplication : Toplevel
 
         var newTarget = InputDialog.Show("Edit symlink", "Symlink target:", currentTarget);
         if (newTarget == null || newTarget == currentTarget) return;
+
+        // Confirm before modifying (matches original MC's edit_symlink_cmd() behaviour)
+        if (!MessageDialog.Confirm("Edit symlink",
+            $"Do you want to update the symlink \"{entry.Name}\"?", "Yes", "No"))
+            return;
+
         try
         {
             File.Delete(entry.FullPath.Path);
@@ -1324,9 +1381,28 @@ public sealed class McApplication : Toplevel
             if (files.Count == 0)
             { MessageDialog.Show("External Panelize", "No files returned by command."); return; }
 
-            // Show what would be panelized (full panelize requires VFS support)
-            MessageDialog.Show("External Panelize",
-                $"{files.Count} file(s) returned.\n(Full panel injection not yet implemented)");
+            // Inject into panel: navigate to current dir, mark all returned filenames.
+            // Equivalent to external_panelize() in original MC — replaces panel content
+            // with the command's output so F5/F6/F8 can operate on the results.
+            var panelDir = _controller.ActivePanel.CurrentPath.Path.TrimEnd('/');
+            var inPanel  = new HashSet<string>(
+                files.Select(f => Path.IsPathRooted(f) ? f : Path.Combine(panelDir, f))
+                     .Where(f => Path.GetDirectoryName(f) == panelDir)
+                     .Select(Path.GetFileName)!,
+                StringComparer.Ordinal);
+
+            RefreshPanels();  // reload so entries reflect current disk state
+            var panel = _controller.ActivePanel;
+            panel.MarkAll(false);
+            foreach (var e in panel.Entries.Where(e => !e.IsParentDir && inPanel.Contains(e.Name)))
+                e.IsMarked = true;
+            panel.RefreshMarking();
+
+            int outsidePanel = files.Count - inPanel.Count;
+            string msg = $"Marked {inPanel.Count} file(s) in current panel.";
+            if (outsidePanel > 0)
+                msg += $"\n{outsidePanel} file(s) were outside the current directory and were skipped.";
+            MessageDialog.Show("External Panelize", msg);
         }
         catch (Exception ex) { MessageDialog.Error(ex.Message); }
     }
@@ -1670,9 +1746,16 @@ public sealed class McApplication : Toplevel
             }
         }
 
-        List<UserMenuEntry> entries;
-        try   { entries = ParseUserMenuFile(menuFile); }
+        List<UserMenuEntry> allEntries;
+        try   { allEntries = ParseUserMenuFile(menuFile); }
         catch (Exception ex) { MessageDialog.Error($"Cannot read user menu:\n{ex.Message}"); return; }
+
+        // Filter entries by condition (+/= lines) — equivalent to check_conditions() in usermenu.c
+        var curFile = GetCurrentEntry()?.Name ?? string.Empty;
+        var curDir  = _controller.ActivePanel.CurrentPath.Path;
+        var entries = allEntries
+            .Where(e => e.Condition == null || EvaluateUserMenuCondition(e.Condition, curFile, curDir))
+            .ToList();
 
         if (entries.Count == 0)
         {
@@ -1790,33 +1873,51 @@ public sealed class McApplication : Toplevel
     /// Indented line(s): shell command body.
     /// Comment lines (#), blank lines, and condition lines (+/=) are skipped.
     /// </summary>
+    /// <summary>
+    /// Parses a mc.menu file and returns menu entries, each with an optional condition string.
+    /// Condition lines (+/= lines) that immediately precede a header line are attached to that entry.
+    /// Equivalent to check_conditions() / parse_mc_menu() in src/usermenu.c.
+    /// </summary>
     private static List<UserMenuEntry> ParseUserMenuFile(string path)
     {
-        var entries  = new List<UserMenuEntry>();
-        string? label = null;
-        char hotKey  = '\0';
-        var cmdLines = new List<string>();
+        var entries         = new List<UserMenuEntry>();
+        string? label       = null;
+        char    hotKey      = '\0';
+        string? condition   = null; // condition attached to the CURRENT entry being built
+        string? nextCond    = null; // condition seen just before the next header
+        var     cmdLines    = new List<string>();
+
+        void Flush()
+        {
+            if (label != null && cmdLines.Count > 0)
+                entries.Add(new UserMenuEntry(label, string.Join("\n", cmdLines), hotKey, condition));
+        }
 
         foreach (var rawLine in File.ReadAllLines(path))
         {
-            if (string.IsNullOrEmpty(rawLine)) continue;
+            if (string.IsNullOrEmpty(rawLine)) { nextCond = null; continue; }
             var trimmed = rawLine.TrimStart();
             if (trimmed.StartsWith('#')) continue;
-            if (trimmed.StartsWith('+') || trimmed.StartsWith('=')) continue; // condition lines
+
+            // Condition line (+/= expression) — attach to the immediately following header
+            if (trimmed.StartsWith('+') || trimmed.StartsWith('='))
+            {
+                nextCond = trimmed;
+                continue;
+            }
 
             bool isCommand = rawLine[0] is ' ' or '\t';
 
             if (isCommand)
             {
                 if (label != null) cmdLines.Add(trimmed);
+                nextCond = null; // a command line resets pending condition
             }
             else
             {
-                // Flush previous entry
-                if (label != null && cmdLines.Count > 0)
-                    entries.Add(new UserMenuEntry(label, string.Join("\n", cmdLines), hotKey));
+                Flush();
 
-                // Parse header: single-char key (letter/digit) + whitespace → extract hotkey
+                // Parse header: single-char hotkey + whitespace
                 if (rawLine.Length >= 2 && char.IsLetterOrDigit(rawLine[0]) && char.IsWhiteSpace(rawLine[1]))
                 {
                     hotKey = rawLine[0];
@@ -1828,16 +1929,68 @@ public sealed class McApplication : Toplevel
                     label  = rawLine.Trim();
                 }
                 cmdLines.Clear();
+                condition = nextCond;
+                nextCond  = null;
             }
         }
-
-        if (label != null && cmdLines.Count > 0)
-            entries.Add(new UserMenuEntry(label, string.Join("\n", cmdLines), hotKey));
+        Flush();
 
         return entries;
     }
 
-    private sealed record UserMenuEntry(string Label, string Command, char HotKey);
+    private sealed record UserMenuEntry(string Label, string Command, char HotKey, string? Condition);
+
+    /// <summary>
+    /// Evaluates a condition line from an mc.menu file.
+    /// Supports the subset used by the original MC check_conditions():
+    ///   + f pattern   — show if current filename matches shell pattern
+    ///   + d pattern   — show if current directory matches shell pattern
+    ///   + ! ...       — negate the condition
+    ///   = ...         — same semantics as +
+    /// Multiple space-separated clauses are ANDed (basic subset).
+    /// </summary>
+    private static bool EvaluateUserMenuCondition(string condition, string fileName, string dir)
+    {
+        // Strip the leading '+' or '=' and whitespace
+        var expr = condition.TrimStart('+', '=').Trim();
+        bool negate = false;
+        if (expr.StartsWith('!')) { negate = true; expr = expr[1..].TrimStart(); }
+
+        bool result = EvaluateSingleCondition(expr, fileName, dir);
+        return negate ? !result : result;
+    }
+
+    private static bool EvaluateSingleCondition(string expr, string fileName, string dir)
+    {
+        // Tokenise: first char is the type, rest is the pattern
+        if (expr.Length < 3) return true; // malformed → show entry
+        char   type    = expr[0];
+        string pattern = expr[2..].Trim();
+
+        return type switch
+        {
+            'f' => MatchShellPattern(fileName, pattern),
+            'd' => MatchShellPattern(dir,      pattern),
+            't' => true, // tag condition — not tracked; always show
+            _   => true, // unknown type → show entry
+        };
+    }
+
+    /// <summary>Matches a filename against a shell glob pattern (* and ? only).</summary>
+    private static bool MatchShellPattern(string input, string pattern)
+    {
+        // Use Regex.IsMatch with the glob converted to regex
+        try
+        {
+            var rx = "^" + System.Text.RegularExpressions.Regex.Escape(pattern)
+                               .Replace("\\*", ".*")
+                               .Replace("\\?", ".") + "$";
+            return System.Text.RegularExpressions.Regex.IsMatch(
+                input, rx,
+                System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+        }
+        catch { return true; }
+    }
 
     /// <summary>
     /// Runs a shell command for the user menu, suspending the TUI so interactive
