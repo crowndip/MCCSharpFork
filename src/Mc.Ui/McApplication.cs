@@ -1835,6 +1835,36 @@ public sealed class McApplication : Toplevel
             }
         };
 
+        // F2 = rescan selected subtree, F8 = delete selected directory (original MC tree.c)
+        lv.KeyDown += (_, k) =>
+        {
+            var idx = lv.SelectedItem;
+            if (idx < 0 || idx >= nodes.Count) return;
+            var (selPath, _, _) = nodes[idx];
+
+            if (k.KeyCode == KeyCode.F2)
+            {
+                // Rescan: force re-expand the selected directory
+                expanded.Add(selPath);
+                Rebuild(selPath);
+                k.Handled = true;
+            }
+            else if (k.KeyCode == KeyCode.F8)
+            {
+                if (selPath == rootPath) return;
+                if (!MessageDialog.Confirm("Delete", $"Delete directory \"{Path.GetFileName(selPath)}\"?", "Yes", "No"))
+                    return;
+                try
+                {
+                    Directory.Delete(selPath, recursive: false);
+                    expanded.Remove(selPath);
+                    Rebuild(Path.GetDirectoryName(selPath) ?? rootPath);
+                }
+                catch (Exception ex) { MessageDialog.Error(ex.Message); }
+                k.Handled = true;
+            }
+        };
+
         var go = new Button { X = Pos.Center() - 8, Y = Pos.Bottom(lv), Text = "Go", IsDefault = true };
         go.Accepting += (_, _) =>
         {
@@ -2553,53 +2583,62 @@ public sealed class McApplication : Toplevel
         var d = new Dialog
         {
             Title = "Configuration",
-            Width = 60,
-            Height = 15,
+            Width = 62,
+            Height = 22,
             ColorScheme = McTheme.Dialog,
         };
 
-        var useIntViewer = new CheckBox
+        CheckBox CB(int y, string label, bool val) => new CheckBox
         {
-            X = 2, Y = 1,
-            Text = "Use internal view",
-            CheckedState = _settings.UseInternalViewer ? CheckState.Checked : CheckState.UnChecked,
-            ColorScheme = McTheme.Dialog,
-        };
-        var useIntEditor = new CheckBox
-        {
-            X = 2, Y = 2,
-            Text = "Use internal edit",
-            CheckedState = _settings.UseInternalEditor ? CheckState.Checked : CheckState.UnChecked,
+            X = 2, Y = y, Text = label,
+            CheckedState = val ? CheckState.Checked : CheckState.UnChecked,
             ColorScheme = McTheme.Dialog,
         };
 
-        d.Add(new Label { X = 2, Y = 4, Text = "External editor:", ColorScheme = McTheme.Dialog });
+        var verbose      = CB(1,  "Verbose operation",           _settings.VerboseOperation);
+        var totals       = CB(2,  "Compute totals",              _settings.ComputeTotals);
+        var autoSave     = CB(3,  "Auto save setup",             _settings.AutoSaveSetup);
+        var showOutput   = CB(4,  "Show output of commands",     _settings.ShowOutputOfCommands);
+        var useSubshell  = CB(5,  "Use subshell",                _settings.UseSubshell);
+        var askRun       = CB(6,  "Ask before running programs", _settings.AskBeforeRunning);
+        var useIntViewer = CB(8,  "Use internal view",           _settings.UseInternalViewer);
+        var useIntEditor = CB(9,  "Use internal edit",           _settings.UseInternalEditor);
+
+        d.Add(new Label { X = 2, Y = 11, Text = "External editor:", ColorScheme = McTheme.Dialog });
         var extEditor = new TextField
         {
-            X = 20, Y = 4, Width = 34,
+            X = 20, Y = 11, Width = 38,
             Text = _settings.ExternalEditor,
             ColorScheme = McTheme.Dialog,
         };
-        d.Add(new Label { X = 2, Y = 6, Text = "External viewer:", ColorScheme = McTheme.Dialog });
+        d.Add(new Label { X = 2, Y = 12, Text = "External viewer:", ColorScheme = McTheme.Dialog });
         var extViewer = new TextField
         {
-            X = 20, Y = 6, Width = 34,
+            X = 20, Y = 12, Width = 38,
             Text = _settings.ExternalViewer,
             ColorScheme = McTheme.Dialog,
         };
 
-        d.Add(useIntViewer, useIntEditor, extEditor, extViewer);
+        d.Add(verbose, totals, autoSave, showOutput, useSubshell, askRun,
+              useIntViewer, useIntEditor, extEditor, extViewer);
 
-        var ok = new Button { X = Pos.Center() - 8, Y = 10, Text = "OK", IsDefault = true };
+        var ok = new Button { Text = "OK", IsDefault = true };
         ok.Accepting += (_, _) =>
         {
-            _settings.UseInternalViewer = useIntViewer.CheckedState == CheckState.Checked;
-            _settings.UseInternalEditor = useIntEditor.CheckedState == CheckState.Checked;
-            _settings.ExternalEditor    = extEditor.Text?.ToString() ?? "vi";
-            _settings.ExternalViewer    = extViewer.Text?.ToString() ?? "less";
+            _settings.VerboseOperation     = verbose.CheckedState     == CheckState.Checked;
+            _settings.ComputeTotals        = totals.CheckedState      == CheckState.Checked;
+            _settings.AutoSaveSetup        = autoSave.CheckedState    == CheckState.Checked;
+            _settings.ShowOutputOfCommands = showOutput.CheckedState  == CheckState.Checked;
+            _settings.UseSubshell          = useSubshell.CheckedState == CheckState.Checked;
+            _settings.AskBeforeRunning     = askRun.CheckedState      == CheckState.Checked;
+            _settings.UseInternalViewer    = useIntViewer.CheckedState == CheckState.Checked;
+            _settings.UseInternalEditor    = useIntEditor.CheckedState == CheckState.Checked;
+            _settings.ExternalEditor       = extEditor.Text?.ToString() ?? "vi";
+            _settings.ExternalViewer       = extViewer.Text?.ToString() ?? "less";
+            _settings.Save();
             Application.RequestStop(d);
         };
-        var cancel = new Button { X = Pos.Center() + 2, Y = 10, Text = "Cancel" };
+        var cancel = new Button { Text = "Cancel" };
         cancel.Accepting += (_, _) => Application.RequestStop(d);
         d.AddButton(ok); d.AddButton(cancel);
         Application.Run(d); d.Dispose();
@@ -2614,43 +2653,51 @@ public sealed class McApplication : Toplevel
         var d = new Dialog
         {
             Title = "Panel options",
-            Width = 50,
-            Height = 10,
+            Width = 58,
+            Height = 18,
             ColorScheme = McTheme.Dialog,
         };
 
-        var showHidden = new CheckBox
+        CheckBox CB(int y, string label, bool val) => new CheckBox
         {
-            X = 2, Y = 1,
-            Text = "Show hidden files",
-            CheckedState = _settings.ShowHiddenFiles ? CheckState.Checked : CheckState.UnChecked,
+            X = 2, Y = y, Text = label,
+            CheckedState = val ? CheckState.Checked : CheckState.UnChecked,
             ColorScheme = McTheme.Dialog,
         };
-        var showBackup = new CheckBox
-        {
-            X = 2, Y = 2,
-            Text = "Show backup files",
-            CheckedState = _settings.ShowBackupFiles ? CheckState.Checked : CheckState.UnChecked,
-            ColorScheme = McTheme.Dialog,
-        };
-        var markMoves = new CheckBox
-        {
-            X = 2, Y = 3,
-            Text = "Mark moves cursor down",
-            CheckedState = _settings.MarkMovesCursor ? CheckState.Checked : CheckState.UnChecked,
-            ColorScheme = McTheme.Dialog,
-        };
-        d.Add(showHidden, showBackup, markMoves);
 
-        var ok = new Button { X = Pos.Center() - 8, Y = 6, Text = "OK", IsDefault = true };
+        var showHidden   = CB(1,  "Show hidden files",              _settings.ShowHiddenFiles);
+        var showBackup   = CB(2,  "Show backup files",              _settings.ShowBackupFiles);
+        var markMoves    = CB(3,  "Mark moves cursor down",         _settings.MarkMovesCursor);
+        var miniStatus   = CB(4,  "Show mini status",               _settings.ShowMiniStatus);
+        var lynxMotion   = CB(5,  "Lynx-like motion (← = parent)", _settings.LynxLikeMotion);
+        var scrollbar    = CB(6,  "Show scrollbar",                 _settings.ShowScrollbar);
+        var highlight    = CB(7,  "Highlight files by attributes",  _settings.HighlightFiles);
+        var mixFiles     = CB(8,  "Mix all files (dirs + files)",   _settings.MixAllFiles);
+        var caseSensitive= CB(9,  "Case-sensitive quick search",    _settings.QuickSearchCaseSensitive);
+        var freeSpace    = CB(10, "Show free space",                _settings.ShowFreeSpace);
+        d.Add(showHidden, showBackup, markMoves, miniStatus, lynxMotion,
+              scrollbar, highlight, mixFiles, caseSensitive, freeSpace);
+
+        var ok = new Button { Text = "OK", IsDefault = true };
         ok.Accepting += (_, _) =>
         {
-            _settings.ShowHiddenFiles = showHidden.CheckedState == CheckState.Checked;
-            _settings.ShowBackupFiles = showBackup.CheckedState == CheckState.Checked;
-            _settings.MarkMovesCursor = markMoves.CheckedState == CheckState.Checked;
+            _settings.ShowHiddenFiles          = showHidden.CheckedState    == CheckState.Checked;
+            _settings.ShowBackupFiles          = showBackup.CheckedState    == CheckState.Checked;
+            _settings.MarkMovesCursor          = markMoves.CheckedState     == CheckState.Checked;
+            _settings.ShowMiniStatus           = miniStatus.CheckedState    == CheckState.Checked;
+            _settings.LynxLikeMotion           = lynxMotion.CheckedState    == CheckState.Checked;
+            _settings.ShowScrollbar            = scrollbar.CheckedState     == CheckState.Checked;
+            _settings.HighlightFiles           = highlight.CheckedState     == CheckState.Checked;
+            _settings.MixAllFiles              = mixFiles.CheckedState      == CheckState.Checked;
+            _settings.QuickSearchCaseSensitive = caseSensitive.CheckedState == CheckState.Checked;
+            _settings.ShowFreeSpace            = freeSpace.CheckedState     == CheckState.Checked;
+            _settings.Save();
+            // Apply panel reload for hidden/backup file visibility change
+            _controller.LeftPanel.Reload();
+            _controller.RightPanel.Reload();
             Application.RequestStop(d);
         };
-        var cancel = new Button { X = Pos.Center() + 2, Y = 6, Text = "Cancel" };
+        var cancel = new Button { Text = "Cancel" };
         cancel.Accepting += (_, _) => Application.RequestStop(d);
         d.AddButton(ok); d.AddButton(cancel);
         Application.Run(d); d.Dispose();
@@ -2716,8 +2763,8 @@ public sealed class McApplication : Toplevel
         var d = new Dialog
         {
             Title = "Layout",
-            Width = 50,
-            Height = 10,
+            Width = 54,
+            Height = 18,
             ColorScheme = McTheme.Dialog,
         };
 
@@ -2730,15 +2777,64 @@ public sealed class McApplication : Toplevel
         };
         d.Add(rg);
 
-        var ok = new Button { X = Pos.Center() - 8, Y = 6, Text = "OK", IsDefault = true };
+        CheckBox CB(int y, string label, bool val) => new CheckBox
+        {
+            X = 2, Y = y, Text = label,
+            CheckedState = val ? CheckState.Checked : CheckState.UnChecked,
+            ColorScheme = McTheme.Dialog,
+        };
+
+        var showMenubar  = CB(4,  "Show menubar",     _settings.ShowMenubar);
+        var showCmdLine  = CB(5,  "Show command line", _settings.ShowCommandLine);
+        var showKeyBar   = CB(6,  "Show key bar",      _settings.ShowKeyBar);
+        d.Add(showMenubar, showCmdLine, showKeyBar);
+
+        d.Add(new Label { X = 2, Y = 8, Text = "Panel split %:", ColorScheme = McTheme.Dialog });
+        var splitField = new TextField
+        {
+            X = 18, Y = 8, Width = 5,
+            Text = _settings.PanelSplitRatio.ToString(),
+            ColorScheme = McTheme.Dialog,
+        };
+        d.Add(splitField);
+        var equalBtn = new Button { X = 24, Y = 8, Text = "Equal (50/50)" };
+        equalBtn.Accepting += (_, _) => splitField.Text = "50";
+        d.Add(equalBtn);
+
+        var ok = new Button { Text = "OK", IsDefault = true };
         ok.Accepting += (_, _) =>
         {
             _settings.HorizontalSplit = rg.SelectedItem == 1;
+            _settings.ShowMenubar     = showMenubar.CheckedState == CheckState.Checked;
+            _settings.ShowCommandLine = showCmdLine.CheckedState == CheckState.Checked;
+            _settings.ShowKeyBar      = showKeyBar.CheckedState  == CheckState.Checked;
+            if (int.TryParse(splitField.Text?.ToString(), out var ratio) && ratio is >= 10 and <= 90)
+                _settings.PanelSplitRatio = ratio;
+            _settings.Save();
+            ApplyLayoutSettings();
             Application.RequestStop(d);
         };
-        var cancel = new Button { X = Pos.Center() + 2, Y = 6, Text = "Cancel" };
+        var cancel = new Button { Text = "Cancel" };
         cancel.Accepting += (_, _) => Application.RequestStop(d);
         d.AddButton(ok); d.AddButton(cancel);
         Application.Run(d); d.Dispose();
+    }
+
+    /// <summary>Apply show/hide layout settings to the live UI elements.</summary>
+    private void ApplyLayoutSettings()
+    {
+        _menuBar.Visible     = _settings.ShowMenubar;
+        _commandLine.Visible = _settings.ShowCommandLine;
+        _buttonBar.Visible   = _settings.ShowKeyBar;
+
+        // Adjust panel split ratio
+        var pct = _settings.PanelSplitRatio;
+        _leftPanelView.Width  = Dim.Percent(pct);
+        _rightPanelView.X     = Pos.Right(_leftPanelView);
+        _rightPanelView.Width = Dim.Fill();
+        _leftOverlay.Width    = Dim.Percent(pct);
+        _rightOverlay.X       = Pos.Right(_leftPanelView);
+
+        Application.LayoutAndDraw(true);
     }
 }

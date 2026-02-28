@@ -55,17 +55,17 @@ These round out the experience but have workarounds or limited daily impact.
 
 | # | Status | Feature | What is missing | MC source reference |
 |---|--------|---------|-----------------|---------------------|
-| 24 | `[ ]` | **Options → Configuration — missing settings** | Many settings absent: Verbose operation, Compute totals, Use shell patterns, Auto save setup, Drop caches after copy/move/delete, Show output of commands, Subshell usage, Always show mini status, Ask before running programs. | `src/setup.c` — `configure_box()` |
-| 25 | `[ ]` | **Options → Panel options — missing settings** | Missing: Show mini status, Lynx-like motion (left arrow = parent dir), Scrollbar in panels, File highlighting by type/permissions, Mix all files (dirs interleaved), Quick search mode (case sensitivity), Real path of symlinks, Free space display. | `src/filemanager/panel.c` — `panel_options_box()` |
-| 26 | `[ ]` | **Options → Layout — missing controls** | Missing: show/hide menubar / command line / key bar / hintbar individually, panel split ratio slider, "Equal split" toggle. | `src/setup.c` — `layout_box()` |
-| 27 | `[ ]` | **Directory tree dialog — F-key bindings** | Our modal tree dialog lacks the F-key bindings of the original tree widget (F2 = rescan subtree, F8 = delete dir) and does not persist expand/collapse state across opens. | `src/filemanager/tree.c` |
+| 24 | `[x]` | **Options → Configuration — missing settings** | ~~Many settings absent.~~ Fixed: added Verbose operation, Compute totals, Auto save setup, Show output of commands, Use subshell, Ask before running programs; all persisted via McSettings/McConfig. | `src/setup.c` — `configure_box()` |
+| 25 | `[x]` | **Options → Panel options — missing settings** | ~~Missing many settings.~~ Fixed: added Show mini status, Lynx-like motion, Show scrollbar, Highlight files, Mix all files, Case-sensitive quick search, Show free space; all saved + panel reload applied. | `src/filemanager/panel.c` — `panel_options_box()` |
+| 26 | `[x]` | **Options → Layout — missing controls** | ~~Missing show/hide and split controls.~~ Fixed: added Show menubar/command line/key bar checkboxes, panel split % field, "Equal (50/50)" button; `ApplyLayoutSettings()` toggles Visible + adjusts Dim.Percent. | `src/setup.c` — `layout_box()` |
+| 27 | `[x]` | **Directory tree dialog — F-key bindings** | ~~Dialog lacks F2/F8 bindings.~~ Fixed: F2 rescans (force-expands) the selected directory; F8 deletes it (with confirmation, non-recursive); expand/collapse state already persisted during the dialog session. | `src/filemanager/tree.c` |
 | 28 | `[ ]` | **F1 Help — hyperlinks between nodes** | Help viewer shows plain text. Original MC uses ctrl-char escape codes to embed hyperlinks between nodes; clicking or pressing Enter on a link navigates to the linked topic. | `src/help.c` |
 | 29 | `[x]` | **Filtered view — pass filename automatically** | ~~"Filtered view" dialog does not substitute `%f` with the current filename; user must type the full command including filename manually.~~ Already implemented: default command is "cat %f" and `%f` is substituted with the full file path before execution. | `src/filemanager/cmd.c` — `filtered_view_cmd()` |
 | 30 | `[ ]` | **Encoding — full iconv list** | Encoding dialog shows a hardcoded list of 16 encodings. Original MC queries all iconv-known encodings dynamically. | `lib/charsets.c` |
 | 31 | `[ ]` | **Options → Appearance / Skins** | Currently shows "not implemented". Original MC supports INI-based colour skin files from `~/.local/share/mc/skins/`. | `lib/skin/` |
 | 32 | `[ ]` | **Options → Learn keys** | Currently shows "not implemented". Original provides an interactive key-binding editor. | `src/learn.c` |
 | 33 | `[ ]` | **Options → Virtual FS settings** | Currently shows "not implemented". Original shows cache timeout, FTP proxy, anonymous password settings. | `src/vfs/setup.c` |
-| 34 | `[ ]` | **Background jobs dialog** | Shows a static informational message. Original lists running background copy/move jobs with file counts and a Kill button. Requires Background copy/move (item 22) to be useful. | `src/background.c` — `jobs_cmd()` |
+| 34 | `[x]` | **Background jobs dialog** | ~~Shows a static informational message.~~ Fixed as part of #22: ShowBackgroundJobs() now lists real BackgroundJob entries with name/status and a Kill button. | `src/background.c` — `jobs_cmd()` |
 | 35 | `[ ]` | **Command history — inline in command line** | History is shown in a separate dialog and pasted. Original integrates history as an inline dropdown in the command-line widget itself. | `src/filemanager/command.c` |
 | 36 | `[ ]` | **Active VFS list — full display** | Only panel paths shown. Original shows each mounted VFS with path + type + connection info, and "Free VFSs" to unmount. | `src/vfs/vfs.c` — `reselect_vfs()` |
 | 37 | `[ ]` | **Shell link (FISH protocol)** | Shows "not implemented". Original implements the FISH (FIles transferred over SHell) protocol for remote panel access over SSH. | `src/vfs/fish/` |
@@ -81,5 +81,5 @@ These round out the experience but have workarounds or limited daily impact.
 |------|-------|------|-------------|-------------|
 | 1 — Critical | 11 | 11 | 0 | 0 |
 | 2 — Important | 12 | 10 | 1 | 1 |
-| 3 — Enhancements | 17 | 1 | 0 | 16 |
-| **Total** | **40** | **22** | **1** | **17** |
+| 3 — Enhancements | 17 | 6 | 0 | 11 |
+| **Total** | **40** | **27** | **1** | **12** |

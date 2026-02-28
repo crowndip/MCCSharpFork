@@ -128,5 +128,104 @@ public sealed class McSettings
         set => _config.Set("Editor", "expand_tabs", value);
     }
 
+    // --- Configuration (configure_box in setup.c) ---
+    public bool VerboseOperation
+    {
+        get => _config.GetBool("Midnight-Commander", "verbose", true);
+        set => _config.Set("Midnight-Commander", "verbose", value);
+    }
+
+    public bool ComputeTotals
+    {
+        get => _config.GetBool("Midnight-Commander", "compute_totals", true);
+        set => _config.Set("Midnight-Commander", "compute_totals", value);
+    }
+
+    public bool AutoSaveSetup
+    {
+        get => _config.GetBool("Midnight-Commander", "auto_save_setup", true);
+        set => _config.Set("Midnight-Commander", "auto_save_setup", value);
+    }
+
+    public bool ShowOutputOfCommands
+    {
+        get => _config.GetBool("Midnight-Commander", "show_output_of_cmds", true);
+        set => _config.Set("Midnight-Commander", "show_output_of_cmds", value);
+    }
+
+    public bool UseSubshell
+    {
+        get => _config.GetBool("Midnight-Commander", "use_subshell", true);
+        set => _config.Set("Midnight-Commander", "use_subshell", value);
+    }
+
+    public bool AskBeforeRunning
+    {
+        get => _config.GetBool("Midnight-Commander", "ask_before_run");
+        set => _config.Set("Midnight-Commander", "ask_before_run", value);
+    }
+
+    // --- Panel options (panel_options_box) ---
+    public bool ShowMiniStatus
+    {
+        get => _config.GetBool("Panels", "show_mini_info", true);
+        set => _config.Set("Panels", "show_mini_info", value);
+    }
+
+    public bool LynxLikeMotion
+    {
+        get => _config.GetBool("Panels", "navigate_with_arrows", true);
+        set => _config.Set("Panels", "navigate_with_arrows", value);
+    }
+
+    public bool ShowScrollbar
+    {
+        get => _config.GetBool("Panels", "show_scrollbar");
+        set => _config.Set("Panels", "show_scrollbar", value);
+    }
+
+    public bool HighlightFiles
+    {
+        get => _config.GetBool("Panels", "highlight_files_by_attributes");
+        set => _config.Set("Panels", "highlight_files_by_attributes", value);
+    }
+
+    public bool MixAllFiles
+    {
+        get => _config.GetBool("Panels", "mix_all_files");
+        set => _config.Set("Panels", "mix_all_files", value);
+    }
+
+    public bool QuickSearchCaseSensitive
+    {
+        get => _config.GetBool("Panels", "qsearch_case_sensitive");
+        set => _config.Set("Panels", "qsearch_case_sensitive", value);
+    }
+
+    public bool ShowFreeSpace
+    {
+        get => _config.GetBool("Panels", "show_free_space", true);
+        set => _config.Set("Panels", "show_free_space", value);
+    }
+
+    // --- Layout (layout_box) ---
+    public bool ShowMenubar
+    {
+        get => _config.GetBool("Layout", "menubar_visible", true);
+        set => _config.Set("Layout", "menubar_visible", value);
+    }
+
+    public bool ShowCommandLine
+    {
+        get => _config.GetBool("Layout", "command_prompt", true);
+        set => _config.Set("Layout", "command_prompt", value);
+    }
+
+    public bool ShowKeyBar
+    {
+        get => _config.GetBool("Layout", "keybar_visible", true);
+        set => _config.Set("Layout", "keybar_visible", value);
+    }
+
     public void Save() => _config.Save();
 }
