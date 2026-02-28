@@ -6,6 +6,21 @@ namespace Mc.Ui.Helpers;
 /// </summary>
 internal static class ProcessHelper
 {
+    /// <summary>Run a shell command string detached (for extension associations). (#47)</summary>
+    public static void RunDetached(string command)
+    {
+        try
+        {
+            var psi = new System.Diagnostics.ProcessStartInfo("/bin/sh")
+            {
+                Arguments       = $"-c \"{command.Replace("\"", "\\\"")}\"",
+                UseShellExecute = false,
+            };
+            System.Diagnostics.Process.Start(psi);
+        }
+        catch { }
+    }
+
     /// <summary>Try to launch an external program with the given arguments.</summary>
     public static bool TryLaunchArgs(string executable, params string[] args)
     {

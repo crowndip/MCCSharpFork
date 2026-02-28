@@ -193,11 +193,20 @@ public sealed class CommandLineView : View
 
     public IReadOnlyList<string> History => _history;
 
+    public string Text => _input.Text?.ToString() ?? string.Empty;
+
     public void SetText(string text)
     {
         _input.Text = text;
         _input.CursorPosition = _input.Text?.Length ?? 0;
         _input.SetFocus();
+    }
+
+    /// <summary>Appends text to the command line (e.g. paste filename via Ctrl+Enter). (#8)</summary>
+    public void AppendText(string text)
+    {
+        var current = _input.Text?.ToString() ?? string.Empty;
+        SetText(current + text);
     }
 
     public void Focus() => _input.SetFocus();

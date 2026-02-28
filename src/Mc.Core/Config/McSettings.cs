@@ -73,6 +73,18 @@ public sealed class McSettings
         set => _config.Set("Midnight-Commander", "confirm_exit", value);
     }
 
+    public bool ConfirmMove  // #31
+    {
+        get => _config.GetBool("Midnight-Commander", "confirm_move", true);
+        set => _config.Set("Midnight-Commander", "confirm_move", value);
+    }
+
+    public bool ConfirmExecute  // #46
+    {
+        get => _config.GetBool("Midnight-Commander", "confirm_execute");
+        set => _config.Set("Midnight-Commander", "confirm_execute", value);
+    }
+
     public bool UseInternalEditor
     {
         get => _config.GetBool("Midnight-Commander", "use_internal_edit", true);

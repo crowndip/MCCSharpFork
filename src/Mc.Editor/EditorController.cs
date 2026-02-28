@@ -28,6 +28,11 @@ public sealed class EditorController
     public (int Line, int Column) CursorPosition => _buffer.OffsetToLineCol(_cursorOffset);
     public bool HasSelection => _selectionStart >= 0 && _selectionEnd > _selectionStart;
 
+    // Editor display options (from McSettings) (#23 #42)
+    public bool ShowLineNumbers { get; set; }
+    public int  TabWidth        { get; set; } = 4;
+    public bool ExpandTabs      { get; set; }
+
     public SyntaxHighlighter? Highlighter { get; private set; }
 
     public event EventHandler? Changed;
@@ -109,6 +114,53 @@ public sealed class EditorController
         Changed?.Invoke(this, EventArgs.Empty);
     }
 
+    /// <summary>Overwrite mode: replace the character under the cursor. (#22)</summary>
+    public void ReplaceChar(char ch)
+    {
+        if (_cursorOffset < _buffer.Length && _buffer[_cursorOffset] != '\n')
+        {
+            var old = _buffer[_cursorOffset].ToString();
+            RecordUndo(new DeleteOp(_cursorOffset, old));
+            _buffer.Delete(_cursorOffset);
+            RecordUndo(new InsertOp(_cursorOffset, ch.ToString()));
+            _buffer.Insert(_cursorOffset, ch);
+            _cursorOffset++;
+        }
+        else
+        {
+            InsertChar(ch);
+        }
+        Changed?.Invoke(this, EventArgs.Empty);
+    }
+
+    /// <summary>Insert newline and reproduce leading whitespace from the current line (auto-indent). (#24)</summary>
+    public void InsertNewlineWithIndent()
+    {
+        var (line, _) = _buffer.OffsetToLineCol(_cursorOffset);
+        var lineText  = _buffer.GetLine(line);
+        int indent    = 0;
+        while (indent < lineText.Length && (lineText[indent] == ' ' || lineText[indent] == '\t'))
+            indent++;
+        var whitespace = lineText[..indent];
+        InsertChar('\n');
+        InsertText(whitespace);
+    }
+
+    /// <summary>Insert tab as spaces when ExpandTabs is on, otherwise literal tab. (#42)</summary>
+    public void InsertTab()
+    {
+        if (ExpandTabs)
+        {
+            var (_, col) = _buffer.OffsetToLineCol(_cursorOffset);
+            int spaces   = TabWidth - (col % TabWidth);
+            InsertText(new string(' ', spaces));
+        }
+        else
+        {
+            InsertChar('\t');
+        }
+    }
+
     public void Backspace()
     {
         if (HasSelection) { DeleteSelection(); return; }
@@ -154,6 +206,13 @@ public sealed class EditorController
     public void StartSelection() => _selectionStart = _cursorOffset;
     public void ExtendSelection() => _selectionEnd = _cursorOffset;
     public void ClearSelection() { _selectionStart = -1; _selectionEnd = -1; }
+
+    /// <summary>Returns (start, end) byte offsets of the current selection, or (-1,-1). (#3)</summary>
+    public (int Start, int End) GetSelectionOffsets()
+    {
+        if (!HasSelection) return (-1, -1);
+        return (Math.Min(_selectionStart, _selectionEnd), Math.Max(_selectionStart, _selectionEnd));
+    }
 
     // --- Clipboard ---
 

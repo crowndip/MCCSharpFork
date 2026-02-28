@@ -12,6 +12,7 @@ public sealed class FindOptions
     public bool SkipHiddenDirs { get; set; }
     public bool CaseSensitive { get; set; }
     public bool ContentRegex { get; set; }
+    public string IgnoreDirs { get; set; } = string.Empty;  // #33
     public bool Confirmed { get; set; }
 }
 
@@ -69,6 +70,13 @@ public static class FindDialog
         var regexCb       = new CheckBox { X = 35, Y = 13, Text = "Use regex",                 CheckedState = CheckState.UnChecked, ColorScheme = McTheme.Dialog };
         d.Add(subDirsCb, followSymCb, skipHiddenCb, caseCb, regexCb);
 
+        // ── Ignore dirs (#33) ─────────────────────────────────────────
+        d.Add(new Label { X = 1, Y = 15, Text = "Ignore dirs (colon-separated):" });
+        var ignoreDirsInput = new TextField { X = 1, Y = 16, Width = 66, Height = 1, Text = string.Empty, ColorScheme = McTheme.Dialog };
+        d.Add(ignoreDirsInput);
+
+        d.Height = 20; // expand dialog to fit new row
+
         var ok = new Button { Text = "Find", IsDefault = true };
         ok.Accepting += (_, _) =>
         {
@@ -82,6 +90,7 @@ public static class FindDialog
                 SkipHiddenDirs  = skipHiddenCb.CheckedState == CheckState.Checked,
                 CaseSensitive   = caseCb.CheckedState       == CheckState.Checked,
                 ContentRegex    = regexCb.CheckedState      == CheckState.Checked,
+                IgnoreDirs      = ignoreDirsInput.Text?.ToString() ?? string.Empty, // #33
                 Confirmed = true,
             };
             Application.RequestStop(d);

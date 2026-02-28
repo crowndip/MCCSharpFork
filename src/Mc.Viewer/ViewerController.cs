@@ -33,6 +33,14 @@ public sealed class ViewerController : IDisposable
     public SearchOptions LastSearch { get; set; } = new();
     private long _lastSearchOffset;
 
+    // Last found match for highlighting (#15)
+    public long LastMatchOffset { get; private set; } = -1;
+    public int  LastMatchLength { get; private set; }
+
+    // Bookmarks (#34)
+    private readonly Dictionary<int, long> _bookmarks = new();
+    public IReadOnlyDictionary<int, long> Bookmarks => _bookmarks;
+
     public event EventHandler? Changed;
 
     public void LoadFile(string path)
@@ -168,10 +176,91 @@ public sealed class ViewerController : IDisposable
         if (result.Found)
         {
             _lastSearchOffset = result.Offset;
-            // Scroll to the match
+            LastMatchOffset   = result.Offset;  // #15
+            LastMatchLength   = result.Length;
         }
         LastSearch = opts;
+        Changed?.Invoke(this, EventArgs.Empty);
         return result;
+    }
+
+    /// <summary>Search backwards from current position. (#17)</summary>
+    public SearchResult FindPrev(SearchOptions opts)
+    {
+        if (string.IsNullOrEmpty(opts.Pattern)) return SearchResult.NotFound;
+
+        ISearchProvider provider = opts.Type switch
+        {
+            SearchType.Regex => new RegexSearchProvider(),
+            _ => new NormalSearchProvider(),
+        };
+
+        var text = GetText();
+        // Search from start to current position for last match
+        var startLimit = (int)Math.Max(0, _lastSearchOffset - 1);
+        SearchResult best = SearchResult.NotFound;
+        long searchFrom = 0;
+        while (true)
+        {
+            var r = provider.Search(text, opts, (int)searchFrom);
+            if (!r.Found || r.Offset >= startLimit) break;
+            best = r;
+            searchFrom = r.Offset + 1;
+        }
+
+        if (best.Found)
+        {
+            _lastSearchOffset = best.Offset;
+            LastMatchOffset   = best.Offset;  // #15
+            LastMatchLength   = best.Length;
+        }
+        LastSearch = opts;
+        Changed?.Invoke(this, EventArgs.Empty);
+        return best;
+    }
+
+    /// <summary>Go to a byte offset in the file (F5). (#16)</summary>
+    public void GotoOffset(long offset, int viewHeight, int viewWidth)
+    {
+        if (_data.Length == 0) return;
+        offset = Math.Clamp(offset, 0, _data.Length - 1);
+
+        if (Mode == ViewMode.Hex)
+        {
+            const int bytesPerRow = 16;
+            ScrollLine = (int)(offset / bytesPerRow);
+        }
+        else
+        {
+            var text = GetText();
+            var chars = text.AsSpan()[..(int)Math.Min(offset, text.Length)];
+            var line  = 0;
+            foreach (var c in chars) if (c == '\n') line++;
+            ScrollLine = Math.Max(0, line - viewHeight / 2);
+        }
+        LastMatchOffset = offset;
+        LastMatchLength = 1;
+        Changed?.Invoke(this, EventArgs.Empty);
+    }
+
+    // --- Bookmarks (#34) ---
+
+    public void SetBookmark(int slot) => _bookmarks[slot] = _lastSearchOffset;
+
+    public void GotoBookmark(int slot, int viewHeight, int viewWidth)
+    {
+        if (_bookmarks.TryGetValue(slot, out var offset))
+            GotoOffset(offset, viewHeight, viewWidth);
+    }
+
+    /// <summary>Converts a byte offset to the approximate scroll-line in text mode.</summary>
+    public int OffsetToLine(long offset, int viewWidth)
+    {
+        var text = GetText();
+        var up   = (int)Math.Min(offset, text.Length);
+        var line = 0;
+        foreach (var c in text.AsSpan()[..up]) if (c == '\n') line++;
+        return line;
     }
 
     private List<string> SplitLines(string text, int maxWidth)

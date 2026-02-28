@@ -36,8 +36,11 @@ public sealed class FilePanelView : View
     private string _quickSearch = string.Empty;
     private bool _quickSearchActive;
 
-    // Public option: show free disk space in status (from McSettings.ShowFreeSpace)
-    public bool ShowFreeSpace { get; set; } = true;
+    // Public options (set from McSettings after construction)
+    public bool ShowFreeSpace            { get; set; } = true;
+    public bool LynxLikeMotion          { get; set; } = true;   // #6
+    public bool MarkMovesCursor         { get; set; } = true;   // #7
+    public bool QuickSearchCaseSensitive { get; set; }          // #5
 
     public event EventHandler<FileEntry?>? EntryActivated;
     public event EventHandler<int>? CursorChanged;
@@ -84,6 +87,27 @@ public sealed class FilePanelView : View
 
     // --- Event handlers ---
 
+    private int HitTestEntry(MouseEventArgs e)
+    {
+        int clickY = e.Position.Y;
+        int h = Viewport.Height;
+        int fileAreaStart = 2;
+        int fileAreaEnd = h - 2;
+        if (clickY < fileAreaStart || clickY >= fileAreaEnd) return -1;
+
+        int idx = _scrollOffset + (clickY - fileAreaStart);
+        if (_listingMode == PanelListingMode.Brief)
+        {
+            int contentRows = ContentRows;
+            int innerWidth  = Viewport.Width - 2;
+            int colWidth    = (innerWidth - 1) / 2;
+            int col1StartX  = 1 + colWidth + 1;
+            if (e.Position.X >= col1StartX)
+                idx = _scrollOffset + contentRows + (clickY - fileAreaStart);
+        }
+        return (idx >= 0 && idx < _listing.Entries.Count) ? idx : -1;
+    }
+
     private void OnMouseClick(object? sender, MouseEventArgs e)
     {
         if (!_isActive)
@@ -92,31 +116,21 @@ public sealed class FilePanelView : View
             return;
         }
 
-        int clickY = e.Position.Y;
-        int h = Viewport.Height;
-        int fileAreaStart = 2;
-        int fileAreaEnd = h - 2;
+        var idx = HitTestEntry(e);
+        if (idx < 0) return;
 
-        if (clickY >= fileAreaStart && clickY < fileAreaEnd)
+        // Double-click activates the entry; single-click just moves cursor. (#35)
+        if (e.Flags.HasFlag(MouseFlags.Button1DoubleClicked))
         {
-            int idx = _scrollOffset + (clickY - fileAreaStart);
-            if (_listingMode == PanelListingMode.Brief)
-            {
-                // Two columns: right-column entries start at _scrollOffset + ContentRows
-                int contentRows = ContentRows;
-                int innerWidth  = Viewport.Width - 2;
-                int colWidth    = (innerWidth - 1) / 2;
-                int col1StartX  = 1 + colWidth + 1; // panel-local X of right column start
-                if (e.Position.X >= col1StartX)
-                    idx = _scrollOffset + contentRows + (clickY - fileAreaStart);
-            }
-            if (idx >= 0 && idx < _listing.Entries.Count)
-            {
-                _cursorIndex = idx;
-                UpdateStatus();
-                CursorChanged?.Invoke(this, _cursorIndex);
-                SetNeedsDraw();
-            }
+            _cursorIndex = idx;
+            EntryActivated?.Invoke(this, _listing.Entries[idx]);
+        }
+        else
+        {
+            _cursorIndex = idx;
+            UpdateStatus();
+            CursorChanged?.Invoke(this, _cursorIndex);
+            SetNeedsDraw();
         }
     }
 
@@ -486,9 +500,10 @@ public sealed class FilePanelView : View
     private void SearchInPanel()
     {
         var entries = _listing.Entries;
+        var cmp = QuickSearchCaseSensitive ? StringComparison.Ordinal : StringComparison.OrdinalIgnoreCase; // #5
         for (int i = 0; i < entries.Count; i++)
         {
-            if (entries[i].Name.StartsWith(_quickSearch, StringComparison.OrdinalIgnoreCase))
+            if (entries[i].Name.StartsWith(_quickSearch, cmp))
             {
                 if (_cursorIndex != i)
                 {
@@ -573,6 +588,19 @@ public sealed class FilePanelView : View
                 }
                 return true;
 
+            // Lynx-like motion (#6): Left = go to parent dir, Right on dir = enter it
+            case KeyCode.CursorLeft when LynxLikeMotion:
+                EntryActivated?.Invoke(this, _listing.Entries.FirstOrDefault(e => e.IsParentDir));
+                return true;
+
+            case KeyCode.CursorRight when LynxLikeMotion:
+            {
+                var entry = CurrentEntry;
+                if (entry != null && (entry.IsDirectory || entry.IsParentDir))
+                    EntryActivated?.Invoke(this, entry);
+                return true;
+            }
+
             case KeyCode.PageUp:
             {
                 int step = Math.Max(1, ContentRows);
@@ -655,7 +683,7 @@ public sealed class FilePanelView : View
     public void ToggleMark()
     {
         _listing.MarkFile(_cursorIndex);
-        if (_cursorIndex < _listing.Entries.Count - 1)
+        if (MarkMovesCursor && _cursorIndex < _listing.Entries.Count - 1) // #7
         {
             _cursorIndex++;
             EnsureCursorVisible();

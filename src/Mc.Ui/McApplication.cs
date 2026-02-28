@@ -212,6 +212,7 @@ public sealed class McApplication : Toplevel
         _leftPanelView.EntryActivated += OnPanelEntryActivated;
         _leftPanelView.BecameActive += (_, _) => SetActivePanel(_leftPanelView);
         _leftPanelView.IsActive = true;
+        ApplyPanelSettings(_leftPanelView);
 
         // Right panel overlaps the left panel's right border by 1 column so that
         // the shared divider is a single │ rather than a double ││. (#5)
@@ -223,6 +224,7 @@ public sealed class McApplication : Toplevel
         };
         _rightPanelView.EntryActivated += OnPanelEntryActivated;
         _rightPanelView.BecameActive += (_, _) => SetActivePanel(_rightPanelView);
+        ApplyPanelSettings(_rightPanelView);
 
         // Cursor-change hooks: update overlay when active-panel cursor moves
         _leftPanelView.CursorChanged  += (_, _) => { if (_rightMode != PanelDisplayMode.Normal) UpdateOverlay(false); };
@@ -289,6 +291,7 @@ public sealed class McApplication : Toplevel
                 case KeyCode.I: ToggleOverlayMode(PanelDisplayMode.Info);      return true; // Ctrl+X I → info panel
                 case KeyCode.T: ToggleOverlayMode(PanelDisplayMode.Tree);      return true; // Ctrl+X T → tree panel
                 case KeyCode.A: Chattr(); return true;                                       // Ctrl+X A → chattr
+                case KeyCode.P: PastePathToCommandLine(); return true;                       // Ctrl+X P → copy path to cmd line (#50)
             }
             return true; // consume unknown Ctrl+X subkey
         }
@@ -319,7 +322,50 @@ public sealed class McApplication : Toplevel
             case KeyCode.T when keyEvent.IsCtrl: OpenTerminalHere(); return true;
             case KeyCode.Insert: GetActivePanel().ToggleMark(); return true;
 
+            // Ctrl+Enter → paste filename to command line (#8)
+            case KeyCode.Enter when keyEvent.IsCtrl:
+                PasteFilenameToCommandLine();
+                return true;
+
+            // Ctrl+Shift+Enter → paste full path to command line (#37)
+            case KeyCode.Enter when keyEvent.IsCtrl && keyEvent.IsShift:
+                PastePathToCommandLine();
+                return true;
+
+            // Alt+. handled in default clause below (#11)
+
+            // Alt+I → sync inactive panel to active path (#12)
+            case KeyCode.I | KeyCode.AltMask:
+                SyncInactivePanelToActive();
+                return true;
+
+            // Alt+O → open other panel at current file's directory (#13)
+            case KeyCode.O | KeyCode.AltMask:
+                OpenOtherPanelAtCurrentDir();
+                return true;
+
+            // Alt+Y → go back in panel directory history (#9)
+            case KeyCode.Y | KeyCode.AltMask:
+                NavigatePanelBack();
+                return true;
+
+            // Alt+U → go forward in panel directory history (#9)
+            case KeyCode.U | KeyCode.AltMask:
+                NavigatePanelForward();
+                return true;
+
+            // Alt+Enter → show file info / properties (#45)
+            case KeyCode.Enter | KeyCode.AltMask:
+                ShowInfo();
+                return true;
+
             default:
+                // Alt+. → toggle hidden files (#11) — KeyCode.Period doesn't exist in TG2; match by rune value
+                if (keyEvent.IsAlt && keyEvent.AsRune.Value == '.')
+                {
+                    ToggleHiddenFiles();
+                    return true;
+                }
                 return base.OnKeyDown(keyEvent);
         }
     }
@@ -353,14 +399,103 @@ public sealed class McApplication : Toplevel
         _rightPanelView.Refresh();
     }
 
+    /// <summary>Pastes the current entry's filename into the command line (Ctrl+Enter). (#8)</summary>
+    private void PasteFilenameToCommandLine()
+    {
+        var entry = GetCurrentEntry();
+        if (entry == null) return;
+        var name = entry.IsParentDir ? ".." : entry.Name;
+        _commandLine.AppendText(name);
+    }
+
+    /// <summary>Pastes the current entry's full path into the command line (Ctrl+X P / Ctrl+Shift+Enter). (#37 #50)</summary>
+    private void PastePathToCommandLine()
+    {
+        var entry = GetCurrentEntry();
+        var path = entry != null
+            ? entry.FullPath.Path
+            : _controller.ActivePanel.CurrentPath.Path;
+        _commandLine.AppendText(path);
+    }
+
+    /// <summary>Toggles display of hidden (dot) files via Alt+. (#11)</summary>
+    private void ToggleHiddenFiles()
+    {
+        _settings.ShowHiddenFiles = !_settings.ShowHiddenFiles;
+        _settings.Save();
+        _controller.LeftPanel.Reload();
+        _controller.RightPanel.Reload();
+    }
+
+    /// <summary>Synchronises the inactive panel to the active panel's current path (Alt+I). (#12)</summary>
+    private void SyncInactivePanelToActive()
+    {
+        var activePath = _controller.ActivePanel.CurrentPath;
+        _controller.InactivePanel.Load(activePath);
+    }
+
+    /// <summary>Navigates the other panel to the directory of the current file (Alt+O). (#13)</summary>
+    private void OpenOtherPanelAtCurrentDir()
+    {
+        var entry = GetCurrentEntry();
+        if (entry == null) return;
+        var dir = entry.IsDirectory || entry.IsParentDir
+            ? entry.FullPath
+            : VfsPath.FromLocal(Path.GetDirectoryName(entry.FullPath.Path) ?? entry.FullPath.Path);
+        _controller.InactivePanel.Load(dir);
+    }
+
+    /// <summary>Goes back in the active panel's directory history (Alt+Y). (#9)</summary>
+    private void NavigatePanelBack()
+    {
+        if (_controller.ActivePanel.CanGoBack)
+            _controller.ActivePanel.GoBack();
+    }
+
+    /// <summary>Goes forward in the active panel's directory history (Alt+U). (#9)</summary>
+    private void NavigatePanelForward()
+    {
+        if (_controller.ActivePanel.CanGoForward)
+            _controller.ActivePanel.GoForward();
+    }
+
+    /// <summary>Push McSettings values into both panel views. Called after settings change.</summary>
+    private void ApplyPanelSettings(FilePanelView panel)  // #5 #6 #7
+    {
+        panel.ShowFreeSpace             = _settings.ShowFreeSpace;
+        panel.LynxLikeMotion           = _settings.LynxLikeMotion;
+        panel.MarkMovesCursor          = _settings.MarkMovesCursor;
+        panel.QuickSearchCaseSensitive = _settings.QuickSearchCaseSensitive;
+    }
+
     private void OnPanelEntryActivated(object? sender, FileEntry? entry)
     {
         if (entry == null) return;
         if (entry.IsDirectory || entry.IsParentDir)
         {
             _controller.NavigateTo(entry.FullPath);
+            return;
         }
-        else if (_settings.UseInternalViewer)
+
+        // Archive VFS: enter ZIP/TAR archives as virtual directories (#20)
+        var ext = Path.GetExtension(entry.Name).ToLowerInvariant();
+        var archivePath = TryGetArchiveVfsPath(entry.FullPath.Path, ext);
+        if (archivePath != null)
+        {
+            _controller.NavigateTo(archivePath);
+            return;
+        }
+
+        // Extension associations take priority over the internal viewer (#47)
+        var openCmd = _controller.Extensions.GetOpenCommand(entry.Name);
+        if (openCmd != null)
+        {
+            var expanded = _controller.Extensions.ExpandCommand(openCmd, entry.FullPath.Path);
+            ProcessHelper.RunDetached(expanded);
+            return;
+        }
+
+        if (_settings.UseInternalViewer)
         {
             ViewFile(entry.FullPath.Path);
         }
@@ -369,6 +504,17 @@ public sealed class McApplication : Toplevel
             _controller.OpenEntry(entry);
         }
     }
+
+    /// <summary>Returns a VFS path for browsing inside an archive file, or null if not an archive. (#20)</summary>
+    private static VfsPath? TryGetArchiveVfsPath(string filePath, string ext) => ext switch
+    {
+        ".zip"                 => new VfsPath("zip",  null, null, null, null, filePath + "|"),
+        ".tar"                 => new VfsPath("tar",  null, null, null, null, filePath + "|"),
+        ".tgz" or ".tar.gz"   => new VfsPath("tar",  null, null, null, null, filePath + "|"),
+        ".tar.bz2" or ".tbz2" => new VfsPath("tar",  null, null, null, null, filePath + "|"),
+        ".tar.xz"  or ".txz"  => new VfsPath("tar",  null, null, null, null, filePath + "|"),
+        _                      => null,
+    };
 
     // --- File operations ---
 
@@ -950,6 +1096,12 @@ public sealed class McApplication : Toplevel
                         opts.CaseSensitive ? System.Text.RegularExpressions.RegexOptions.None
                                            : System.Text.RegularExpressions.RegexOptions.IgnoreCase);
 
+                // Build set of ignored directory names (#33)
+                var ignoredDirNames = new HashSet<string>(
+                    (opts.IgnoreDirs ?? string.Empty)
+                        .Split(':', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries),
+                    StringComparer.OrdinalIgnoreCase);
+
                 // Build enumerable, optionally skipping hidden dirs and following symlinks
                 IEnumerable<string> EnumerateFiles(string root)
                 {
@@ -971,8 +1123,11 @@ public sealed class McApplication : Toplevel
                     foreach (var dir in dirs)
                     {
                         if (token.IsCancellationRequested) yield break;
+                        var dirName = Path.GetFileName(dir);
                         // Skip hidden directories (names starting with '.') when requested
-                        if (opts.SkipHiddenDirs && Path.GetFileName(dir).StartsWith('.')) continue;
+                        if (opts.SkipHiddenDirs && dirName.StartsWith('.')) continue;
+                        // Skip ignored directories (#33)
+                        if (ignoredDirNames.Count > 0 && ignoredDirNames.Contains(dirName)) continue;
                         // Skip symlinked directories unless FollowSymlinks
                         if (!opts.FollowSymlinks && new DirectoryInfo(dir).Attributes.HasFlag(FileAttributes.ReparsePoint))
                             continue;
@@ -2301,14 +2456,32 @@ public sealed class McApplication : Toplevel
 
         if (string.IsNullOrWhiteSpace(chosenCommand)) return;
 
-        // Macro expansion (%f %d %D %b %e) — matching original MC macros
-        var fileEntry = GetCurrentEntry();
-        var cmd = chosenCommand
+        // Macro expansion — matches original MC expand_format() (#18)
+        var fileEntry   = GetCurrentEntry();
+        var markedFiles = _controller.ActivePanel.GetMarkedEntries();
+
+        // %{Prompt} — interactive prompt replacement
+        var cmd = System.Text.RegularExpressions.Regex.Replace(chosenCommand,
+            @"%\{([^}]*)\}",
+            m =>
+            {
+                var promptText = m.Groups[1].Value;
+                return InputDialog.Show("User menu prompt", promptText, string.Empty) ?? string.Empty;
+            });
+
+        // %s / %t — space-separated list of tagged/marked files (or current file if none marked)
+        var taggedList = markedFiles.Count > 0
+            ? string.Join(" ", markedFiles.Select(e => $"\"{e.FullPath.Path}\""))
+            : (fileEntry != null ? $"\"{fileEntry.FullPath.Path}\"" : string.Empty);
+
+        cmd = cmd
             .Replace("%f",  fileEntry?.FullPath.Path ?? string.Empty)
             .Replace("%b",  Path.GetFileNameWithoutExtension(fileEntry?.Name ?? string.Empty))
             .Replace("%e",  Path.GetExtension(fileEntry?.Name ?? string.Empty).TrimStart('.'))
             .Replace("%d",  _controller.ActivePanel.CurrentPath.Path)
-            .Replace("%D",  _controller.InactivePanel.CurrentPath.Path);
+            .Replace("%D",  _controller.InactivePanel.CurrentPath.Path)
+            .Replace("%s",  taggedList)   // #18
+            .Replace("%t",  taggedList);  // #18
 
         ExecuteUserMenuCommand(cmd);
     }
@@ -2413,7 +2586,7 @@ public sealed class McApplication : Toplevel
     ///   = ...         — same semantics as +
     /// Multiple space-separated clauses are ANDed (basic subset).
     /// </summary>
-    private static bool EvaluateUserMenuCondition(string condition, string fileName, string dir)
+    private bool EvaluateUserMenuCondition(string condition, string fileName, string dir)
     {
         // Strip the leading '+' or '=' and whitespace
         var expr = condition.TrimStart('+', '=').Trim();
@@ -2424,7 +2597,7 @@ public sealed class McApplication : Toplevel
         return negate ? !result : result;
     }
 
-    private static bool EvaluateSingleCondition(string expr, string fileName, string dir)
+    private bool EvaluateSingleCondition(string expr, string fileName, string dir)
     {
         // Tokenise: first char is the type, rest is the pattern
         if (expr.Length < 3) return true; // malformed → show entry
@@ -2435,7 +2608,7 @@ public sealed class McApplication : Toplevel
         {
             'f' => MatchShellPattern(fileName, pattern),
             'd' => MatchShellPattern(dir,      pattern),
-            't' => true, // tag condition — not tracked; always show
+            't' => _controller.ActivePanel.MarkedCount > 0, // #39 true only when files are tagged
             _   => true, // unknown type → show entry
         };
     }
@@ -2482,6 +2655,10 @@ public sealed class McApplication : Toplevel
         {
             try { File.Delete(tmpScript); } catch { }
         }
+
+        // Press Enter to continue — matches original MC execute_menu_command() (#19)
+        Console.Write("\nPress Enter to continue...");
+        Console.ReadLine();
 
         Application.Driver?.Init();
         Application.LayoutAndDraw(true);
@@ -2936,6 +3113,9 @@ public sealed class McApplication : Toplevel
             _settings.QuickSearchCaseSensitive = caseSensitive.CheckedState == CheckState.Checked;
             _settings.ShowFreeSpace            = freeSpace.CheckedState     == CheckState.Checked;
             _settings.Save();
+            // Apply live settings to panels (#5 #6 #7)
+            ApplyPanelSettings(_leftPanelView);
+            ApplyPanelSettings(_rightPanelView);
             // Apply panel reload for hidden/backup file visibility change
             _controller.LeftPanel.Reload();
             _controller.RightPanel.Reload();
@@ -3143,42 +3323,35 @@ public sealed class McApplication : Toplevel
         {
             Title = "Confirmation",
             Width = 50,
-            Height = 10,
+            Height = 12,
             ColorScheme = McTheme.Dialog,
         };
 
-        var confirmDelete = new CheckBox
+        CheckBox CB(int y, string label, bool val) => new CheckBox
         {
-            X = 2, Y = 1,
-            Text = "Confirm delete",
-            CheckedState = _settings.ConfirmDelete ? CheckState.Checked : CheckState.UnChecked,
+            X = 2, Y = y, Text = label,
+            CheckedState = val ? CheckState.Checked : CheckState.UnChecked,
             ColorScheme = McTheme.Dialog,
         };
-        var confirmOverwrite = new CheckBox
-        {
-            X = 2, Y = 2,
-            Text = "Confirm overwrite",
-            CheckedState = _settings.ConfirmOverwrite ? CheckState.Checked : CheckState.UnChecked,
-            ColorScheme = McTheme.Dialog,
-        };
-        var confirmExit = new CheckBox
-        {
-            X = 2, Y = 3,
-            Text = "Confirm exit",
-            CheckedState = _settings.ConfirmExit ? CheckState.Checked : CheckState.UnChecked,
-            ColorScheme = McTheme.Dialog,
-        };
-        d.Add(confirmDelete, confirmOverwrite, confirmExit);
+        var confirmDelete    = CB(1, "Confirm delete",    _settings.ConfirmDelete);
+        var confirmOverwrite = CB(2, "Confirm overwrite", _settings.ConfirmOverwrite);
+        var confirmMove      = CB(3, "Confirm move",      _settings.ConfirmMove);    // #31
+        var confirmExec      = CB(4, "Confirm execute",   _settings.ConfirmExecute); // #46
+        var confirmExit      = CB(5, "Confirm exit",      _settings.ConfirmExit);
+        d.Add(confirmDelete, confirmOverwrite, confirmMove, confirmExec, confirmExit);
 
-        var ok = new Button { X = Pos.Center() - 8, Y = 6, Text = "OK", IsDefault = true };
+        var ok = new Button { Text = "OK", IsDefault = true };
         ok.Accepting += (_, _) =>
         {
-            _settings.ConfirmDelete    = confirmDelete.CheckedState == CheckState.Checked;
+            _settings.ConfirmDelete    = confirmDelete.CheckedState    == CheckState.Checked;
             _settings.ConfirmOverwrite = confirmOverwrite.CheckedState == CheckState.Checked;
-            _settings.ConfirmExit      = confirmExit.CheckedState == CheckState.Checked;
+            _settings.ConfirmMove      = confirmMove.CheckedState      == CheckState.Checked;
+            _settings.ConfirmExecute   = confirmExec.CheckedState      == CheckState.Checked;
+            _settings.ConfirmExit      = confirmExit.CheckedState      == CheckState.Checked;
+            _settings.Save();
             Application.RequestStop(d);
         };
-        var cancel = new Button { X = Pos.Center() + 2, Y = 6, Text = "Cancel" };
+        var cancel = new Button { Text = "Cancel" };
         cancel.Accepting += (_, _) => Application.RequestStop(d);
         d.AddButton(ok); d.AddButton(cancel);
         Application.Run(d); d.Dispose();
@@ -3250,20 +3423,61 @@ public sealed class McApplication : Toplevel
         Application.Run(d); d.Dispose();
     }
 
-    /// <summary>Apply show/hide layout settings to the live UI elements.</summary>
+    /// <summary>Apply show/hide and split-direction layout settings to the live UI elements. (#10)</summary>
     private void ApplyLayoutSettings()
     {
         _menuBar.Visible     = _settings.ShowMenubar;
         _commandLine.Visible = _settings.ShowCommandLine;
         _buttonBar.Visible   = _settings.ShowKeyBar;
 
-        // Adjust panel split ratio
         var pct = _settings.PanelSplitRatio;
-        _leftPanelView.Width  = Dim.Percent(pct);
-        _rightPanelView.X     = Pos.Right(_leftPanelView);
-        _rightPanelView.Width = Dim.Fill();
-        _leftOverlay.Width    = Dim.Percent(pct);
-        _rightOverlay.X       = Pos.Right(_leftPanelView);
+
+        if (_settings.HorizontalSplit)
+        {
+            // Top/bottom layout (#10)
+            _leftPanelView.X      = 0;
+            _leftPanelView.Y      = 1;
+            _leftPanelView.Width  = Dim.Fill();
+            _leftPanelView.Height = Dim.Percent(pct) - 1;
+
+            _rightPanelView.X      = 0;
+            _rightPanelView.Y      = Pos.Bottom(_leftPanelView) - 1; // share bottom/top border
+            _rightPanelView.Width  = Dim.Fill();
+            _rightPanelView.Height = Dim.Fill(2);
+
+            _leftOverlay.X      = 0;
+            _leftOverlay.Y      = 1;
+            _leftOverlay.Width  = Dim.Fill();
+            _leftOverlay.Height = Dim.Percent(pct) - 1;
+
+            _rightOverlay.X      = 0;
+            _rightOverlay.Y      = Pos.Bottom(_leftPanelView) - 1;
+            _rightOverlay.Width  = Dim.Fill();
+            _rightOverlay.Height = Dim.Fill(2);
+        }
+        else
+        {
+            // Side-by-side layout (original behaviour)
+            _leftPanelView.X      = 0;
+            _leftPanelView.Y      = 1;
+            _leftPanelView.Width  = Dim.Percent(pct);
+            _leftPanelView.Height = Dim.Fill(2);
+
+            _rightPanelView.X      = Pos.Right(_leftPanelView) - 1;
+            _rightPanelView.Y      = 1;
+            _rightPanelView.Width  = Dim.Fill();
+            _rightPanelView.Height = Dim.Fill(2);
+
+            _leftOverlay.X      = 0;
+            _leftOverlay.Y      = 1;
+            _leftOverlay.Width  = Dim.Percent(pct);
+            _leftOverlay.Height = Dim.Fill(2);
+
+            _rightOverlay.X      = Pos.Right(_leftPanelView) - 1;
+            _rightOverlay.Y      = 1;
+            _rightOverlay.Width  = Dim.Fill();
+            _rightOverlay.Height = Dim.Fill(2);
+        }
 
         Application.LayoutAndDraw(true);
     }

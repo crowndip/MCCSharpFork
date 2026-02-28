@@ -13,10 +13,17 @@ public sealed class DirectoryListing
     private List<FileEntry> _entries = [];
     private VfsPath _currentPath = VfsPath.FromLocal(Environment.CurrentDirectory);
 
+    // Navigation history — equivalent to dir_history in original MC panel.c (#9)
+    private readonly List<VfsPath> _history = [];
+    private int _historyIndex = -1;
+
     public VfsPath CurrentPath => _currentPath;
     public IReadOnlyList<FileEntry> Entries => _entries;
     public SortOptions Sort { get; } = new();
     public FilterOptions Filter { get; } = new();
+
+    public bool CanGoBack    => _historyIndex > 0;
+    public bool CanGoForward => _historyIndex < _history.Count - 1;
 
     // Aggregates
     public int TotalFiles { get; private set; }
@@ -33,7 +40,31 @@ public sealed class DirectoryListing
 
     public void Load(VfsPath path)
     {
+        // Push to history, discarding any forward entries (#9)
+        if (_historyIndex >= 0 && _history[_historyIndex] == path) { Reload(); return; }
+        if (_historyIndex < _history.Count - 1)
+            _history.RemoveRange(_historyIndex + 1, _history.Count - _historyIndex - 1);
+        _history.Add(path);
+        _historyIndex = _history.Count - 1;
         _currentPath = path;
+        Reload();
+    }
+
+    /// <summary>Navigate back in directory history (Alt+Y). (#9)</summary>
+    public void GoBack()
+    {
+        if (!CanGoBack) return;
+        _historyIndex--;
+        _currentPath = _history[_historyIndex];
+        Reload();
+    }
+
+    /// <summary>Navigate forward in directory history (Alt+U). (#9)</summary>
+    public void GoForward()
+    {
+        if (!CanGoForward) return;
+        _historyIndex++;
+        _currentPath = _history[_historyIndex];
         Reload();
     }
 
@@ -143,12 +174,21 @@ public sealed class DirectoryListing
 
             int cmp = Sort.Field switch
             {
-                SortField.Name => CompareNames(a.Name, b.Name),
-                SortField.Extension => string.Compare(a.Extension, b.Extension,
+                SortField.Name             => CompareNames(a.Name, b.Name),
+                SortField.Extension        => string.Compare(a.Extension, b.Extension,
                     Sort.CaseSensitive ? StringComparison.Ordinal : StringComparison.OrdinalIgnoreCase),
-                SortField.Size => a.Size.CompareTo(b.Size),
+                SortField.Size             => a.Size.CompareTo(b.Size),
                 SortField.ModificationTime => a.ModificationTime.CompareTo(b.ModificationTime),
-                _ => CompareNames(a.Name, b.Name),
+                SortField.AccessTime       => a.DirEntry.AccessTime.CompareTo(b.DirEntry.AccessTime),     // #21
+                SortField.CreationTime     => a.DirEntry.CreationTime.CompareTo(b.DirEntry.CreationTime), // #21
+                SortField.Permissions      => a.Permissions.CompareTo(b.Permissions),                     // #21
+                SortField.Owner            => string.Compare(a.OwnerName, b.OwnerName,
+                    Sort.CaseSensitive ? StringComparison.Ordinal : StringComparison.OrdinalIgnoreCase),  // #21
+                SortField.Group            => string.Compare(a.GroupName, b.GroupName,
+                    Sort.CaseSensitive ? StringComparison.Ordinal : StringComparison.OrdinalIgnoreCase),  // #21
+                SortField.Inode            => a.DirEntry.Inode.CompareTo(b.DirEntry.Inode),              // #21
+                SortField.Unsorted         => 0,                                                           // #21
+                _                          => CompareNames(a.Name, b.Name),
             };
 
             return Sort.Descending ? -cmp : cmp;
