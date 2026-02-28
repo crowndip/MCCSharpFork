@@ -64,10 +64,10 @@ These round out the experience but have workarounds or limited daily impact.
 | 30 | `[x]` | **Encoding — full iconv list** | ~~Hardcoded list of 16 encodings.~~ Fixed: uses `System.Text.Encoding.GetEncodings()` for the full .NET-registered list; preferred encodings first, rest alphabetically; filter field for quick search. | `lib/charsets.c` |
 | 31 | `[ ]` | **Options → Appearance / Skins** | Currently shows "not implemented". Original MC supports INI-based colour skin files from `~/.local/share/mc/skins/`. | `lib/skin/` |
 | 32 | `[ ]` | **Options → Learn keys** | Currently shows "not implemented". Original provides an interactive key-binding editor. | `src/learn.c` |
-| 33 | `[ ]` | **Options → Virtual FS settings** | Currently shows "not implemented". Original shows cache timeout, FTP proxy, anonymous password settings. | `src/vfs/setup.c` |
+| 33 | `[x]` | **Options → Virtual FS settings** | ~~Shows "not implemented".~~ Fixed: `ShowVfsSettingsDialog()` with VFS cache timeout, FTP anonymous password, FTP proxy host, and "Use passive mode" checkbox; persisted via McSettings. | `src/vfs/setup.c` |
 | 34 | `[x]` | **Background jobs dialog** | ~~Shows a static informational message.~~ Fixed as part of #22: ShowBackgroundJobs() now lists real BackgroundJob entries with name/status and a Kill button. | `src/background.c` — `jobs_cmd()` |
 | 35 | `[x]` | **Command history — inline in command line** | ~~History in a separate dialog.~~ Fixed: Ctrl+H or Up-on-empty-input pops up an inline `Window` with a `ListView` of history (most-recent first) positioned just above the command line; Enter selects, Esc closes. | `src/filemanager/command.c` |
-| 36 | `[ ]` | **Active VFS list — full display** | Only panel paths shown. Original shows each mounted VFS with path + type + connection info, and "Free VFSs" to unmount. | `src/vfs/vfs.c` — `reselect_vfs()` |
+| 36 | `[x]` | **Active VFS list — full display** | ~~Only panel paths shown.~~ Fixed: display now shows scheme://[user@]host[:port]/path format with scheme type info; Browse navigates active panel; Free VFSs unmounts all remote connections. | `src/vfs/vfs.c` — `reselect_vfs()` |
 | 37 | `[ ]` | **Shell link (FISH protocol)** | Shows "not implemented". Original implements the FISH (FIles transferred over SHell) protocol for remote panel access over SSH. | `src/vfs/fish/` |
 | 38 | `[ ]` | **Screen list (multiple subshells)** | Shows "not implemented". Original MC supports multiple pseudo-terminal subshell screens, accessible via a screen-manager dialog. | `src/subshell/` |
 | 39 | `[x]` | **Chattr (ext2 file attributes)** | ~~Not present.~~ Fixed: Ctrl+X A shows a Chattr dialog querying `lsattr` for current attrs, displays checkboxes for common ext2 attributes (append-only, immutable, no-dump, etc.), and applies changes via `chattr +/-flags`. | `src/filemanager/chattr.c` |
@@ -81,5 +81,5 @@ These round out the experience but have workarounds or limited daily impact.
 |------|-------|------|-------------|-------------|
 | 1 — Critical | 11 | 11 | 0 | 0 |
 | 2 — Important | 12 | 12 | 0 | 0 |
-| 3 — Enhancements | 17 | 11 | 0 | 6 |
-| **Total** | **40** | **34** | **1** | **5** |
+| 3 — Enhancements | 17 | 13 | 0 | 4 |
+| **Total** | **40** | **36** | **1** | **3** |

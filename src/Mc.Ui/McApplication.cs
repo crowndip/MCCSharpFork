@@ -187,7 +187,7 @@ public sealed class McApplication : Toplevel
                     new("C_onfirmation...",  string.Empty, ShowConfirmationDialog),
                     new("_Appearance...",    string.Empty, () => NotImplemented("Appearance / skins")),
                     new("_Learn keys...",    string.Empty, () => NotImplemented("Learn keys")),
-                    new("_Virtual FS...",    string.Empty, () => NotImplemented("Virtual FS settings")),
+                    new("_Virtual FS...",    string.Empty, ShowVfsSettingsDialog),
                     null!,
                     new("_Save setup",       string.Empty, () => _settings.Save()),
                     null!,
@@ -2682,7 +2682,16 @@ public sealed class McApplication : Toplevel
             return;
         }
 
-        var display = entries.Select(e => e.Label).ToList();
+        // Build richer display: [side] scheme://[user@]host[:port]/path
+        var display = entries.Select(e =>
+        {
+            var p = e.Path;
+            var userPart  = p.User != null ? $"{p.User}@" : string.Empty;
+            var portPart  = p.Port.HasValue ? $":{p.Port}" : string.Empty;
+            var hostPart  = p.Host != null ? $"{userPart}{p.Host}{portPart}" : string.Empty;
+            var label     = hostPart.Length > 0 ? $"{p.Scheme}://{hostPart}{p.Path}" : p.ToString();
+            return e.Label[..8] + label;  // e.g. "[Left]  ftp://user@host/path"
+        }).ToList();
         VfsPath? chosen = null;
         bool freeAll  = false;
 
@@ -2920,6 +2929,65 @@ public sealed class McApplication : Toplevel
             // Apply panel reload for hidden/backup file visibility change
             _controller.LeftPanel.Reload();
             _controller.RightPanel.Reload();
+            Application.RequestStop(d);
+        };
+        var cancel = new Button { Text = "Cancel" };
+        cancel.Accepting += (_, _) => Application.RequestStop(d);
+        d.AddButton(ok); d.AddButton(cancel);
+        Application.Run(d); d.Dispose();
+    }
+
+    /// <summary>
+    /// VFS settings dialog (cache timeout, FTP settings).
+    /// Equivalent to configure_vfs() in the original C codebase.
+    /// </summary>
+    private void ShowVfsSettingsDialog()
+    {
+        var d = new Dialog
+        {
+            Title = "Virtual File System",
+            Width = 60,
+            Height = 14,
+            ColorScheme = McTheme.Dialog,
+        };
+
+        d.Add(new Label { X = 2, Y = 1, Text = "VFS cache timeout (sec):", ColorScheme = McTheme.Dialog });
+        var timeout = new TextField
+        {
+            X = 28, Y = 1, Width = 8,
+            Text = _settings.VfsCacheTimeout.ToString(),
+            ColorScheme = McTheme.Dialog,
+        };
+        d.Add(new Label { X = 2, Y = 3, Text = "FTP anonymous password:", ColorScheme = McTheme.Dialog });
+        var anonPass = new TextField
+        {
+            X = 28, Y = 3, Width = 28,
+            Text = _settings.FtpAnonymousPassword,
+            ColorScheme = McTheme.Dialog,
+        };
+        d.Add(new Label { X = 2, Y = 4, Text = "FTP proxy host:", ColorScheme = McTheme.Dialog });
+        var proxy = new TextField
+        {
+            X = 28, Y = 4, Width = 28,
+            Text = _settings.FtpProxy,
+            ColorScheme = McTheme.Dialog,
+        };
+        var passiveCb = new CheckBox
+        {
+            X = 2, Y = 6, Text = "Use FTP passive mode",
+            CheckedState = _settings.FtpPassiveMode ? CheckState.Checked : CheckState.UnChecked,
+            ColorScheme = McTheme.Dialog,
+        };
+        d.Add(timeout, anonPass, proxy, passiveCb);
+
+        var ok = new Button { Text = "OK", IsDefault = true };
+        ok.Accepting += (_, _) =>
+        {
+            if (int.TryParse(timeout.Text?.ToString(), out var t)) _settings.VfsCacheTimeout = t;
+            _settings.FtpAnonymousPassword = anonPass.Text?.ToString() ?? string.Empty;
+            _settings.FtpProxy             = proxy.Text?.ToString() ?? string.Empty;
+            _settings.FtpPassiveMode       = passiveCb.CheckedState == CheckState.Checked;
+            _settings.Save();
             Application.RequestStop(d);
         };
         var cancel = new Button { Text = "Cancel" };

@@ -227,5 +227,30 @@ public sealed class McSettings
         set => _config.Set("Layout", "keybar_visible", value);
     }
 
+    // --- VFS settings (vfs_setup.c) ---
+    public int VfsCacheTimeout
+    {
+        get => _config.GetInt("VFS", "vfs_timeout", 60);
+        set => _config.Set("VFS", "vfs_timeout", value);
+    }
+
+    public string FtpAnonymousPassword
+    {
+        get => _config.GetString("VFS", "ftp_anonymous_passwd", "anonymous@");
+        set => _config.Set("VFS", "ftp_anonymous_passwd", value);
+    }
+
+    public string FtpProxy
+    {
+        get => _config.GetString("VFS", "ftp_proxy", string.Empty);
+        set => _config.Set("VFS", "ftp_proxy", value);
+    }
+
+    public bool FtpPassiveMode
+    {
+        get => _config.GetBool("VFS", "ftp_use_passive_connections", true);
+        set => _config.Set("VFS", "ftp_use_passive_connections", value);
+    }
+
     public void Save() => _config.Save();
 }
