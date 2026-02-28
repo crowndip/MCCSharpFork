@@ -3,61 +3,124 @@ using Mc.Core.Config;
 namespace Mc.FileManager;
 
 /// <summary>
-/// Manages the directory hotlist (bookmarks).
+/// Manages the directory hotlist (bookmarks) with hierarchical group support.
 /// Equivalent to src/filemanager/hotlist.c in the original C codebase.
 /// </summary>
 public sealed class HotlistManager
 {
-    private readonly List<HotlistEntry> _entries = [];
+    // ── Model ────────────────────────────────────────────────────────────────
 
-    public record HotlistEntry(string Label, string Path, string? Group = null);
+    public abstract class HotlistItem
+    {
+        public string Label { get; set; } = string.Empty;
+    }
 
-    public IReadOnlyList<HotlistEntry> Entries => _entries.AsReadOnly();
+    public sealed class HotlistEntry : HotlistItem
+    {
+        public string Path { get; set; } = string.Empty;
+        public HotlistEntry(string label, string path) { Label = label; Path = path; }
+    }
+
+    public sealed class HotlistGroup : HotlistItem
+    {
+        public List<HotlistItem> Children { get; } = [];
+        public HotlistGroup(string label) { Label = label; }
+    }
+
+    // ── State ────────────────────────────────────────────────────────────────
+
+    public HotlistGroup Root { get; } = new HotlistGroup(string.Empty);
+
+    /// <summary>Flat list of all entries (for legacy callers).</summary>
+    public IReadOnlyList<HotlistEntry> Entries => GetAllEntries(Root);
 
     public HotlistManager()
     {
         LoadFromFile(ConfigPaths.HotlistFile);
     }
 
-    public void Add(string label, string path, string? group = null)
+    // ── Flat API (backwards-compat) ──────────────────────────────────────────
+
+    public void Add(string label, string path, string? groupLabel = null)
     {
-        _entries.RemoveAll(e => e.Path == path);
-        _entries.Add(new HotlistEntry(label, path, group));
+        var group = groupLabel == null ? Root : FindOrCreateGroup(Root, groupLabel);
+        group.Children.RemoveAll(i => i is HotlistEntry e && e.Path == path);
+        group.Children.Add(new HotlistEntry(label, path));
         Save();
     }
 
     public void Remove(string path)
     {
-        _entries.RemoveAll(e => e.Path == path);
+        RemoveEntry(Root, path);
         Save();
     }
 
-    public bool Contains(string path) => _entries.Any(e => e.Path == path);
+    public bool Contains(string path) => Entries.Any(e => e.Path == path);
 
-    public IReadOnlyList<HotlistEntry> GetGroup(string? group)
-        => _entries.Where(e => e.Group == group).ToList();
+    public IReadOnlyList<HotlistEntry> GetGroup(string? groupLabel)
+    {
+        if (groupLabel == null) return Root.Children.OfType<HotlistEntry>().ToList();
+        var g = FindGroup(Root, groupLabel);
+        return g?.Children.OfType<HotlistEntry>().ToList() ?? [];
+    }
+
+    // ── Group API ────────────────────────────────────────────────────────────
+
+    public HotlistGroup AddGroup(HotlistGroup parent, string label)
+    {
+        var g = new HotlistGroup(label);
+        parent.Children.Add(g);
+        Save();
+        return g;
+    }
+
+    public void RemoveItem(HotlistGroup parent, HotlistItem item)
+    {
+        parent.Children.Remove(item);
+        Save();
+    }
+
+    public void MoveItem(HotlistGroup source, HotlistGroup dest, HotlistItem item)
+    {
+        source.Children.Remove(item);
+        dest.Children.Add(item);
+        Save();
+    }
+
+    // ── Persistence ──────────────────────────────────────────────────────────
 
     public void LoadFromFile(string path)
     {
         if (!File.Exists(path)) return;
-        _entries.Clear();
+        Root.Children.Clear();
+        var lines = File.ReadAllLines(path);
+        int pos = 0;
+        ReadGroup(Root, lines, ref pos);
+    }
 
-        string? currentGroup = null;
-        foreach (var line in File.ReadAllLines(path))
+    private static void ReadGroup(HotlistGroup group, string[] lines, ref int pos)
+    {
+        while (pos < lines.Length)
         {
-            var trimmed = line.Trim();
+            var trimmed = lines[pos].Trim();
+            pos++;
+
             if (trimmed.StartsWith("GROUP "))
             {
-                currentGroup = trimmed[6..].Trim(' ', '"');
-                continue;
+                var label = trimmed[6..].Trim(' ', '"');
+                var sub = new HotlistGroup(label);
+                group.Children.Add(sub);
+                ReadGroup(sub, lines, ref pos);
             }
-            if (trimmed == "ENDGROUP") { currentGroup = null; continue; }
-            if (trimmed.StartsWith("ENTRY "))
+            else if (trimmed == "ENDGROUP")
             {
-                // ENTRY "label" "path"
+                return;
+            }
+            else if (trimmed.StartsWith("ENTRY "))
+            {
                 var parts = ParseQuotedParts(trimmed[6..]);
                 if (parts.Count >= 2)
-                    _entries.Add(new HotlistEntry(parts[0], parts[1], currentGroup));
+                    group.Children.Add(new HotlistEntry(parts[0], parts[1]));
             }
         }
     }
@@ -66,18 +129,73 @@ public sealed class HotlistManager
     {
         Directory.CreateDirectory(Path.GetDirectoryName(ConfigPaths.HotlistFile)!);
         using var writer = new StreamWriter(ConfigPaths.HotlistFile);
-        string? currentGroup = null;
-        foreach (var entry in _entries)
+        WriteGroup(writer, Root, 0);
+    }
+
+    private static void WriteGroup(StreamWriter w, HotlistGroup group, int depth)
+    {
+        var indent = new string(' ', depth * 2);
+        foreach (var item in group.Children)
         {
-            if (entry.Group != currentGroup)
+            if (item is HotlistEntry e)
             {
-                if (currentGroup != null) writer.WriteLine("ENDGROUP");
-                if (entry.Group != null) writer.WriteLine($"GROUP \"{entry.Group}\"");
-                currentGroup = entry.Group;
+                w.WriteLine($"{indent}ENTRY \"{e.Label}\" \"{e.Path}\"");
             }
-            writer.WriteLine($"ENTRY \"{entry.Label}\" \"{entry.Path}\"");
+            else if (item is HotlistGroup g)
+            {
+                w.WriteLine($"{indent}GROUP \"{g.Label}\"");
+                WriteGroup(w, g, depth + 1);
+                w.WriteLine($"{indent}ENDGROUP");
+            }
         }
-        if (currentGroup != null) writer.WriteLine("ENDGROUP");
+    }
+
+    // ── Helpers ───────────────────────────────────────────────────────────────
+
+    private static IReadOnlyList<HotlistEntry> GetAllEntries(HotlistGroup group)
+    {
+        var result = new List<HotlistEntry>();
+        foreach (var item in group.Children)
+        {
+            if (item is HotlistEntry e) result.Add(e);
+            else if (item is HotlistGroup g) result.AddRange(GetAllEntries(g));
+        }
+        return result;
+    }
+
+    private static bool RemoveEntry(HotlistGroup group, string path)
+    {
+        for (int i = 0; i < group.Children.Count; i++)
+        {
+            if (group.Children[i] is HotlistEntry e && e.Path == path)
+            { group.Children.RemoveAt(i); return true; }
+            if (group.Children[i] is HotlistGroup g && RemoveEntry(g, path))
+                return true;
+        }
+        return false;
+    }
+
+    private static HotlistGroup? FindGroup(HotlistGroup group, string label)
+    {
+        foreach (var item in group.Children)
+        {
+            if (item is HotlistGroup g)
+            {
+                if (g.Label == label) return g;
+                var found = FindGroup(g, label);
+                if (found != null) return found;
+            }
+        }
+        return null;
+    }
+
+    private HotlistGroup FindOrCreateGroup(HotlistGroup parent, string label)
+    {
+        var existing = FindGroup(parent, label);
+        if (existing != null) return existing;
+        var g = new HotlistGroup(label);
+        parent.Children.Add(g);
+        return g;
     }
 
     private static List<string> ParseQuotedParts(string s)
@@ -107,7 +225,6 @@ public sealed class HotlistManager
     }
 }
 
-// Forward reference to ConfigPaths (defined in Mc.Core)
 file static class ConfigPaths
 {
     public static string HotlistFile =>

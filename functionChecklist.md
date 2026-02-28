@@ -36,9 +36,9 @@ These are present in everyday original MC but not critical blockers.
 |---|--------|---------|-----------------|---------------------|
 | 12 | `[x]` | **External Panelize — inject into panel** | ~~Shell command output filenames are captured but NOT loaded into the panel; F5/F6/F8 cannot operate on the results.~~ Fixed: files from command output are now marked in the active panel; files outside the current directory are counted and reported. | `src/filemanager/cmd.c` — `external_panelize()` |
 | 13 | `[~]` | **Find file — start-dir browser + extra options** | ~~Editable start-dir field, "Follow symlinks", "Skip hidden dirs" added.~~ Still missing: tree-button to browse start directory; "Ignore dirs" list; "Again" button to restart search. | `src/filemanager/find.c` |
-| 14 | `[ ]` | **Hotlist — hierarchical groups** | Current hotlist is a flat list. Original stores `GROUP`/`ENTRY`/`ENDGROUP` blocks; needs "New group", "Move entry", "Up" (parent group) actions. | `src/vfs/path.c`, `lib/hotlist.c` |
-| 15 | `[ ]` | **Quick view panel mode (persistent)** | Quick view currently opens a full-screen one-shot viewer. Original MC switches the **inactive panel** to a live quick-view mode that updates automatically as the cursor moves in the active panel. | `src/filemanager/panel.c` — `WPanel::panel_format` = `list_quick_view` |
-| 16 | `[ ]` | **Info panel mode (persistent)** | Info currently shows a modal dialog. Original MC switches the panel to a **persistent Info widget** showing disk usage + file attributes for whatever the cursor is on. | `src/filemanager/info.c` |
+| 14 | `[x]` | **Hotlist — hierarchical groups** | ~~Current hotlist is a flat list.~~ Fixed: HotlistManager now has a full tree model (HotlistGroup/HotlistEntry) with recursive GROUP/ENTRY/ENDGROUP file format; HotlistDialog shows groups as `[/] Name` items with Enter/Go to for navigation, "Up" to return to parent, "New group" to create groups, breadcrumb path label. | `src/vfs/path.c`, `lib/hotlist.c` |
+| 15 | `[x]` | **Quick view panel mode (persistent)** | ~~Quick view opens a full-screen one-shot viewer.~~ Fixed: `Ctrl+X Q` toggles the inactive panel into a live Quick View overlay that reads up to 500 lines of the file under the cursor and updates automatically via `CursorChanged` event. Toggle off restores the file-listing panel. | `src/filemanager/panel.c` — `WPanel::panel_format` = `list_quick_view` |
+| 16 | `[x]` | **Info panel mode (persistent)** | ~~Info shows a modal dialog.~~ Fixed: `Ctrl+X I` toggles the inactive panel into a persistent Info overlay showing Name/Type/Size/Mode/Owner/Group/Mtime/Atime (+ symlink target); updates automatically as cursor moves. | `src/filemanager/info.c` |
 | 17 | `[ ]` | **Tree panel mode (persistent)** | Tree is a modal dialog. Original MC switches the panel to a **persistent navigable tree widget** with F2 (rescan), F8 (delete dir), and expand/collapse per node. | `src/filemanager/tree.c` |
 | 18 | `[ ]` | **File listing — Long / User-defined columns** | Only Full and Brief modes are offered. Original also has: Long (ls -l style), Half (2-column brief), User-defined (configurable column list). | `src/filemanager/panel.c` — `list_type` enum |
 | 19 | `[x]` | **Edit symlink — confirmation step** | ~~Original asks "Do you want to update the symlink?" before modifying the target. We edit without the secondary confirm.~~ Fixed: confirmation dialog added before recreating the symlink. | `src/filemanager/cmd.c` — `edit_symlink_cmd()` |
@@ -80,6 +80,6 @@ These round out the experience but have workarounds or limited daily impact.
 | Tier | Total | Done | In progress | Not started |
 |------|-------|------|-------------|-------------|
 | 1 — Critical | 11 | 11 | 0 | 0 |
-| 2 — Important | 12 | 6 | 1 | 5 |
+| 2 — Important | 12 | 9 | 1 | 2 |
 | 3 — Enhancements | 17 | 1 | 0 | 16 |
-| **Total** | **40** | **18** | **1** | **21** |
+| **Total** | **40** | **21** | **1** | **18** |

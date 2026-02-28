@@ -1,6 +1,7 @@
 using System.Collections.ObjectModel;
 using Mc.Core.Config;
 using Mc.Core.Models;
+using Mc.Core.Utilities;
 using Mc.Core.Vfs;
 using Mc.DiffViewer;
 using Mc.Editor;
@@ -36,6 +37,13 @@ public sealed class McApplication : Toplevel
     // Ctrl+X prefix key state (like the Ctrl+X submap in original MC)
     private bool _ctrlXPrefix = false;
 
+    // Panel overlay modes (Quick View / Info) — mirrors list_quick_view / info_panel in MC
+    private enum PanelDisplayMode { Normal, QuickView, Info }
+    private PanelDisplayMode _leftMode  = PanelDisplayMode.Normal;
+    private PanelDisplayMode _rightMode = PanelDisplayMode.Normal;
+    private View _leftOverlay  = null!;
+    private View _rightOverlay = null!;
+
     public McApplication(FileManagerController controller, McSettings settings)
     {
         _controller = controller;
@@ -63,8 +71,8 @@ public sealed class McApplication : Toplevel
         MenuItem[] PanelMenuItems(bool left) =>
         [
             new MenuItem("_File listing",      string.Empty, () => ShowListingFormatDialog(left)),
-            new MenuItem("_Quick view",        string.Empty, QuickViewCurrent),
-            new MenuItem("_Info",              string.Empty, ShowInfo),
+            new MenuItem("_Quick view",        "Ctrl+X Q",   () => ToggleOverlayMode(PanelDisplayMode.QuickView)),
+            new MenuItem("_Info",              "Ctrl+X I",   () => ToggleOverlayMode(PanelDisplayMode.Info)),
             new MenuItem("_Tree",              string.Empty, () => ShowTreeDialog(left)),
             new MenuItem("_Panelize",          string.Empty, ExternalPanelize),
             null!,
@@ -202,7 +210,28 @@ public sealed class McApplication : Toplevel
         _rightPanelView.EntryActivated += OnPanelEntryActivated;
         _rightPanelView.BecameActive += (_, _) => SetActivePanel(_rightPanelView);
 
-        Add(_leftPanelView, _rightPanelView);
+        // Cursor-change hooks: update overlay when active-panel cursor moves
+        _leftPanelView.CursorChanged  += (_, _) => { if (_rightMode != PanelDisplayMode.Normal) UpdateOverlay(false); };
+        _rightPanelView.CursorChanged += (_, _) => { if (_leftMode  != PanelDisplayMode.Normal) UpdateOverlay(true); };
+
+        // Overlay views (initially hidden; replace the inactive panel in Quick View / Info modes)
+        _leftOverlay = new View
+        {
+            X = 0, Y = 1,
+            Width  = Dim.Percent(50),
+            Height = Dim.Fill(2),
+            Visible = false,
+            ColorScheme = McTheme.Panel,
+        };
+        _rightOverlay = new View
+        {
+            X      = Pos.Right(_leftPanelView), Y = 1,
+            Width  = Dim.Fill(),
+            Height = Dim.Fill(2),
+            Visible = false,
+            ColorScheme = McTheme.Panel,
+        };
+        Add(_leftPanelView, _rightPanelView, _leftOverlay, _rightOverlay);
 
         // Command line
         _commandLine = new CommandLineView
@@ -242,6 +271,8 @@ public sealed class McApplication : Toplevel
             {
                 case KeyCode.C: Chmod(); return true;           // Ctrl+X C → chmod
                 case KeyCode.O: Chown(); return true;           // Ctrl+X O → chown
+                case KeyCode.Q: ToggleOverlayMode(PanelDisplayMode.QuickView); return true; // Ctrl+X Q → quick view
+                case KeyCode.I: ToggleOverlayMode(PanelDisplayMode.Info);      return true; // Ctrl+X I → info panel
             }
             return true; // consume unknown Ctrl+X subkey
         }
@@ -527,6 +558,116 @@ public sealed class McApplication : Toplevel
         var entry = GetCurrentEntry();
         if (entry == null) return;
         InfoDialog.Show(entry);
+    }
+
+    // ── Quick View / Info panel overlay (persistent panel mode) ───────────────
+    // Matches list_quick_view / list_info modes in original MC (src/filemanager/panel.c).
+    // Ctrl+X Q toggles Quick View; Ctrl+X I toggles Info on the INACTIVE panel.
+
+    private void ToggleOverlayMode(PanelDisplayMode mode)
+    {
+        bool inactiveIsLeft = _controller.ActivePanel == _controller.RightPanel;
+        if (inactiveIsLeft)
+        {
+            _leftMode = _leftMode == mode ? PanelDisplayMode.Normal : mode;
+            ApplyOverlay(true, _leftMode);
+        }
+        else
+        {
+            _rightMode = _rightMode == mode ? PanelDisplayMode.Normal : mode;
+            ApplyOverlay(false, _rightMode);
+        }
+    }
+
+    private void ApplyOverlay(bool isLeft, PanelDisplayMode mode)
+    {
+        var panelView = isLeft ? _leftPanelView : _rightPanelView;
+        var overlay   = isLeft ? _leftOverlay   : _rightOverlay;
+
+        panelView.Visible = mode == PanelDisplayMode.Normal;
+        overlay.Visible   = mode != PanelDisplayMode.Normal;
+
+        if (mode != PanelDisplayMode.Normal)
+            UpdateOverlay(isLeft);
+
+        Application.LayoutAndDraw(true);
+    }
+
+    private void UpdateOverlay(bool isLeft)
+    {
+        var overlay = isLeft ? _leftOverlay : _rightOverlay;
+        var mode    = isLeft ? _leftMode    : _rightMode;
+        var entry   = GetCurrentEntry(); // cursor in the ACTIVE panel
+
+        overlay.RemoveAll();
+
+        // Border title
+        var title = mode == PanelDisplayMode.QuickView ? "Quick View" : "Info";
+        overlay.Add(new Label { X = 0, Y = 0, Text = title, ColorScheme = McTheme.Panel });
+
+        if (mode == PanelDisplayMode.Info)
+            PopulateInfoOverlay(overlay, entry);
+        else
+            PopulateQuickViewOverlay(overlay, entry);
+
+        overlay.SetNeedsDraw();
+    }
+
+    private static void PopulateInfoOverlay(View overlay, FileEntry? entry)
+    {
+        if (entry == null || entry.IsParentDir)
+        {
+            overlay.Add(new Label { X = 1, Y = 2, Text = "No file selected." });
+            return;
+        }
+
+        var lines = new[]
+        {
+            $"Name:   {entry.Name}",
+            $"Type:   {(entry.IsDirectory ? "Directory" : entry.IsSymlink ? "Symlink" : "File")}",
+            $"Size:   {FileSizeFormatter.FormatExact(entry.Size)} B",
+            $"        ({FileSizeFormatter.Format(entry.Size)})",
+            $"Mode:   {PermissionsFormatter.Format(entry.Permissions, entry.IsDirectory, entry.IsSymlink)}",
+            $"Owner:  {entry.OwnerName ?? entry.DirEntry.OwnerUid.ToString()}",
+            $"Group:  {entry.GroupName ?? entry.DirEntry.OwnerGid.ToString()}",
+            $"Mtime:  {entry.ModificationTime:yyyy-MM-dd HH:mm}",
+            $"Atime:  {entry.DirEntry.AccessTime:yyyy-MM-dd HH:mm}",
+        };
+
+        if (entry.IsSymlink && entry.DirEntry.SymlinkTarget != null)
+        {
+            var all = lines.ToList();
+            all.Add($"→       {entry.DirEntry.SymlinkTarget}");
+            for (int i = 0; i < all.Count; i++)
+                overlay.Add(new Label { X = 1, Y = 2 + i, Text = all[i] });
+        }
+        else
+        {
+            for (int i = 0; i < lines.Length; i++)
+                overlay.Add(new Label { X = 1, Y = 2 + i, Text = lines[i] });
+        }
+    }
+
+    private static void PopulateQuickViewOverlay(View overlay, FileEntry? entry)
+    {
+        if (entry == null || entry.IsDirectory || entry.IsParentDir || entry.IsSymlink)
+        {
+            var msg = entry?.IsDirectory == true ? "(directory)" : "(no preview)";
+            overlay.Add(new Label { X = 1, Y = 2, Text = msg });
+            return;
+        }
+
+        try
+        {
+            // Read up to 500 lines for in-panel quick view
+            var lines = File.ReadLines(entry.FullPath.Path).Take(500).ToList();
+            for (int i = 0; i < lines.Count; i++)
+                overlay.Add(new Label { X = 1, Y = 2 + i, Text = lines[i] });
+        }
+        catch
+        {
+            overlay.Add(new Label { X = 1, Y = 2, Text = "(cannot read file)" });
+        }
     }
 
     private void Chmod()
