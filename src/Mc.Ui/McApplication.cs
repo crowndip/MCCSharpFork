@@ -79,16 +79,15 @@ public sealed class McApplication : Toplevel
 
         // Menu bar — mirrors original MC: Left | File | Command | [Tools] | Options | Right
         // Panel menu items are identical for Left and Right
+        // Panel menu matches original MC Left/Right menus — no duplicate items. (#24)
         MenuItem[] PanelMenuItems(bool left) =>
         [
-            new MenuItem("_File listing",      string.Empty, () => ShowListingFormatDialog(left)),
+            new MenuItem("_Listing format...", string.Empty, () => ShowListingFormatDialog(left)),
             new MenuItem("_Quick view",        "Ctrl+X Q",   () => ToggleOverlayMode(PanelDisplayMode.QuickView)),
             new MenuItem("_Info",              "Ctrl+X I",   () => ToggleOverlayMode(PanelDisplayMode.Info)),
             new MenuItem("_Tree",              "Ctrl+X T",   () => ToggleOverlayMode(PanelDisplayMode.Tree)),
-            new MenuItem("_Tree",              string.Empty, () => ShowTreeDialog(left)),
             new MenuItem("_Panelize",          string.Empty, ExternalPanelize),
             null!,
-            new MenuItem("_Listing format...", string.Empty, () => ShowListingFormatDialog(left)),
             new MenuItem("_Sort order...",     string.Empty, ShowSortDialog),
             new MenuItem("_Filter...",         string.Empty, () => ShowFilterDialog(left)),
             new MenuItem("_Encoding...",       string.Empty, () => ShowEncodingDialog(left)),
@@ -214,9 +213,11 @@ public sealed class McApplication : Toplevel
         _leftPanelView.BecameActive += (_, _) => SetActivePanel(_leftPanelView);
         _leftPanelView.IsActive = true;
 
+        // Right panel overlaps the left panel's right border by 1 column so that
+        // the shared divider is a single │ rather than a double ││. (#5)
         _rightPanelView = new FilePanelView(_controller.RightPanel)
         {
-            X = Pos.Right(_leftPanelView), Y = 1,
+            X = Pos.Right(_leftPanelView) - 1, Y = 1,
             Width = Dim.Fill(),
             Height = Dim.Fill(2),
         };
@@ -238,7 +239,7 @@ public sealed class McApplication : Toplevel
         };
         _rightOverlay = new View
         {
-            X      = Pos.Right(_leftPanelView), Y = 1,
+            X      = Pos.Right(_leftPanelView) - 1, Y = 1,
             Width  = Dim.Fill(),
             Height = Dim.Fill(2),
             Visible = false,

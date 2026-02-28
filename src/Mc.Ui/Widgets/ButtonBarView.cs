@@ -57,14 +57,19 @@ public sealed class ButtonBarView : View
         base.OnDrawingContent(context);
         var viewport = Viewport;
 
-        int x = 0;
         int totalWidth = viewport.Width;
-        int btnWidth = totalWidth / _buttons.Length;
+        int count      = _buttons.Length;
+        int baseWidth  = totalWidth / count;
+        int remainder  = totalWidth % count; // extra pixels distributed to last button (#35)
+        int x = 0;
 
-        for (int i = 0; i < _buttons.Length; i++)
+        for (int i = 0; i < count; i++)
         {
             var (label, _, _) = _buttons[i];
-            // Number part in bold/white on black
+            // Last button absorbs any remainder so bar fills exactly to screen edge
+            int btnWidth = i == count - 1 ? baseWidth + remainder : baseWidth;
+
+            // Digit part (F-key number) in white on black
             Driver.SetAttribute(McTheme.ButtonBar.HotNormal);
             int numLen = 0;
             while (numLen < label.Length && char.IsDigit(label[numLen])) numLen++;
@@ -75,9 +80,9 @@ public sealed class ButtonBarView : View
             // Label part in black on cyan
             Driver.SetAttribute(McTheme.ButtonBar.Normal);
             var text = label[numLen..];
-            if (text.Length > btnWidth - numLen - 1)
-                text = text[..(btnWidth - numLen - 1)];
-            Driver.AddStr(text.PadRight(btnWidth - numLen));
+            int labelRoom = btnWidth - numLen;
+            if (text.Length > labelRoom) text = text[..labelRoom];
+            Driver.AddStr(text.PadRight(labelRoom));
 
             x += btnWidth;
         }

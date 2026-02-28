@@ -13,22 +13,14 @@ public enum PanelListingMode
 {
     /// <summary>Name + size + modification time (default).</summary>
     Full,
-    /// <summary>Names only — more files visible at once.</summary>
+    /// <summary>Two-column names-only — more files visible at once.</summary>
     Brief,
     /// <summary>ls -l style: permissions + owner + group + size + date + name.</summary>
     Long,
 }
 
 /// <summary>
-/// One file panel drawn in classic MC style:
-///   ┌────── /path ──────┐
-///   │ Name   Size Modify │  ← column header
-///   │ ..                 │  ← entries
-///   │ /Documents         │
-///   │ file.c   1.2k Jan 1│
-///   │ file.txt  1234 Jan 2│ ← selected (black on cyan)
-///   │ info line          │  ← status
-///   └────────────────────┘
+/// One file panel drawn in classic MC style.
 /// Equivalent to WPanel in the original C codebase (lib/widget + src/filemanager/panel.c).
 /// </summary>
 public sealed class FilePanelView : View
@@ -43,6 +35,9 @@ public sealed class FilePanelView : View
     // Quick search state (equivalent to panel->searching in original MC panel.c)
     private string _quickSearch = string.Empty;
     private bool _quickSearchActive;
+
+    // Public option: show free disk space in status (from McSettings.ShowFreeSpace)
+    public bool ShowFreeSpace { get; set; } = true;
 
     public event EventHandler<FileEntry?>? EntryActivated;
     public event EventHandler<int>? CursorChanged;
@@ -97,15 +92,24 @@ public sealed class FilePanelView : View
             return;
         }
 
-        // Click inside the file-entry area (rows 2 .. h-3)
         int clickY = e.Position.Y;
         int h = Viewport.Height;
         int fileAreaStart = 2;
-        int fileAreaEnd = h - 2; // exclusive (h-2 = status line, h-1 = bottom border)
+        int fileAreaEnd = h - 2;
 
         if (clickY >= fileAreaStart && clickY < fileAreaEnd)
         {
             int idx = _scrollOffset + (clickY - fileAreaStart);
+            if (_listingMode == PanelListingMode.Brief)
+            {
+                // Two columns: right-column entries start at _scrollOffset + ContentRows
+                int contentRows = ContentRows;
+                int innerWidth  = Viewport.Width - 2;
+                int colWidth    = (innerWidth - 1) / 2;
+                int col1StartX  = 1 + colWidth + 1; // panel-local X of right column start
+                if (e.Position.X >= col1StartX)
+                    idx = _scrollOffset + contentRows + (clickY - fileAreaStart);
+            }
             if (idx >= 0 && idx < _listing.Entries.Count)
             {
                 _cursorIndex = idx;
@@ -142,10 +146,23 @@ public sealed class FilePanelView : View
     {
         int contentRows = ContentRows;
         if (contentRows <= 0) return;
-        if (_cursorIndex < _scrollOffset)
-            _scrollOffset = _cursorIndex;
-        else if (_cursorIndex >= _scrollOffset + contentRows)
-            _scrollOffset = _cursorIndex - contentRows + 1;
+
+        if (_listingMode == PanelListingMode.Brief)
+        {
+            // Brief (two-column) mode: visible range = _scrollOffset .. _scrollOffset + 2*contentRows - 1
+            int visible = 2 * contentRows;
+            if (_cursorIndex < _scrollOffset)
+                _scrollOffset = (_cursorIndex / contentRows) * contentRows;
+            else if (_cursorIndex >= _scrollOffset + visible)
+                _scrollOffset = ((_cursorIndex - visible + contentRows) / contentRows) * contentRows;
+        }
+        else
+        {
+            if (_cursorIndex < _scrollOffset)
+                _scrollOffset = _cursorIndex;
+            else if (_cursorIndex >= _scrollOffset + contentRows)
+                _scrollOffset = _cursorIndex - contentRows + 1;
+        }
     }
 
     private void UpdateStatus()
@@ -155,18 +172,41 @@ public sealed class FilePanelView : View
             _statusText = $" Quick search: {_quickSearch}_";
             return;
         }
+
         var marked = _listing.MarkedCount;
         if (marked > 0)
         {
-            _statusText = $" {marked} files, {FileSizeFormatter.Format(_listing.TotalMarkedSize)} marked";
+            // Singular/plural (#34)
+            string label = marked == 1 ? "file" : "files";
+            _statusText = $" {marked} {label}, {FileSizeFormatter.Format(_listing.TotalMarkedSize)} tagged";
         }
         else
         {
             var entry = CurrentEntry;
             if (entry != null && !entry.IsParentDir)
-                _statusText = $" {entry.Name}  {FileSizeFormatter.Format(entry.Size)}  {entry.ModificationTime:yyyy-MM-dd HH:mm}";
+            {
+                // Symlink: show target after " -> " (#20)
+                string extra = entry.IsSymlink && !string.IsNullOrEmpty(entry.SymlinkTarget)
+                    ? $" -> {entry.SymlinkTarget}" : string.Empty;
+                // Date in ls-style format (#12)
+                string dateStr = FormatDate(entry.ModificationTime, 12).TrimEnd();
+                _statusText = $" {entry.Name}{extra}  {FileSizeFormatter.Format(entry.Size)}  {dateStr}";
+            }
             else
-                _statusText = $" {_listing.TotalFiles} files, {_listing.TotalDirectories} dirs";
+            {
+                // No file selected: count + free space (#16, #25)
+                string freeStr = string.Empty;
+                if (ShowFreeSpace)
+                {
+                    try
+                    {
+                        var root = Path.GetPathRoot(_listing.CurrentPath.ToString()) ?? "/";
+                        freeStr = $", {FileSizeFormatter.Format(new DriveInfo(root).AvailableFreeSpace)} free";
+                    }
+                    catch { }
+                }
+                _statusText = $" {_listing.TotalFiles} files, {_listing.TotalDirectories} dirs{freeStr}";
+            }
         }
     }
 
@@ -188,21 +228,22 @@ public sealed class FilePanelView : View
 
     private void DrawBorderAndPath(int w, int h)
     {
-        var frameAttr = McTheme.PanelFrame;
-        // Active panel: path shown in bright header color; inactive: frame color (dimmer)
-        var pathAttr = _isActive ? McTheme.PanelHeader : McTheme.PanelFrame;
+        // Active panel frame is bright (PanelHeader); inactive is dimmed (PanelFrame).
+        // Applies to the ENTIRE border — corners, dashes, side bars, bottom. (#6, #27)
+        var frameAttr = _isActive ? McTheme.PanelHeader : McTheme.PanelFrame;
 
-        // ── Top border: ┌─── /path ───┐ ──────────────────────────────
-        var pathStr     = PathUtils.TildePath(_listing.CurrentPath.ToString());
+        // ── Top border: ┌─── ~/path/ ───┐  (trailing slash per #32) ──────
+        var pathStr = PathUtils.TildePath(_listing.CurrentPath.ToString());
+        if (!pathStr.EndsWith('/')) pathStr += '/';
+
         var displayPath = $" {pathStr} ";
-        int available   = w - 2; // width between the two corner chars
+        int available   = w - 2;
         int dashTotal   = available - displayPath.Length;
         int dashLeft, dashRight;
 
         if (dashTotal < 0)
         {
-            // Truncate path to fit
-            int maxPathLen = available - 2; // leave at least " " + " "
+            int maxPathLen = available - 2;
             if (maxPathLen > 0)
                 displayPath = " " + pathStr[..Math.Min(pathStr.Length, maxPathLen)] + " ";
             else
@@ -213,29 +254,24 @@ public sealed class FilePanelView : View
         }
         else
         {
-            dashLeft  = dashTotal / 2;
-            dashRight = dashTotal - dashLeft;
+            // Extra dash goes to LEFT so right is equal or shorter (#38)
+            dashRight = dashTotal / 2;
+            dashLeft  = dashTotal - dashRight;
         }
 
         Move(0, 0);
         Driver.SetAttribute(frameAttr);
-        Driver.AddStr("┌" + new string('─', dashLeft));
-        Driver.SetAttribute(pathAttr);
-        Driver.AddStr(displayPath);
-        Driver.SetAttribute(frameAttr);
-        Driver.AddStr(new string('─', dashRight) + "┐");
+        Driver.AddStr("┌" + new string('─', dashLeft) + displayPath + new string('─', dashRight) + "┐");
 
-        // ── Left and right side bars ──────────────────────────────────
+        // ── Side bars ────────────────────────────────────────────────────
         for (int y = 1; y < h - 1; y++)
         {
-            Driver.SetAttribute(frameAttr);
             Move(0,     y); Driver.AddStr("│");
             Move(w - 1, y); Driver.AddStr("│");
         }
 
-        // ── Bottom border: └────────────┘ ────────────────────────────
+        // ── Bottom border ─────────────────────────────────────────────────
         Move(0, h - 1);
-        Driver.SetAttribute(frameAttr);
         Driver.AddStr("└" + new string('─', w - 2) + "┘");
     }
 
@@ -247,15 +283,29 @@ public sealed class FilePanelView : View
 
         if (_listingMode == PanelListingMode.Brief)
         {
-            Driver.AddStr(" Name".PadRight(innerWidth));
+            // Two-column brief header: " Name │ Name" (#18)
+            int colWidth  = (innerWidth - 1) / 2;
+            int col2Width = innerWidth - 1 - colWidth;
+            var frameAttr = _isActive ? McTheme.PanelHeader : McTheme.PanelFrame;
+            Driver.AddStr(" Name".PadRight(colWidth));
+            Driver.SetAttribute(frameAttr);
+            Driver.AddStr("│");
+            Driver.SetAttribute(McTheme.PanelHeader);
+            Driver.AddStr(" Name".PadRight(col2Width));
             return;
         }
 
         (int nameWidth, int sizeWidth, int dateWidth) = ColumnWidths(innerWidth);
-        var header = " "
-            + "Name".PadRight(nameWidth)
-            + "Size".PadLeft(sizeWidth) + " "
-            + "Modify time".PadRight(dateWidth);
+        var sort = _listing.Sort;
+
+        // Sort direction indicator on active sort column (#9, #31)
+        string nameInd = sort.Field == SortField.Name             ? (sort.Descending ? "↓" : "↑") : string.Empty;
+        string sizeInd = sort.Field == SortField.Size             ? (sort.Descending ? "↓" : "↑") : string.Empty;
+        string dateInd = sort.Field == SortField.ModificationTime ? (sort.Descending ? "↓" : "↑") : string.Empty;
+
+        var header = (" Name" + nameInd).PadRight(nameWidth)
+                   + ("Size" + sizeInd).PadLeft(sizeWidth) + " "
+                   + ("Modify time" + dateInd).PadRight(dateWidth);
 
         if (header.Length > innerWidth) header = header[..innerWidth];
         Driver.AddStr(header.PadRight(innerWidth));
@@ -267,13 +317,19 @@ public sealed class FilePanelView : View
         int contentRows = h - 4;
         if (contentRows <= 0) return;
 
+        if (_listingMode == PanelListingMode.Brief)
+        {
+            DrawBriefEntries(innerWidth, contentRows);
+            return;
+        }
+
         var entries    = _listing.Entries;
         var normalAttr = McTheme.PanelFile;
 
         for (int row = 0; row < contentRows; row++)
         {
             int entryIdx = _scrollOffset + row;
-            int screenY  = row + 2; // 0=top border, 1=header, 2=first entry
+            int screenY  = row + 2;
 
             Move(1, screenY);
 
@@ -284,29 +340,62 @@ public sealed class FilePanelView : View
                 continue;
             }
 
-            var  entry    = entries[entryIdx];
-            bool isCursor = _isActive && entryIdx == _cursorIndex;
+            var entry = entries[entryIdx];
+            Driver.SetAttribute(GetEntryAttr(entry, entryIdx));
 
-            Terminal.Gui.Attribute attr;
-            if      (isCursor && entry.IsMarked) attr = McTheme.PanelMarkedCursor;
-            else if (isCursor)                   attr = McTheme.PanelCursor;
-            else if (entry.IsMarked)             attr = McTheme.PanelMarked;
-            else if (entry.IsDirectory || entry.IsParentDir) attr = McTheme.PanelDirectory;
-            else if (entry.IsSymlink)            attr = McTheme.PanelSymlink;
-            else if (entry.IsExecutable)         attr = McTheme.PanelExecutable;
-            else                                 attr = normalAttr;
-
-            Driver.SetAttribute(attr);
-            var text = _listingMode switch
-            {
-                PanelListingMode.Brief => FormatBriefEntry(entry, innerWidth),
-                PanelListingMode.Long  => FormatLongEntry(entry, innerWidth),
-                _                     => FormatEntry(entry, innerWidth),
-            };
+            var text = _listingMode == PanelListingMode.Long
+                ? FormatLongEntry(entry, innerWidth)
+                : FormatEntry(entry, innerWidth);
             Driver.AddStr(text);
-            // FormatEntry/FormatBriefEntry fills innerWidth-1 chars; pad the last cell
-            Driver.AddStr(" ");
         }
+    }
+
+    // Brief mode: two columns with │ separator (#4)
+    private void DrawBriefEntries(int innerWidth, int contentRows)
+    {
+        int colWidth  = (innerWidth - 1) / 2;
+        int col2Width = innerWidth - 1 - colWidth;
+        int sepX      = 1 + colWidth; // panel-local X of │ separator
+        var frameAttr = _isActive ? McTheme.PanelHeader : McTheme.PanelFrame;
+        var entries   = _listing.Entries;
+
+        for (int row = 0; row < contentRows; row++)
+        {
+            int screenY = row + 2;
+            DrawBriefCell(entries, _scrollOffset + row,               1,       screenY, colWidth);
+            Move(sepX, screenY); Driver.SetAttribute(frameAttr); Driver.AddStr("│");
+            DrawBriefCell(entries, _scrollOffset + contentRows + row, sepX + 1, screenY, col2Width);
+        }
+    }
+
+    private void DrawBriefCell(
+        IReadOnlyList<FileEntry> entries, int idx, int screenX, int screenY, int width)
+    {
+        Move(screenX, screenY);
+        if (idx >= entries.Count)
+        {
+            Driver.SetAttribute(McTheme.PanelFile);
+            Driver.AddStr(new string(' ', width));
+            return;
+        }
+        var entry = entries[idx];
+        Driver.SetAttribute(GetEntryAttr(entry, idx));
+        Driver.AddStr(FormatBriefCell(entry, width));
+    }
+
+    private Terminal.Gui.Attribute GetEntryAttr(FileEntry entry, int entryIdx)
+    {
+        bool activeCursor   = _isActive  && entryIdx == _cursorIndex;
+        bool inactiveCursor = !_isActive && entryIdx == _cursorIndex;
+
+        if      (activeCursor && entry.IsMarked)            return McTheme.PanelMarkedCursor;
+        else if (activeCursor)                              return McTheme.PanelCursor;
+        else if (inactiveCursor)                            return McTheme.PanelInactiveCursor; // (#8, #19)
+        else if (entry.IsMarked)                            return McTheme.PanelMarked;
+        else if (entry.IsDirectory || entry.IsParentDir)    return McTheme.PanelDirectory;
+        else if (entry.IsSymlink)                           return McTheme.PanelSymlink;
+        else if (entry.IsExecutable)                        return McTheme.PanelExecutable;
+        else                                                return McTheme.PanelFile;
     }
 
     private void DrawStatusLine(int w, int h)
@@ -326,8 +415,18 @@ public sealed class FilePanelView : View
     {
         const int sizeWidth = 8;
         const int dateWidth = 12;
-        int nameWidth = Math.Max(12, innerWidth - sizeWidth - dateWidth - 3);
+        int nameWidth = Math.Max(12, innerWidth - sizeWidth - dateWidth - 2);
         return (nameWidth, sizeWidth, dateWidth);
+    }
+
+    /// <summary>
+    /// ls -l style date: recent files show HH:MM; files older than 6 months show YYYY. (#10, #12)
+    /// </summary>
+    private static string FormatDate(DateTime dt, int width)
+    {
+        if (dt == DateTime.MinValue) return string.Empty.PadRight(width);
+        var fmt = dt > DateTime.Now.AddMonths(-6) ? "MMM dd HH:mm" : "MMM dd  yyyy";
+        return dt.ToString(fmt).PadRight(width);
     }
 
     private static string FormatEntry(FileEntry entry, int innerWidth)
@@ -336,23 +435,28 @@ public sealed class FilePanelView : View
 
         var marker = entry.IsMarked ? "*" : " ";
 
-        string name;
-        if      (entry.IsParentDir)  name = "..";
-        else if (entry.IsDirectory)  name = "/" + entry.Name;
-        else if (entry.IsSymlink)    name = "~" + entry.Name;
-        else                         name = entry.Name;
-
+        // No prefix chars for directories/symlinks — colour alone distinguishes them (#1, #2)
+        string name = entry.IsParentDir ? ".." : entry.Name;
         if (name.Length > nameWidth) name = name[..(nameWidth - 1)] + "~";
         name = name.PadRight(nameWidth);
 
-        var size = FileSizeFormatter.FormatPanelSize(entry.Size, entry.IsDirectory)
-                                    .PadLeft(sizeWidth);
-        var date = entry.ModificationTime == DateTime.MinValue
-            ? string.Empty.PadRight(dateWidth)
-            : entry.ModificationTime.ToString("MMM dd HH:mm").PadRight(dateWidth);
+        // Parent dir → <UP-DIR>; regular dirs → <DIR> (#7)
+        var size = (entry.IsParentDir ? "<UP-DIR>"
+                    : FileSizeFormatter.FormatPanelSize(entry.Size, entry.IsDirectory))
+                   .PadLeft(sizeWidth);
 
-        // Total: 1 + nameWidth + sizeWidth + 1 + dateWidth = innerWidth - 1
+        var date = FormatDate(entry.ModificationTime, dateWidth); // age-aware (#10)
+
         return $"{marker}{name}{size} {date}";
+    }
+
+    private static string FormatBriefCell(FileEntry entry, int width)
+    {
+        var marker = entry.IsMarked ? "*" : " ";
+        string name = entry.IsParentDir ? ".." : entry.Name; // no prefix chars (#1, #2)
+        int nameWidth = width - 1;
+        if (name.Length > nameWidth) name = name[..(nameWidth - 1)] + "~";
+        return marker + name.PadRight(nameWidth);
     }
 
     /// <summary>ls -l style: [*]perms owner group size date name</summary>
@@ -362,49 +466,23 @@ public sealed class FilePanelView : View
         var perms  = PermissionsFormatter.Format(entry.Permissions, entry.IsDirectory, entry.IsSymlink);
         var owner  = (entry.OwnerName ?? entry.DirEntry.OwnerUid.ToString()).PadRight(8)[..8];
         var group  = (entry.GroupName ?? entry.DirEntry.OwnerGid.ToString()).PadRight(8)[..8];
-        var size   = FileSizeFormatter.FormatPanelSize(entry.Size, entry.IsDirectory).PadLeft(8);
-        var date   = entry.ModificationTime == DateTime.MinValue
-            ? "           "
-            : entry.ModificationTime.ToString("MMM dd HH:mm");
+        // Parent dir → <UP-DIR> (#13)
+        var size   = (entry.IsParentDir ? "<UP-DIR>"
+                      : FileSizeFormatter.FormatPanelSize(entry.Size, entry.IsDirectory)).PadLeft(8);
+        var date   = FormatDate(entry.ModificationTime, 12); // age-aware (#10)
 
-        // prefix: 1+10+1+8+1+8+1+8+1+11 = 49 chars
-        const int prefixLen = 1 + 10 + 1 + 8 + 1 + 8 + 1 + 8 + 1 + 11 + 1; // 50
         var prefix = $"{marker}{perms} {owner} {group} {size} {date} ";
 
-        string name;
-        if      (entry.IsParentDir)  name = "..";
-        else if (entry.IsDirectory)  name = "/" + entry.Name;
-        else if (entry.IsSymlink)    name = "~" + entry.Name;
-        else                         name = entry.Name;
-
+        // No prefix chars for dirs/symlinks (#17)
+        string name = entry.IsParentDir ? ".." : entry.Name;
         int nameWidth = Math.Max(1, innerWidth - prefix.Length);
         if (name.Length > nameWidth) name = name[..(nameWidth - 1)] + "~";
 
         return (prefix + name).PadRight(innerWidth);
     }
 
-    private static string FormatBriefEntry(FileEntry entry, int innerWidth)
-    {
-        var marker = entry.IsMarked ? "*" : " ";
-        string name;
-        if      (entry.IsParentDir)  name = "..";
-        else if (entry.IsDirectory)  name = "/" + entry.Name;
-        else if (entry.IsSymlink)    name = "~" + entry.Name;
-        else                         name = entry.Name;
-
-        int nameWidth = innerWidth - 1; // 1 for marker
-        if (name.Length > nameWidth) name = name[..(nameWidth - 1)] + "~";
-        // Total: 1 + nameWidth = innerWidth; DrawFileEntries pads one extra space → innerWidth+1
-        // but that is fine because the right border is at column w-1
-        return marker + name.PadRight(nameWidth);
-    }
-
     // --- Quick search ---
 
-    /// <summary>
-    /// Searches panel entries for the first name starting with <see cref="_quickSearch"/>
-    /// and moves the cursor there.  Equivalent to panel_quick_search() in panel.c.
-    /// </summary>
     private void SearchInPanel()
     {
         var entries = _listing.Entries;
@@ -461,7 +539,6 @@ public sealed class FilePanelView : View
                     SearchInPanel();
                 return true;
             }
-            // Printable char: extend search buffer
             var rune = keyEvent.AsRune;
             if (rune.Value >= 32 && !keyEvent.IsCtrl && !keyEvent.IsAlt)
             {
@@ -469,7 +546,6 @@ public sealed class FilePanelView : View
                 SearchInPanel();
                 return true;
             }
-            // Any other key (navigation etc.) exits search and falls through
             ExitQuickSearch();
         }
 
@@ -549,7 +625,6 @@ public sealed class FilePanelView : View
                 return true;
 
             default:
-                // Activate quick search on any printable character (no Ctrl/Alt modifier)
                 if (_isActive)
                 {
                     var rune = keyEvent.AsRune;

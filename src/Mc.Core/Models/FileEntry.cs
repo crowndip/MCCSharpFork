@@ -30,4 +30,5 @@ public sealed class FileEntry
     public string Extension => DirEntry.Extension;
     public VfsPath FullPath => DirEntry.FullPath;
     public bool IsParentDir => DirEntry.IsParentDir;
+    public string? SymlinkTarget => DirEntry.SymlinkTarget;
 }

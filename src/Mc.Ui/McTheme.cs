@@ -22,10 +22,11 @@ public static class McTheme
     public static Terminal.Gui.Attribute PanelDirectory { get; private set; }
     public static Terminal.Gui.Attribute PanelExecutable { get; private set; }
     public static Terminal.Gui.Attribute PanelSymlink { get; private set; }
-    public static Terminal.Gui.Attribute PanelMarked { get; private set; }
-    public static Terminal.Gui.Attribute PanelCursor { get; private set; }
-    public static Terminal.Gui.Attribute PanelMarkedCursor { get; private set; }
-    public static Terminal.Gui.Attribute PanelStatus { get; private set; }
+    public static Terminal.Gui.Attribute PanelMarked         { get; private set; }
+    public static Terminal.Gui.Attribute PanelCursor         { get; private set; }
+    public static Terminal.Gui.Attribute PanelMarkedCursor   { get; private set; }
+    public static Terminal.Gui.Attribute PanelInactiveCursor { get; private set; }
+    public static Terminal.Gui.Attribute PanelStatus         { get; private set; }
 
     public static void ApplyDefault()
     {
@@ -103,9 +104,10 @@ public static class McTheme
         PanelExecutable   = new Terminal.Gui.Attribute(Color.BrightGreen,  Color.Blue);
         PanelSymlink      = new Terminal.Gui.Attribute(Color.Cyan,         Color.Blue);
         PanelMarked       = new Terminal.Gui.Attribute(Color.BrightYellow, Color.Blue);
-        PanelCursor       = new Terminal.Gui.Attribute(Color.Black,        Color.Cyan);
-        PanelMarkedCursor = new Terminal.Gui.Attribute(Color.BrightYellow, Color.Cyan);
-        PanelStatus       = new Terminal.Gui.Attribute(Color.Black,        Color.Cyan);
+        PanelCursor         = new Terminal.Gui.Attribute(Color.Black,        Color.Cyan);
+        PanelMarkedCursor   = new Terminal.Gui.Attribute(Color.BrightYellow, Color.Cyan);
+        PanelInactiveCursor = new Terminal.Gui.Attribute(Color.White,        Color.Blue);
+        PanelStatus         = new Terminal.Gui.Attribute(Color.Black,        Color.Cyan);
 
         // Apply to global colors
         Colors.ColorSchemes["Base"]   = Panel;
@@ -208,9 +210,10 @@ public static class McTheme
         PanelExecutable   = new Terminal.Gui.Attribute(exFg, pBg);
         PanelSymlink      = new Terminal.Gui.Attribute(syFg, pBg);
         PanelMarked       = new Terminal.Gui.Attribute(mkFg, pBg);
-        PanelCursor       = new Terminal.Gui.Attribute(sFg,  sBg);
-        PanelMarkedCursor = new Terminal.Gui.Attribute(mkFg, sBg);
-        PanelStatus       = new Terminal.Gui.Attribute(stFg, stBg);
+        PanelCursor         = new Terminal.Gui.Attribute(sFg,  sBg);
+        PanelMarkedCursor   = new Terminal.Gui.Attribute(mkFg, sBg);
+        PanelInactiveCursor = new Terminal.Gui.Attribute(drFg, pBg);
+        PanelStatus         = new Terminal.Gui.Attribute(stFg, stBg);
 
         Colors.ColorSchemes["Base"]   = Panel;
         Colors.ColorSchemes["Dialog"] = Dialog;

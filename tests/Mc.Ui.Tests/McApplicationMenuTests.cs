@@ -80,12 +80,11 @@ public sealed class McApplicationMenuTests
     // ==================================================================
 
     [Theory]
-    [InlineData("File listing")]
+    [InlineData("Listing format")]
     [InlineData("Quick view")]
     [InlineData("Info")]
     [InlineData("Tree")]
     [InlineData("Panelize")]
-    [InlineData("Listing format")]
     [InlineData("Sort order")]
     [InlineData("Filter")]
     [InlineData("Encoding")]
@@ -307,12 +306,11 @@ public sealed class McApplicationMenuTests
     // ==================================================================
 
     [Theory]
-    [InlineData("File listing")]
+    [InlineData("Listing format")]
     [InlineData("Quick view")]
     [InlineData("Info")]
     [InlineData("Tree")]
     [InlineData("Panelize")]
-    [InlineData("Listing format")]
     [InlineData("Sort order")]
     [InlineData("Filter")]
     [InlineData("Encoding")]
