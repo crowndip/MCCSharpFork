@@ -14,6 +14,7 @@ public sealed class CopyMoveOptions
     public bool StableSymlinks { get; set; }
     public bool OverwriteAll { get; set; }
     public bool SkipAll { get; set; }
+    public bool RunInBackground { get; set; }
 }
 
 /// <summary>
@@ -118,10 +119,29 @@ public static class CopyMoveDialog
             Application.RequestStop(d);
         };
 
+        var background = new Button { Text = "Background" };
+        background.Accepting += (_, _) =>
+        {
+            result = new CopyMoveOptions
+            {
+                SourceMask         = sourceInput.Text?.ToString() ?? defaultSource,
+                DestinationPath    = destInput.Text?.ToString() ?? defaultDest,
+                Confirmed          = true,
+                RunInBackground    = true,
+                UseShellPatterns   = shellPatternsCb.CheckedState == CheckState.Checked,
+                PreserveAttributes = preserveCb.CheckedState == CheckState.Checked,
+                FollowSymlinks     = followSymCb.CheckedState == CheckState.Checked,
+                DiveIntoSubdir     = diveCb.CheckedState == CheckState.Checked,
+                StableSymlinks     = stableCb.CheckedState == CheckState.Checked,
+            };
+            Application.RequestStop(d);
+        };
+
         var cancel = new Button { Text = "Cancel" };
         cancel.Accepting += (_, _) => Application.RequestStop(d);
 
         d.AddButton(ok);
+        d.AddButton(background);
         d.AddButton(cancel);
         destInput.SetFocus();
         Application.Run(d);

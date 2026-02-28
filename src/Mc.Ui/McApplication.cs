@@ -37,6 +37,17 @@ public sealed class McApplication : Toplevel
     // Ctrl+X prefix key state (like the Ctrl+X submap in original MC)
     private bool _ctrlXPrefix = false;
 
+    // Background file-operation jobs (equivalent to background.c in original MC)
+    private sealed class BackgroundJob
+    {
+        public string Name    { get; init; } = string.Empty;
+        public string Status  { get; set;  } = "Running…";
+        public bool   Running { get; set;  } = true;
+        public CancellationTokenSource Cts  { get; } = new();
+        public Task?  Task    { get; set;  }
+    }
+    private readonly List<BackgroundJob> _backgroundJobs = [];
+
     // Panel overlay modes (Quick View / Info) — mirrors list_quick_view / info_panel in MC
     private enum PanelDisplayMode { Normal, QuickView, Info }
     private PanelDisplayMode _leftMode  = PanelDisplayMode.Normal;
@@ -448,30 +459,19 @@ public sealed class McApplication : Toplevel
         var dest = _controller.InactivePanel.CurrentPath.Path;
         var entry  = GetCurrentEntry();
         var marked = _controller.ActivePanel.GetMarkedEntries();
-        var sourceName   = marked.Count > 0 ? $"{marked.Count} files" : (entry?.Name ?? "marked files");
+        var sourceName    = marked.Count > 0 ? $"{marked.Count} files" : (entry?.Name ?? "marked files");
         var defaultSource = marked.Count > 0 ? "*" : (entry?.Name ?? "*");
         var opts = CopyMoveDialog.Show(false, sourceName, dest, defaultSource);
         if (opts?.Confirmed != true) return;
 
-        var progress = new ProgressDialog("Copy");
-        progress.Show();
-        _ = Task.Run(async () =>
-        {
-            try { await _controller.CopyMarkedAsync(progress, progress.CancellationToken); }
-            catch (OperationCanceledException) { }
-            catch (Exception ex) { Application.Invoke(() => MessageDialog.Error(ex.Message)); }
-            finally { progress.Close(); Application.Invoke(RefreshPanels); }
-        });
+        RunFileOperation("Copy", opts.RunInBackground, _controller.CopyMarkedAsync);
     }
 
     private void MoveFiles()
     {
         var entry = GetCurrentEntry();
         var marked = _controller.ActivePanel.GetMarkedEntries();
-        // Single-file rename: pre-fill destination with the filename so user can rename in-place.
-        // With multiple marked files the destination is the inactive panel directory (move).
-        string dest;
-        string sourceName;
+        string dest, sourceName;
         if (marked.Count > 0)
         {
             dest = _controller.InactivePanel.CurrentPath.Path;
@@ -479,7 +479,7 @@ public sealed class McApplication : Toplevel
         }
         else if (entry != null)
         {
-            dest = entry.Name;   // pre-fill filename only → allows inline rename
+            dest = entry.Name;
             sourceName = entry.Name;
         }
         else return;
@@ -487,15 +487,38 @@ public sealed class McApplication : Toplevel
         var opts = CopyMoveDialog.Show(true, sourceName, dest, moveSource);
         if (opts?.Confirmed != true) return;
 
-        var progress = new ProgressDialog("Move");
-        progress.Show();
-        _ = Task.Run(async () =>
+        RunFileOperation("Move", opts.RunInBackground, _controller.MoveMarkedAsync);
+    }
+
+    private void RunFileOperation(string name, bool background,
+        Func<IProgress<OperationProgress>?, CancellationToken, Task> operation)
+    {
+        if (background)
         {
-            try { await _controller.MoveMarkedAsync(progress, progress.CancellationToken); }
-            catch (OperationCanceledException) { }
-            catch (Exception ex) { Application.Invoke(() => MessageDialog.Error(ex.Message)); }
-            finally { progress.Close(); Application.Invoke(RefreshPanels); }
-        });
+            var job = new BackgroundJob { Name = name };
+            var reporter = new Progress<OperationProgress>(p =>
+                job.Status = p.CurrentFile ?? job.Status);
+            job.Task = Task.Run(async () =>
+            {
+                try { await operation(reporter, job.Cts.Token); job.Status = "Done"; }
+                catch (OperationCanceledException) { job.Status = "Cancelled"; }
+                catch (Exception ex) { job.Status = $"Error: {ex.Message}"; }
+                finally { job.Running = false; Application.Invoke(RefreshPanels); }
+            });
+            _backgroundJobs.Add(job);
+        }
+        else
+        {
+            var progress = new ProgressDialog(name);
+            progress.Show();
+            _ = Task.Run(async () =>
+            {
+                try { await operation(progress, progress.CancellationToken); }
+                catch (OperationCanceledException) { }
+                catch (Exception ex) { Application.Invoke(() => MessageDialog.Error(ex.Message)); }
+                finally { progress.Close(); Application.Invoke(RefreshPanels); }
+            });
+        }
     }
 
     private void MakeDir()
@@ -2461,11 +2484,57 @@ public sealed class McApplication : Toplevel
     /// dialog, so there are no truly "background" jobs to list.
     /// Equivalent to jobs_box() in the original C codebase.
     /// </summary>
-    private static void ShowBackgroundJobs() =>
-        MessageDialog.Show("Background jobs",
-            "No background jobs.\n\n" +
-            "File operations (copy/move/delete) in this port\n" +
-            "run as async tasks with a progress dialog.");
+    private void ShowBackgroundJobs()
+    {
+        // Prune finished jobs
+        _backgroundJobs.RemoveAll(j => !j.Running && (j.Task?.IsCompleted ?? true) &&
+                                       j.Status is "Done" or "Cancelled");
+
+        if (_backgroundJobs.Count == 0)
+        {
+            MessageDialog.Show("Background jobs", "No background jobs running.");
+            return;
+        }
+
+        var d = new Dialog
+        {
+            Title  = "Background Jobs",
+            Width  = 68,
+            Height = Math.Min(5 + _backgroundJobs.Count * 2, 22),
+            ColorScheme = McTheme.Dialog,
+        };
+
+        for (int i = 0; i < _backgroundJobs.Count; i++)
+        {
+            var job = _backgroundJobs[i];
+            d.Add(new Label { X = 1, Y = 1 + i * 2, Text = $"{job.Name}: {job.Status}" });
+        }
+
+        var listView = new ListView
+        {
+            X = 1, Y = 1, Width = Dim.Fill(1),
+            Height = Dim.Fill(4),
+            ColorScheme = McTheme.Panel,
+        };
+        var items = _backgroundJobs.Select(j => $"{j.Name,-10} {(j.Running ? "Running" : "Finished"),-10} {j.Status}").ToList();
+        listView.SetSource(new System.Collections.ObjectModel.ObservableCollection<string>(items));
+        d.Add(listView);
+
+        var kill = new Button { Text = "Kill" };
+        kill.Accepting += (_, _) =>
+        {
+            var idx = listView.SelectedItem;
+            if (idx >= 0 && idx < _backgroundJobs.Count)
+                _backgroundJobs[idx].Cts.Cancel();
+        };
+
+        var close = new Button { Text = "Close", IsDefault = true };
+        close.Accepting += (_, _) => Application.RequestStop(d);
+
+        d.AddButton(kill);
+        d.AddButton(close);
+        Application.Run(d);
+    }
 
     // --- Not-yet-implemented stub ---
 

@@ -44,7 +44,7 @@ These are present in everyday original MC but not critical blockers.
 | 19 | `[x]` | **Edit symlink — confirmation step** | ~~Original asks "Do you want to update the symlink?" before modifying the target. We edit without the secondary confirm.~~ Fixed: confirmation dialog added before recreating the symlink. | `src/filemanager/cmd.c` — `edit_symlink_cmd()` |
 | 20 | `[x]` | **Compare files — null/directory fallback** | ~~When either entry is null or a directory the operation silently does nothing. Original MC falls back gracefully with an error message.~~ Fixed: MessageDialog.Show error when either entry is null or directory. | `src/filemanager/cmd.c` — `diff_view_cmd()` |
 | 21 | `[x]` | **F2 User menu — condition lines** | ~~`+`/`=` condition lines (e.g. `+ f text/*` restricts entry to text files matching a pattern) are silently skipped instead of evaluated; entries are not filtered.~~ Fixed: `EvaluateUserMenuCondition()` evaluates `f`/`d` pattern conditions and `!` negation; filtered entries are hidden from the menu. | `src/usermenu.c` — `check_conditions()` |
-| 22 | `[ ]` | **Copy/Move — Background button** | The "Background" button is absent. Original MC allows long copy/move operations to run in the background with progress tracking in the "Background jobs" dialog. | `src/filemanager/filegui.c`, `src/background.c` |
+| 22 | `[x]` | **Copy/Move — Background button** | ~~The "Background" button is absent.~~ Fixed: "Background" button added to CopyMoveDialog; operations run as non-blocking Tasks with a BackgroundJob tracker; ShowBackgroundJobs() now lists running/finished jobs with a Kill (cancel) button. | `src/filemanager/filegui.c`, `src/background.c` |
 | 23 | `[x]` | **Advanced Chown — combined dialog** | ~~Currently shows ChownDialog then ChmodDialog in sequence.~~ Fixed: new AdvancedChownDialog combines owner/group listboxes with permission checkboxes (special/owner/group/other) and octal field; multi-file "Set all" support. | `src/filemanager/achown.c` |
 
 ---
@@ -80,6 +80,6 @@ These round out the experience but have workarounds or limited daily impact.
 | Tier | Total | Done | In progress | Not started |
 |------|-------|------|-------------|-------------|
 | 1 — Critical | 11 | 11 | 0 | 0 |
-| 2 — Important | 12 | 9 | 1 | 2 |
+| 2 — Important | 12 | 10 | 1 | 1 |
 | 3 — Enhancements | 17 | 1 | 0 | 16 |
-| **Total** | **40** | **21** | **1** | **18** |
+| **Total** | **40** | **22** | **1** | **17** |
