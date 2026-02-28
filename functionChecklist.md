@@ -61,12 +61,12 @@ These round out the experience but have workarounds or limited daily impact.
 | 27 | `[x]` | **Directory tree dialog — F-key bindings** | ~~Dialog lacks F2/F8 bindings.~~ Fixed: F2 rescans (force-expands) the selected directory; F8 deletes it (with confirmation, non-recursive); expand/collapse state already persisted during the dialog session. | `src/filemanager/tree.c` |
 | 28 | `[ ]` | **F1 Help — hyperlinks between nodes** | Help viewer shows plain text. Original MC uses ctrl-char escape codes to embed hyperlinks between nodes; clicking or pressing Enter on a link navigates to the linked topic. | `src/help.c` |
 | 29 | `[x]` | **Filtered view — pass filename automatically** | ~~"Filtered view" dialog does not substitute `%f` with the current filename; user must type the full command including filename manually.~~ Already implemented: default command is "cat %f" and `%f` is substituted with the full file path before execution. | `src/filemanager/cmd.c` — `filtered_view_cmd()` |
-| 30 | `[ ]` | **Encoding — full iconv list** | Encoding dialog shows a hardcoded list of 16 encodings. Original MC queries all iconv-known encodings dynamically. | `lib/charsets.c` |
+| 30 | `[x]` | **Encoding — full iconv list** | ~~Hardcoded list of 16 encodings.~~ Fixed: uses `System.Text.Encoding.GetEncodings()` for the full .NET-registered list; preferred encodings first, rest alphabetically; filter field for quick search. | `lib/charsets.c` |
 | 31 | `[ ]` | **Options → Appearance / Skins** | Currently shows "not implemented". Original MC supports INI-based colour skin files from `~/.local/share/mc/skins/`. | `lib/skin/` |
 | 32 | `[ ]` | **Options → Learn keys** | Currently shows "not implemented". Original provides an interactive key-binding editor. | `src/learn.c` |
 | 33 | `[ ]` | **Options → Virtual FS settings** | Currently shows "not implemented". Original shows cache timeout, FTP proxy, anonymous password settings. | `src/vfs/setup.c` |
 | 34 | `[x]` | **Background jobs dialog** | ~~Shows a static informational message.~~ Fixed as part of #22: ShowBackgroundJobs() now lists real BackgroundJob entries with name/status and a Kill button. | `src/background.c` — `jobs_cmd()` |
-| 35 | `[ ]` | **Command history — inline in command line** | History is shown in a separate dialog and pasted. Original integrates history as an inline dropdown in the command-line widget itself. | `src/filemanager/command.c` |
+| 35 | `[x]` | **Command history — inline in command line** | ~~History in a separate dialog.~~ Fixed: Ctrl+H or Up-on-empty-input pops up an inline `Window` with a `ListView` of history (most-recent first) positioned just above the command line; Enter selects, Esc closes. | `src/filemanager/command.c` |
 | 36 | `[ ]` | **Active VFS list — full display** | Only panel paths shown. Original shows each mounted VFS with path + type + connection info, and "Free VFSs" to unmount. | `src/vfs/vfs.c` — `reselect_vfs()` |
 | 37 | `[ ]` | **Shell link (FISH protocol)** | Shows "not implemented". Original implements the FISH (FIles transferred over SHell) protocol for remote panel access over SSH. | `src/vfs/fish/` |
 | 38 | `[ ]` | **Screen list (multiple subshells)** | Shows "not implemented". Original MC supports multiple pseudo-terminal subshell screens, accessible via a screen-manager dialog. | `src/subshell/` |
@@ -81,5 +81,5 @@ These round out the experience but have workarounds or limited daily impact.
 |------|-------|------|-------------|-------------|
 | 1 — Critical | 11 | 11 | 0 | 0 |
 | 2 — Important | 12 | 10 | 1 | 1 |
-| 3 — Enhancements | 17 | 6 | 0 | 11 |
-| **Total** | **40** | **27** | **1** | **12** |
+| 3 — Enhancements | 17 | 8 | 0 | 9 |
+| **Total** | **40** | **29** | **1** | **10** |

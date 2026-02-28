@@ -1659,43 +1659,68 @@ public sealed class McApplication : Toplevel
     {
         var listing = left ? _controller.LeftPanel : _controller.RightPanel;
 
-        // Common encodings matching MC's default list
-        string[] encodings =
-        [
-            "UTF-8", "ISO-8859-1", "ISO-8859-2", "ISO-8859-5", "ISO-8859-15",
-            "KOI8-R", "KOI8-U", "CP1250", "CP1251", "CP1252",
-            "CP866", "GB2312", "GBK", "BIG5", "SHIFT_JIS", "EUC-JP",
-        ];
+        // All encodings registered with .NET (equivalent to iconv -l in the original MC)
+        // Put common ones first, then append the rest alphabetically.
+        var preferredFirst = new[] { "UTF-8", "ISO-8859-1", "ISO-8859-2", "ISO-8859-5",
+            "ISO-8859-15", "KOI8-R", "KOI8-U", "CP1250", "CP1251", "CP1252",
+            "CP866", "GB2312", "GBK", "BIG5", "SHIFT_JIS", "EUC-JP" };
+        var allEncodings = System.Text.Encoding.GetEncodings()
+            .Select(ei => ei.Name.ToUpperInvariant())
+            .OrderBy(n => n)
+            .Distinct()
+            .ToList();
+        // preferred first, then everything else
+        var encodings = preferredFirst
+            .Where(allEncodings.Contains)
+            .Concat(allEncodings.Where(n => !preferredFirst.Contains(n)))
+            .ToArray();
 
-        var current = listing.CurrentPath.Encoding ?? "UTF-8";
+        var current  = listing.CurrentPath.Encoding ?? "UTF-8";
         var selected = current;
 
         var d = new Dialog
         {
             Title       = "Select encoding",
-            Width       = 40,
-            Height      = encodings.Length + 6,
+            Width       = 42,
+            Height      = 20,
             ColorScheme = McTheme.Dialog,
         };
 
+        // Filter field for quick search in encoding list
+        d.Add(new Label { X = 1, Y = 1, Text = "Filter:", ColorScheme = McTheme.Dialog });
+        var filterField = new TextField { X = 9, Y = 1, Width = 30, ColorScheme = McTheme.Dialog };
+
         var lv = new ListView
         {
-            X           = 1, Y = 1,
-            Width       = Dim.Fill(1),
-            Height      = encodings.Length,
+            X = 1, Y = 2,
+            Width = Dim.Fill(1),
+            Height = Dim.Fill(4),
             ColorScheme = McTheme.Panel,
         };
-        lv.SetSource(new System.Collections.ObjectModel.ObservableCollection<string>(encodings));
-        lv.SelectedItem = Math.Max(0, Array.IndexOf(encodings, current));
-        d.Add(lv);
+        d.Add(filterField, lv);
 
-        var ok = new Button { X = Pos.Center() - 8, Y = encodings.Length + 2, Text = "OK", IsDefault = true };
+        string[] filtered = encodings;
+        void ApplyFilter()
+        {
+            var q = filterField.Text?.ToString() ?? string.Empty;
+            filtered = string.IsNullOrEmpty(q)
+                ? encodings
+                : encodings.Where(e => e.Contains(q, StringComparison.OrdinalIgnoreCase)).ToArray();
+            lv.SetSource(new ObservableCollection<string>(filtered));
+            lv.SelectedItem = Math.Max(0, Array.IndexOf(filtered, selected));
+        }
+        filterField.TextChanged += (_, _) => ApplyFilter();
+        ApplyFilter();
+        lv.SelectedItem = Math.Max(0, Array.IndexOf(filtered, current));
+
+        var ok = new Button { Text = "OK", IsDefault = true };
         ok.Accepting += (_, _) =>
         {
-            if (lv.SelectedItem >= 0) selected = encodings[lv.SelectedItem];
+            if (lv.SelectedItem >= 0 && lv.SelectedItem < filtered.Length)
+                selected = filtered[lv.SelectedItem];
             Application.RequestStop(d);
         };
-        var cancel = new Button { X = Pos.Center() + 2, Y = encodings.Length + 2, Text = "Cancel" };
+        var cancel = new Button { Text = "Cancel" };
         cancel.Accepting += (_, _) => { selected = current; Application.RequestStop(d); };
         d.AddButton(ok); d.AddButton(cancel);
         Application.Run(d); d.Dispose();
