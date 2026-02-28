@@ -49,7 +49,7 @@ public sealed class McApplication : Toplevel
     private readonly List<BackgroundJob> _backgroundJobs = [];
 
     // Panel overlay modes (Quick View / Info) — mirrors list_quick_view / info_panel in MC
-    private enum PanelDisplayMode { Normal, QuickView, Info }
+    private enum PanelDisplayMode { Normal, QuickView, Info, Tree }
     private PanelDisplayMode _leftMode  = PanelDisplayMode.Normal;
     private PanelDisplayMode _rightMode = PanelDisplayMode.Normal;
     private View _leftOverlay  = null!;
@@ -84,6 +84,7 @@ public sealed class McApplication : Toplevel
             new MenuItem("_File listing",      string.Empty, () => ShowListingFormatDialog(left)),
             new MenuItem("_Quick view",        "Ctrl+X Q",   () => ToggleOverlayMode(PanelDisplayMode.QuickView)),
             new MenuItem("_Info",              "Ctrl+X I",   () => ToggleOverlayMode(PanelDisplayMode.Info)),
+            new MenuItem("_Tree",              "Ctrl+X T",   () => ToggleOverlayMode(PanelDisplayMode.Tree)),
             new MenuItem("_Tree",              string.Empty, () => ShowTreeDialog(left)),
             new MenuItem("_Panelize",          string.Empty, ExternalPanelize),
             null!,
@@ -122,6 +123,7 @@ public sealed class McApplication : Toplevel
                     new("Edit s_ymlink",         string.Empty, () => EditSymlink()),
                     new("Ch_own",                string.Empty, () => Chown()),
                     new("_Advanced chown",       string.Empty, () => AdvancedChown()),
+                    new("Ch_attr",               "Ctrl+X A",   () => Chattr()),
                     new("_Rename/Move",          "F6",         () => MoveFiles()),
                     new("_Mkdir",                "F7",         () => MakeDir()),
                     new("_Delete",               "F8",         () => DeleteFiles()),
@@ -284,6 +286,8 @@ public sealed class McApplication : Toplevel
                 case KeyCode.O: Chown(); return true;           // Ctrl+X O → chown
                 case KeyCode.Q: ToggleOverlayMode(PanelDisplayMode.QuickView); return true; // Ctrl+X Q → quick view
                 case KeyCode.I: ToggleOverlayMode(PanelDisplayMode.Info);      return true; // Ctrl+X I → info panel
+                case KeyCode.T: ToggleOverlayMode(PanelDisplayMode.Tree);      return true; // Ctrl+X T → tree panel
+                case KeyCode.A: Chattr(); return true;                                       // Ctrl+X A → chattr
             }
             return true; // consume unknown Ctrl+X subkey
         }
@@ -625,11 +629,19 @@ public sealed class McApplication : Toplevel
         overlay.RemoveAll();
 
         // Border title
-        var title = mode == PanelDisplayMode.QuickView ? "Quick View" : "Info";
+        var title = mode switch
+        {
+            PanelDisplayMode.QuickView => "Quick View",
+            PanelDisplayMode.Info      => "Info",
+            PanelDisplayMode.Tree      => "Directory Tree",
+            _                          => string.Empty,
+        };
         overlay.Add(new Label { X = 0, Y = 0, Text = title, ColorScheme = McTheme.Panel });
 
         if (mode == PanelDisplayMode.Info)
             PopulateInfoOverlay(overlay, entry);
+        else if (mode == PanelDisplayMode.Tree)
+            PopulateTreeOverlay(overlay, isLeft);
         else
             PopulateQuickViewOverlay(overlay, entry);
 
@@ -691,6 +703,87 @@ public sealed class McApplication : Toplevel
         {
             overlay.Add(new Label { X = 1, Y = 2, Text = "(cannot read file)" });
         }
+    }
+
+    // ── Tree panel overlay ────────────────────────────────────────────────────
+    // Equivalent to the tree panel mode in src/filemanager/panel.c (list_tree).
+    // Selecting a directory navigates the ACTIVE panel there.
+
+    private void PopulateTreeOverlay(View overlay, bool isLeft)
+    {
+        var activeListing  = _controller.ActivePanel;
+        var currentPath    = activeListing.CurrentPath.Path;
+        var rootPath       = OperatingSystem.IsWindows()
+            ? (Path.GetPathRoot(currentPath) ?? "C:\\") : "/";
+
+        // Lazily track expanded set per overlay (store in overlay's Data field)
+        var expanded = overlay.Data as HashSet<string>
+                       ?? new HashSet<string>(StringComparer.OrdinalIgnoreCase) { rootPath };
+        // Expand ancestors of current path
+        var anc = currentPath;
+        while (!string.IsNullOrEmpty(anc) && anc != Path.GetPathRoot(anc))
+        { expanded.Add(anc); anc = Path.GetDirectoryName(anc) ?? rootPath; }
+        overlay.Data = expanded;
+
+        var nodes   = new List<(string FullPath, int Depth, bool HasChildren)>();
+        int selIdx  = 0;
+
+        void Visit(string path, int depth)
+        {
+            bool hasCh;
+            try { hasCh = Directory.EnumerateDirectories(path).Any(); } catch { hasCh = false; }
+            nodes.Add((path, depth, hasCh));
+            if (hasCh && expanded.Contains(path))
+            {
+                try
+                {
+                    foreach (var sub in Directory.GetDirectories(path)
+                                                 .OrderBy(d => d, StringComparer.OrdinalIgnoreCase))
+                        Visit(sub, depth + 1);
+                }
+                catch { }
+            }
+        }
+        Visit(rootPath, 0);
+
+        var display = new List<string>();
+        for (int i = 0; i < nodes.Count; i++)
+        {
+            var (path, depth, hasCh) = nodes[i];
+            var name   = depth == 0 ? path
+                : (Path.GetFileName(path.TrimEnd(Path.DirectorySeparatorChar)) ?? path);
+            var indent = new string(' ', depth * 2);
+            var marker = !hasCh ? "  " : expanded.Contains(path) ? "▼ " : "▶ ";
+            display.Add(indent + marker + name);
+            if (string.Equals(path, currentPath, StringComparison.OrdinalIgnoreCase)) selIdx = i;
+        }
+
+        var lv = new ListView
+        {
+            X = 0, Y = 2,
+            Width = Dim.Fill(),
+            Height = Dim.Fill(),
+            ColorScheme = McTheme.Panel,
+        };
+        lv.SetSource(new ObservableCollection<string>(display));
+        lv.SelectedItem = Math.Max(0, Math.Min(selIdx, nodes.Count - 1));
+        overlay.Add(lv);
+
+        lv.OpenSelectedItem += (_, _) =>
+        {
+            var idx = lv.SelectedItem;
+            if (idx < 0 || idx >= nodes.Count) return;
+            var (path, _, hasCh) = nodes[idx];
+            if (hasCh)
+            {
+                if (expanded.Contains(path)) expanded.Remove(path);
+                else expanded.Add(path);
+            }
+            // Navigate active panel
+            activeListing.Load(VfsPath.FromLocal(path));
+            UpdateOverlay(isLeft);
+            RefreshPanels();
+        };
     }
 
     private void Chmod()
@@ -1352,6 +1445,107 @@ public sealed class McApplication : Toplevel
         }
     }
 
+    // --- Chattr (ext2 file attributes) ---
+    // Equivalent to chattr_cmd() in src/filemanager/chattr.c.
+
+    private void Chattr()
+    {
+        var entry = GetCurrentEntry();
+        if (entry == null || entry.IsParentDir) return;
+
+        // Query current attributes via lsattr
+        string currentAttrs = string.Empty;
+        try
+        {
+            var psi = new System.Diagnostics.ProcessStartInfo("lsattr")
+            {
+                Arguments = $"-d \"{entry.FullPath.Path}\"",
+                UseShellExecute = false,
+                RedirectStandardOutput = true,
+                RedirectStandardError  = true,
+            };
+            using var proc = System.Diagnostics.Process.Start(psi);
+            var output = proc?.StandardOutput.ReadToEnd() ?? string.Empty;
+            proc?.WaitForExit();
+            // lsattr output: "----i--------e-- filename"
+            if (output.Length > 0)
+                currentAttrs = output.Split(' ')[0].Trim();
+        }
+        catch { /* lsattr not available */ }
+
+        // Common ext2 attributes
+        var attrDefs = new[]
+        {
+            ('a', "Append only"),
+            ('c', "Compressed"),
+            ('d', "No dump"),
+            ('e', "Extents format"),
+            ('i', "Immutable"),
+            ('j', "Journal data"),
+            ('s', "Secure delete"),
+            ('S', "Synchronous updates"),
+            ('t', "No tail merging"),
+            ('T', "Top of dir hierarchy"),
+            ('u', "Undeletable"),
+        };
+
+        var d = new Dialog
+        {
+            Title = $"File attributes: {entry.Name}",
+            Width = 50,
+            Height = attrDefs.Length + 7,
+            ColorScheme = McTheme.Dialog,
+        };
+
+        var checkboxes = attrDefs.Select((def, i) => new CheckBox
+        {
+            X = 2, Y = 1 + i,
+            Text = $"[{def.Item1}] {def.Item2}",
+            CheckedState = currentAttrs.Contains(def.Item1) ? CheckState.Checked : CheckState.UnChecked,
+            ColorScheme = McTheme.Dialog,
+        }).ToArray();
+        foreach (var cb in checkboxes) d.Add(cb);
+
+        var ok = new Button { Text = "Set", IsDefault = true };
+        ok.Accepting += (_, _) =>
+        {
+            var attrs = new string(attrDefs
+                .Where((def, i) => checkboxes[i].CheckedState == CheckState.Checked)
+                .Select(def => def.Item1).ToArray());
+            var setStr  = string.IsNullOrEmpty(attrs) ? string.Empty : "+" + attrs;
+            var clearStr= new string(attrDefs
+                .Where((def, i) => checkboxes[i].CheckedState != CheckState.Checked)
+                .Select(def => def.Item1).ToArray());
+            if (!string.IsNullOrEmpty(clearStr)) clearStr = "-" + clearStr;
+
+            try
+            {
+                var arg = setStr + clearStr;
+                if (string.IsNullOrEmpty(arg)) { Application.RequestStop(d); return; }
+                var psi = new System.Diagnostics.ProcessStartInfo("chattr")
+                {
+                    Arguments = $"{arg} \"{entry.FullPath.Path}\"",
+                    UseShellExecute = false,
+                    RedirectStandardError = true,
+                };
+                using var proc = System.Diagnostics.Process.Start(psi);
+                proc?.WaitForExit();
+                if (proc?.ExitCode != 0)
+                {
+                    var err = proc?.StandardError.ReadToEnd();
+                    if (!string.IsNullOrWhiteSpace(err))
+                        MessageDialog.Error(err.Trim());
+                }
+            }
+            catch (Exception ex) { MessageDialog.Error(ex.Message); }
+            Application.RequestStop(d);
+        };
+        var cancel = new Button { Text = "Cancel" };
+        cancel.Accepting += (_, _) => Application.RequestStop(d);
+        d.AddButton(ok); d.AddButton(cancel);
+        Application.Run(d);
+    }
+
     // --- File menu: Quick cd / Selection ---
 
     private void QuickCd()
@@ -1624,16 +1818,22 @@ public sealed class McApplication : Toplevel
         {
             X            = 2,
             Y            = 1,
-            RadioLabels  = ["Full file list", "Brief file list"],
-            SelectedItem = panel.ListingMode == PanelListingMode.Brief ? 1 : 0,
+            RadioLabels  = ["Full file list", "Brief file list", "Long (ls -l style)"],
+            SelectedItem = panel.ListingMode == PanelListingMode.Brief ? 1
+                         : panel.ListingMode == PanelListingMode.Long  ? 2 : 0,
             ColorScheme  = McTheme.Dialog,
         };
         d.Add(rg);
 
-        var ok = new Button { X = Pos.Center() - 8, Y = 6, Text = "OK", IsDefault = true };
+        var ok = new Button { X = Pos.Center() - 8, Y = 7, Text = "OK", IsDefault = true };
         ok.Accepting += (_, _) =>
         {
-            panel.ListingMode = rg.SelectedItem == 1 ? PanelListingMode.Brief : PanelListingMode.Full;
+            panel.ListingMode = rg.SelectedItem switch
+            {
+                1 => PanelListingMode.Brief,
+                2 => PanelListingMode.Long,
+                _ => PanelListingMode.Full,
+            };
             Application.RequestStop(d);
         };
         var cancel = new Button { X = Pos.Center() + 2, Y = 6, Text = "Cancel" };

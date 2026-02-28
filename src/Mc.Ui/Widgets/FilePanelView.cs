@@ -15,6 +15,8 @@ public enum PanelListingMode
     Full,
     /// <summary>Names only — more files visible at once.</summary>
     Brief,
+    /// <summary>ls -l style: permissions + owner + group + size + date + name.</summary>
+    Long,
 }
 
 /// <summary>
@@ -295,9 +297,12 @@ public sealed class FilePanelView : View
             else                                 attr = normalAttr;
 
             Driver.SetAttribute(attr);
-            var text = _listingMode == PanelListingMode.Brief
-                ? FormatBriefEntry(entry, innerWidth)
-                : FormatEntry(entry, innerWidth);
+            var text = _listingMode switch
+            {
+                PanelListingMode.Brief => FormatBriefEntry(entry, innerWidth),
+                PanelListingMode.Long  => FormatLongEntry(entry, innerWidth),
+                _                     => FormatEntry(entry, innerWidth),
+            };
             Driver.AddStr(text);
             // FormatEntry/FormatBriefEntry fills innerWidth-1 chars; pad the last cell
             Driver.AddStr(" ");
@@ -348,6 +353,34 @@ public sealed class FilePanelView : View
 
         // Total: 1 + nameWidth + sizeWidth + 1 + dateWidth = innerWidth - 1
         return $"{marker}{name}{size} {date}";
+    }
+
+    /// <summary>ls -l style: [*]perms owner group size date name</summary>
+    private static string FormatLongEntry(FileEntry entry, int innerWidth)
+    {
+        var marker = entry.IsMarked ? "*" : " ";
+        var perms  = PermissionsFormatter.Format(entry.Permissions, entry.IsDirectory, entry.IsSymlink);
+        var owner  = (entry.OwnerName ?? entry.DirEntry.OwnerUid.ToString()).PadRight(8)[..8];
+        var group  = (entry.GroupName ?? entry.DirEntry.OwnerGid.ToString()).PadRight(8)[..8];
+        var size   = FileSizeFormatter.FormatPanelSize(entry.Size, entry.IsDirectory).PadLeft(8);
+        var date   = entry.ModificationTime == DateTime.MinValue
+            ? "           "
+            : entry.ModificationTime.ToString("MMM dd HH:mm");
+
+        // prefix: 1+10+1+8+1+8+1+8+1+11 = 49 chars
+        const int prefixLen = 1 + 10 + 1 + 8 + 1 + 8 + 1 + 8 + 1 + 11 + 1; // 50
+        var prefix = $"{marker}{perms} {owner} {group} {size} {date} ";
+
+        string name;
+        if      (entry.IsParentDir)  name = "..";
+        else if (entry.IsDirectory)  name = "/" + entry.Name;
+        else if (entry.IsSymlink)    name = "~" + entry.Name;
+        else                         name = entry.Name;
+
+        int nameWidth = Math.Max(1, innerWidth - prefix.Length);
+        if (name.Length > nameWidth) name = name[..(nameWidth - 1)] + "~";
+
+        return (prefix + name).PadRight(innerWidth);
     }
 
     private static string FormatBriefEntry(FileEntry entry, int innerWidth)

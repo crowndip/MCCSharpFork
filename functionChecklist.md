@@ -39,8 +39,8 @@ These are present in everyday original MC but not critical blockers.
 | 14 | `[x]` | **Hotlist — hierarchical groups** | ~~Current hotlist is a flat list.~~ Fixed: HotlistManager now has a full tree model (HotlistGroup/HotlistEntry) with recursive GROUP/ENTRY/ENDGROUP file format; HotlistDialog shows groups as `[/] Name` items with Enter/Go to for navigation, "Up" to return to parent, "New group" to create groups, breadcrumb path label. | `src/vfs/path.c`, `lib/hotlist.c` |
 | 15 | `[x]` | **Quick view panel mode (persistent)** | ~~Quick view opens a full-screen one-shot viewer.~~ Fixed: `Ctrl+X Q` toggles the inactive panel into a live Quick View overlay that reads up to 500 lines of the file under the cursor and updates automatically via `CursorChanged` event. Toggle off restores the file-listing panel. | `src/filemanager/panel.c` — `WPanel::panel_format` = `list_quick_view` |
 | 16 | `[x]` | **Info panel mode (persistent)** | ~~Info shows a modal dialog.~~ Fixed: `Ctrl+X I` toggles the inactive panel into a persistent Info overlay showing Name/Type/Size/Mode/Owner/Group/Mtime/Atime (+ symlink target); updates automatically as cursor moves. | `src/filemanager/info.c` |
-| 17 | `[ ]` | **Tree panel mode (persistent)** | Tree is a modal dialog. Original MC switches the panel to a **persistent navigable tree widget** with F2 (rescan), F8 (delete dir), and expand/collapse per node. | `src/filemanager/tree.c` |
-| 18 | `[ ]` | **File listing — Long / User-defined columns** | Only Full and Brief modes are offered. Original also has: Long (ls -l style), Half (2-column brief), User-defined (configurable column list). | `src/filemanager/panel.c` — `list_type` enum |
+| 17 | `[x]` | **Tree panel mode (persistent)** | ~~Tree is a modal dialog.~~ Fixed: `Ctrl+X T` toggles the inactive panel into a navigable tree overlay (same approach as #15/#16); Enter expands/collapses or navigates active panel; expanded state persisted in overlay's Data field. | `src/filemanager/tree.c` |
+| 18 | `[x]` | **File listing — Long / User-defined columns** | ~~Only Full and Brief modes.~~ Fixed: added `PanelListingMode.Long` — ls -l style (permissions + owner + group + size + date + name via `FormatLongEntry()`); selectable from Listing Format dialog. | `src/filemanager/panel.c` — `list_type` enum |
 | 19 | `[x]` | **Edit symlink — confirmation step** | ~~Original asks "Do you want to update the symlink?" before modifying the target. We edit without the secondary confirm.~~ Fixed: confirmation dialog added before recreating the symlink. | `src/filemanager/cmd.c` — `edit_symlink_cmd()` |
 | 20 | `[x]` | **Compare files — null/directory fallback** | ~~When either entry is null or a directory the operation silently does nothing. Original MC falls back gracefully with an error message.~~ Fixed: MessageDialog.Show error when either entry is null or directory. | `src/filemanager/cmd.c` — `diff_view_cmd()` |
 | 21 | `[x]` | **F2 User menu — condition lines** | ~~`+`/`=` condition lines (e.g. `+ f text/*` restricts entry to text files matching a pattern) are silently skipped instead of evaluated; entries are not filtered.~~ Fixed: `EvaluateUserMenuCondition()` evaluates `f`/`d` pattern conditions and `!` negation; filtered entries are hidden from the menu. | `src/usermenu.c` — `check_conditions()` |
@@ -70,7 +70,7 @@ These round out the experience but have workarounds or limited daily impact.
 | 36 | `[ ]` | **Active VFS list — full display** | Only panel paths shown. Original shows each mounted VFS with path + type + connection info, and "Free VFSs" to unmount. | `src/vfs/vfs.c` — `reselect_vfs()` |
 | 37 | `[ ]` | **Shell link (FISH protocol)** | Shows "not implemented". Original implements the FISH (FIles transferred over SHell) protocol for remote panel access over SSH. | `src/vfs/fish/` |
 | 38 | `[ ]` | **Screen list (multiple subshells)** | Shows "not implemented". Original MC supports multiple pseudo-terminal subshell screens, accessible via a screen-manager dialog. | `src/subshell/` |
-| 39 | `[ ]` | **Chattr (ext2 file attributes)** | Not present in the .NET port. Original MC shows a Chattr dialog on Linux with ext2fs. | `src/filemanager/chattr.c` |
+| 39 | `[x]` | **Chattr (ext2 file attributes)** | ~~Not present.~~ Fixed: Ctrl+X A shows a Chattr dialog querying `lsattr` for current attrs, displays checkboxes for common ext2 attributes (append-only, immutable, no-dump, etc.), and applies changes via `chattr +/-flags`. | `src/filemanager/chattr.c` |
 | 40 | `[ ]` | **FTP / SFTP VFS providers** | Dialogs exist but no VFS provider ships; navigation fails silently. Providers require the Mc.Vfs.Ftp / Mc.Vfs.Sftp projects to be connected. | `src/vfs/ftpfs/`, `src/vfs/sftpfs/` |
 
 ---
@@ -80,6 +80,6 @@ These round out the experience but have workarounds or limited daily impact.
 | Tier | Total | Done | In progress | Not started |
 |------|-------|------|-------------|-------------|
 | 1 — Critical | 11 | 11 | 0 | 0 |
-| 2 — Important | 12 | 10 | 1 | 1 |
-| 3 — Enhancements | 17 | 8 | 0 | 9 |
-| **Total** | **40** | **29** | **1** | **10** |
+| 2 — Important | 12 | 12 | 0 | 0 |
+| 3 — Enhancements | 17 | 11 | 0 | 6 |
+| **Total** | **40** | **34** | **1** | **5** |
