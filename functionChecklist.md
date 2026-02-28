@@ -62,7 +62,7 @@ These round out the experience but have workarounds or limited daily impact.
 | 28 | `[ ]` | **F1 Help — hyperlinks between nodes** | Help viewer shows plain text. Original MC uses ctrl-char escape codes to embed hyperlinks between nodes; clicking or pressing Enter on a link navigates to the linked topic. | `src/help.c` |
 | 29 | `[x]` | **Filtered view — pass filename automatically** | ~~"Filtered view" dialog does not substitute `%f` with the current filename; user must type the full command including filename manually.~~ Already implemented: default command is "cat %f" and `%f` is substituted with the full file path before execution. | `src/filemanager/cmd.c` — `filtered_view_cmd()` |
 | 30 | `[x]` | **Encoding — full iconv list** | ~~Hardcoded list of 16 encodings.~~ Fixed: uses `System.Text.Encoding.GetEncodings()` for the full .NET-registered list; preferred encodings first, rest alphabetically; filter field for quick search. | `lib/charsets.c` |
-| 31 | `[ ]` | **Options → Appearance / Skins** | Currently shows "not implemented". Original MC supports INI-based colour skin files from `~/.local/share/mc/skins/`. | `lib/skin/` |
+| 31 | `[x]` | **Options → Appearance / Skins** | ~~Currently shows "not implemented".~~ Fixed: `ShowAppearanceDialog()` lists "default" plus any INI skin files found in `~/.local/share/mc/skins/` and `/usr/share/mc/skins/`; selecting one calls `McTheme.ApplySkin()` which parses the MC INI colour format and updates all ColorSchemes; choice persisted via `McSettings.ActiveSkin`. | `lib/skin/` |
 | 32 | `[x]` | **Options → Learn keys** | ~~Shows "not implemented".~~ Fixed: `ShowLearnKeysDialog()` shows a scrollable list of all 25 key bindings (F-keys, Ctrl combinations, Ctrl+X submap) in a table. | `src/learn.c` |
 | 33 | `[x]` | **Options → Virtual FS settings** | ~~Shows "not implemented".~~ Fixed: `ShowVfsSettingsDialog()` with VFS cache timeout, FTP anonymous password, FTP proxy host, and "Use passive mode" checkbox; persisted via McSettings. | `src/vfs/setup.c` |
 | 34 | `[x]` | **Background jobs dialog** | ~~Shows a static informational message.~~ Fixed as part of #22: ShowBackgroundJobs() now lists real BackgroundJob entries with name/status and a Kill button. | `src/background.c` — `jobs_cmd()` |
@@ -81,5 +81,5 @@ These round out the experience but have workarounds or limited daily impact.
 |------|-------|------|-------------|-------------|
 | 1 — Critical | 11 | 11 | 0 | 0 |
 | 2 — Important | 12 | 12 | 0 | 0 |
-| 3 — Enhancements | 17 | 15 | 0 | 2 |
-| **Total** | **40** | **38** | **0** | **2** |
+| 3 — Enhancements | 17 | 16 | 0 | 1 |
+| **Total** | **40** | **39** | **0** | **1** |

@@ -185,7 +185,7 @@ public sealed class McApplication : Toplevel
                     new("_Layout...",        string.Empty, ShowLayoutDialog),
                     new("_Panel options...", string.Empty, ShowPanelOptionsDialog),
                     new("C_onfirmation...",  string.Empty, ShowConfirmationDialog),
-                    new("_Appearance...",    string.Empty, () => NotImplemented("Appearance / skins")),
+                    new("_Appearance...",    string.Empty, ShowAppearanceDialog),
                     new("_Learn keys...",    string.Empty, ShowLearnKeysDialog),
                     new("_Virtual FS...",    string.Empty, ShowVfsSettingsDialog),
                     null!,
@@ -3014,6 +3014,69 @@ public sealed class McApplication : Toplevel
     /// VFS settings dialog (cache timeout, FTP settings).
     /// Equivalent to configure_vfs() in the original C codebase.
     /// </summary>
+    private void ShowAppearanceDialog()
+    {
+        var skins = McTheme.FindSkinFiles();
+        var skinNames = skins.Select(f => Path.GetFileNameWithoutExtension(f)).ToList();
+        skinNames.Insert(0, "default");
+
+        var currentSkin = _settings.ActiveSkin;
+        var selectedIdx = skinNames.IndexOf(currentSkin);
+        if (selectedIdx < 0) selectedIdx = 0;
+
+        var d = new Dialog
+        {
+            Title  = "Appearance",
+            Width  = 50,
+            Height = 16,
+            ColorScheme = McTheme.Dialog,
+        };
+
+        var label = new Label
+        {
+            X = 1, Y = 0,
+            Text = "Select skin (color theme):",
+            ColorScheme = McTheme.Dialog,
+        };
+
+        var lv = new ListView
+        {
+            X = 1, Y = 2,
+            Width  = Dim.Fill(1),
+            Height = Dim.Fill(4),
+            ColorScheme = McTheme.Panel,
+        };
+        lv.SetSource(new System.Collections.ObjectModel.ObservableCollection<string>(skinNames));
+        lv.SelectedItem = Math.Max(0, selectedIdx);
+
+        var okBtn = new Button { Text = "OK", IsDefault = true };
+        okBtn.Accepting += (_, _) =>
+        {
+            var idx      = lv.SelectedItem;
+            var chosen   = idx >= 0 && idx < skinNames.Count ? skinNames[idx] : "default";
+            _settings.ActiveSkin = chosen;
+            if (chosen == "default")
+                McTheme.ApplyDefault();
+            else
+            {
+                var path = idx > 0 ? skins[idx - 1] : string.Empty;
+                if (!string.IsNullOrEmpty(path))
+                    McTheme.ApplySkin(path);
+            }
+            Application.LayoutAndDraw(true);
+            Application.RequestStop(d);
+        };
+
+        var cancelBtn = new Button { Text = "Cancel" };
+        cancelBtn.Accepting += (_, _) => Application.RequestStop(d);
+
+        d.AddButton(okBtn);
+        d.AddButton(cancelBtn);
+        d.Add(label, lv);
+        Application.Run(d);
+        d.Dispose();
+    }
+
     private void ShowVfsSettingsDialog()
     {
         var d = new Dialog
