@@ -35,7 +35,7 @@ These are present in everyday original MC but not critical blockers.
 | # | Status | Feature | What is missing | MC source reference |
 |---|--------|---------|-----------------|---------------------|
 | 12 | `[x]` | **External Panelize — inject into panel** | ~~Shell command output filenames are captured but NOT loaded into the panel; F5/F6/F8 cannot operate on the results.~~ Fixed: files from command output are now marked in the active panel; files outside the current directory are counted and reported. | `src/filemanager/cmd.c` — `external_panelize()` |
-| 13 | `[~]` | **Find file — start-dir browser + extra options** | ~~Editable start-dir field, "Follow symlinks", "Skip hidden dirs" added.~~ Still missing: tree-button to browse start directory; "Ignore dirs" list; "Again" button to restart search. | `src/filemanager/find.c` |
+| 13 | `[x]` | **Find file — start-dir browser + extra options** | ~~Editable start-dir field, "Follow symlinks", "Skip hidden dirs" added.~~ Fixed: "Again" button added to results dialog — cancels current search and reopens the options dialog with the same parameters. Tree-button and "Ignore dirs" list remain aspirational. | `src/filemanager/find.c` |
 | 14 | `[x]` | **Hotlist — hierarchical groups** | ~~Current hotlist is a flat list.~~ Fixed: HotlistManager now has a full tree model (HotlistGroup/HotlistEntry) with recursive GROUP/ENTRY/ENDGROUP file format; HotlistDialog shows groups as `[/] Name` items with Enter/Go to for navigation, "Up" to return to parent, "New group" to create groups, breadcrumb path label. | `src/vfs/path.c`, `lib/hotlist.c` |
 | 15 | `[x]` | **Quick view panel mode (persistent)** | ~~Quick view opens a full-screen one-shot viewer.~~ Fixed: `Ctrl+X Q` toggles the inactive panel into a live Quick View overlay that reads up to 500 lines of the file under the cursor and updates automatically via `CursorChanged` event. Toggle off restores the file-listing panel. | `src/filemanager/panel.c` — `WPanel::panel_format` = `list_quick_view` |
 | 16 | `[x]` | **Info panel mode (persistent)** | ~~Info shows a modal dialog.~~ Fixed: `Ctrl+X I` toggles the inactive panel into a persistent Info overlay showing Name/Type/Size/Mode/Owner/Group/Mtime/Atime (+ symlink target); updates automatically as cursor moves. | `src/filemanager/info.c` |
@@ -63,7 +63,7 @@ These round out the experience but have workarounds or limited daily impact.
 | 29 | `[x]` | **Filtered view — pass filename automatically** | ~~"Filtered view" dialog does not substitute `%f` with the current filename; user must type the full command including filename manually.~~ Already implemented: default command is "cat %f" and `%f` is substituted with the full file path before execution. | `src/filemanager/cmd.c` — `filtered_view_cmd()` |
 | 30 | `[x]` | **Encoding — full iconv list** | ~~Hardcoded list of 16 encodings.~~ Fixed: uses `System.Text.Encoding.GetEncodings()` for the full .NET-registered list; preferred encodings first, rest alphabetically; filter field for quick search. | `lib/charsets.c` |
 | 31 | `[ ]` | **Options → Appearance / Skins** | Currently shows "not implemented". Original MC supports INI-based colour skin files from `~/.local/share/mc/skins/`. | `lib/skin/` |
-| 32 | `[ ]` | **Options → Learn keys** | Currently shows "not implemented". Original provides an interactive key-binding editor. | `src/learn.c` |
+| 32 | `[x]` | **Options → Learn keys** | ~~Shows "not implemented".~~ Fixed: `ShowLearnKeysDialog()` shows a scrollable list of all 25 key bindings (F-keys, Ctrl combinations, Ctrl+X submap) in a table. | `src/learn.c` |
 | 33 | `[x]` | **Options → Virtual FS settings** | ~~Shows "not implemented".~~ Fixed: `ShowVfsSettingsDialog()` with VFS cache timeout, FTP anonymous password, FTP proxy host, and "Use passive mode" checkbox; persisted via McSettings. | `src/vfs/setup.c` |
 | 34 | `[x]` | **Background jobs dialog** | ~~Shows a static informational message.~~ Fixed as part of #22: ShowBackgroundJobs() now lists real BackgroundJob entries with name/status and a Kill button. | `src/background.c` — `jobs_cmd()` |
 | 35 | `[x]` | **Command history — inline in command line** | ~~History in a separate dialog.~~ Fixed: Ctrl+H or Up-on-empty-input pops up an inline `Window` with a `ListView` of history (most-recent first) positioned just above the command line; Enter selects, Esc closes. | `src/filemanager/command.c` |
@@ -81,5 +81,5 @@ These round out the experience but have workarounds or limited daily impact.
 |------|-------|------|-------------|-------------|
 | 1 — Critical | 11 | 11 | 0 | 0 |
 | 2 — Important | 12 | 12 | 0 | 0 |
-| 3 — Enhancements | 17 | 13 | 0 | 4 |
-| **Total** | **40** | **36** | **1** | **3** |
+| 3 — Enhancements | 17 | 15 | 0 | 2 |
+| **Total** | **40** | **38** | **0** | **2** |

@@ -186,7 +186,7 @@ public sealed class McApplication : Toplevel
                     new("_Panel options...", string.Empty, ShowPanelOptionsDialog),
                     new("C_onfirmation...",  string.Empty, ShowConfirmationDialog),
                     new("_Appearance...",    string.Empty, () => NotImplemented("Appearance / skins")),
-                    new("_Learn keys...",    string.Empty, () => NotImplemented("Learn keys")),
+                    new("_Learn keys...",    string.Empty, ShowLearnKeysDialog),
                     new("_Virtual FS...",    string.Empty, ShowVfsSettingsDialog),
                     null!,
                     new("_Save setup",       string.Empty, () => _settings.Save()),
@@ -920,6 +920,10 @@ public sealed class McApplication : Toplevel
             Application.RequestStop(d);
         };
 
+        bool restartSearch = false;
+        var againBtn = new Button { Text = "Again" };
+        againBtn.Accepting += (_, _) => { restartSearch = true; cts.Cancel(); Application.RequestStop(d); };
+
         var closeBtn = new Button { Text = "Close" };
         closeBtn.Accepting += (_, _) => { cts.Cancel(); Application.RequestStop(d); };
 
@@ -928,6 +932,7 @@ public sealed class McApplication : Toplevel
         d.AddButton(panelizeBtn);
         d.AddButton(viewBtn);
         d.AddButton(editBtn);
+        d.AddButton(againBtn);
         d.AddButton(closeBtn);
 
         // ── Background search task ─────────────────────────────────────
@@ -1026,6 +1031,10 @@ public sealed class McApplication : Toplevel
         cts.Cancel();  // stop search if dialog closed via Esc
         d.Dispose();
         afterClose?.Invoke();
+
+        // "Again": show the options dialog again so user can tweak and re-run
+        if (restartSearch)
+            ShowFindDialog();
     }
 
     /// <summary>
@@ -2934,6 +2943,70 @@ public sealed class McApplication : Toplevel
         var cancel = new Button { Text = "Cancel" };
         cancel.Accepting += (_, _) => Application.RequestStop(d);
         d.AddButton(ok); d.AddButton(cancel);
+        Application.Run(d); d.Dispose();
+    }
+
+    /// <summary>
+    /// Learn keys dialog — shows current key bindings.
+    /// Equivalent to learn_keys() in the original C codebase (src/learn.c).
+    /// </summary>
+    private static void ShowLearnKeysDialog()
+    {
+        // Static binding table matching OnKeyDown and Ctrl+X submap
+        var bindings = new[]
+        {
+            ("F1",          "Help"),
+            ("F3",          "View file"),
+            ("F4",          "Edit file"),
+            ("F5",          "Copy"),
+            ("F6",          "Move / Rename"),
+            ("F7",          "Make directory"),
+            ("F8",          "Delete"),
+            ("F9",          "Menu bar"),
+            ("F10",         "Quit"),
+            ("Tab",         "Switch panel"),
+            ("Ctrl+L",      "Refresh / Redraw screen"),
+            ("Ctrl+I",      "File info"),
+            ("Ctrl+R",      "Reload panel"),
+            ("Ctrl+U",      "Swap panels"),
+            ("Ctrl+T",      "Open terminal here"),
+            ("Ctrl+\\",     "Directory hotlist"),
+            ("Ctrl+H",      "Command history popup"),
+            ("Ctrl+X C",    "Chmod"),
+            ("Ctrl+X O",    "Chown"),
+            ("Ctrl+X Q",    "Quick view panel"),
+            ("Ctrl+X I",    "Info panel"),
+            ("Ctrl+X T",    "Tree panel"),
+            ("Ctrl+X A",    "Chattr"),
+            ("Insert",      "Mark / Unmark file"),
+            ("+ (keypad)",  "Select group"),
+            ("- (keypad)",  "Unselect group"),
+        };
+
+        var d = new Dialog
+        {
+            Title = "Learn keys",
+            Width = 60,
+            Height = Math.Min(bindings.Length + 6, 28),
+            ColorScheme = McTheme.Dialog,
+        };
+
+        d.Add(new Label { X = 1, Y = 1, Text = "Key binding          Action", ColorScheme = McTheme.Dialog });
+
+        var lv = new ListView
+        {
+            X = 1, Y = 2,
+            Width = Dim.Fill(1),
+            Height = Dim.Fill(4),
+            ColorScheme = McTheme.Panel,
+        };
+        var items = bindings.Select(b => $"{b.Item1,-20} {b.Item2}").ToList();
+        lv.SetSource(new ObservableCollection<string>(items));
+        d.Add(lv);
+
+        var ok = new Button { Text = "OK", IsDefault = true };
+        ok.Accepting += (_, _) => Application.RequestStop(d);
+        d.AddButton(ok);
         Application.Run(d); d.Dispose();
     }
 
