@@ -41,6 +41,8 @@ public sealed class FilePanelView : View
     public bool LynxLikeMotion          { get; set; } = true;   // #6
     public bool MarkMovesCursor         { get; set; } = true;   // #7
     public bool QuickSearchCaseSensitive { get; set; }          // #5
+    public bool ShowScrollbar            { get; set; }           // #9
+    public bool ShowMiniStatus           { get; set; } = true;  // #24
 
     public event EventHandler<FileEntry?>? EntryActivated;
     public event EventHandler<int>? CursorChanged;
@@ -92,7 +94,7 @@ public sealed class FilePanelView : View
         int clickY = e.Position.Y;
         int h = Viewport.Height;
         int fileAreaStart = 2;
-        int fileAreaEnd = h - 2;
+        int fileAreaEnd = ShowMiniStatus ? h - 2 : h - 1;
         if (clickY < fileAreaStart || clickY >= fileAreaEnd) return -1;
 
         int idx = _scrollOffset + (clickY - fileAreaStart);
@@ -150,11 +152,10 @@ public sealed class FilePanelView : View
 
     // --- Layout helpers ---
 
-    // Number of file-entry rows visible between the column header and the status line.
-    // Layout: row 0 = top border, row 1 = column header,
-    //         rows 2 .. h-3 = entries,
-    //         row h-2 = status, row h-1 = bottom border.
-    private int ContentRows => Math.Max(0, Viewport.Height - 4);
+    // Number of file-entry rows visible between the column header and the status/bottom border.
+    // With mini-status:    row 0=top, row 1=header, rows 2..h-3=entries, row h-2=status, row h-1=bottom.
+    // Without mini-status: row 0=top, row 1=header, rows 2..h-2=entries, row h-1=bottom.
+    private int ContentRows => Math.Max(0, Viewport.Height - (ShowMiniStatus ? 4 : 3));
 
     private void EnsureCursorVisible()
     {
@@ -236,7 +237,8 @@ public sealed class FilePanelView : View
         DrawBorderAndPath(w, h);
         DrawColumnHeader(w);
         DrawFileEntries(w, h);
-        DrawStatusLine(w, h);
+        if (ShowMiniStatus) DrawStatusLine(w, h);
+        DrawScrollbar(w, h);
         return false;
     }
 
@@ -328,7 +330,7 @@ public sealed class FilePanelView : View
     private void DrawFileEntries(int w, int h)
     {
         int innerWidth  = w - 2;
-        int contentRows = h - 4;
+        int contentRows = ContentRows;
         if (contentRows <= 0) return;
 
         if (_listingMode == PanelListingMode.Brief)
@@ -409,6 +411,7 @@ public sealed class FilePanelView : View
         else if (entry.IsDirectory || entry.IsParentDir)    return McTheme.PanelDirectory;
         else if (entry.IsSymlink)                           return McTheme.PanelSymlink;
         else if (entry.IsExecutable)                        return McTheme.PanelExecutable;
+        else if (IsArchiveFile(entry.Name))                 return McTheme.PanelArchive;  // (#22)
         else                                                return McTheme.PanelFile;
     }
 
@@ -652,6 +655,17 @@ public sealed class FilePanelView : View
                 EntryActivated?.Invoke(this, _listing.Entries.FirstOrDefault(e => e.IsParentDir));
                 return true;
 
+            // Alt+S / Alt+s → start quick search (same as typing a char). (#61)
+            case KeyCode.S | KeyCode.AltMask:
+                if (_isActive)
+                {
+                    _quickSearch = string.Empty;
+                    _quickSearchActive = true;
+                    UpdateStatus();
+                    SetNeedsDraw();
+                }
+                return true;
+
             default:
                 if (_isActive)
                 {
@@ -666,6 +680,49 @@ public sealed class FilePanelView : View
                 }
                 if (!_isActive) BecameActive?.Invoke(this, EventArgs.Empty);
                 return base.OnKeyDown(keyEvent);
+        }
+    }
+
+    // --- Archive detection (#22) ---
+
+    private static readonly HashSet<string> ArchiveExtensions = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ".zip", ".tar", ".gz", ".bz2", ".xz", ".rar", ".7z", ".tgz", ".tbz2",
+        ".txz", ".lz", ".lzma", ".z", ".ar", ".deb", ".rpm", ".cab", ".iso",
+        ".img", ".dmg", ".cpio", ".zst", ".lz4", ".ace", ".arc",
+    };
+
+    private static bool IsArchiveFile(string name)
+    {
+        var ext = Path.GetExtension(name);
+        if (ArchiveExtensions.Contains(ext)) return true;
+        var lower = name.ToLowerInvariant();
+        return lower.EndsWith(".tar.gz") || lower.EndsWith(".tar.bz2")
+            || lower.EndsWith(".tar.xz") || lower.EndsWith(".tar.zst")
+            || lower.EndsWith(".tar.lz4");
+    }
+
+    // --- Scrollbar drawing (#9, #57) ---
+
+    private void DrawScrollbar(int w, int h)
+    {
+        if (!ShowScrollbar) return;
+        var entries = _listing.Entries;
+        int visibleRows = ContentRows;
+        if (entries.Count <= visibleRows) return; // fits without scrollbar
+
+        int scrollbarCol = w - 2;
+        int scrollbarTop = 2;
+        int thumbPos = (int)((double)_scrollOffset
+            / Math.Max(1, entries.Count - visibleRows)
+            * Math.Max(1, visibleRows - 1));
+        thumbPos = Math.Clamp(thumbPos, 0, visibleRows - 1);
+
+        Driver.SetAttribute(McTheme.PanelFrame);
+        for (int row = 0; row < visibleRows; row++)
+        {
+            Move(scrollbarCol, scrollbarTop + row);
+            Driver.AddStr(row == thumbPos ? "▓" : "░");
         }
     }
 
@@ -689,6 +746,52 @@ public sealed class FilePanelView : View
             EnsureCursorVisible();
         }
         UpdateStatus();
+        SetNeedsDraw();
+    }
+
+    /// <summary>Jumps to the first entry in the panel (Alt+G). (#27)</summary>
+    public void JumpToFirst()
+    {
+        if (_listing.Entries.Count == 0) return;
+        _cursorIndex = 0;
+        _scrollOffset = 0;
+        UpdateStatus();
+        CursorChanged?.Invoke(this, _cursorIndex);
+        SetNeedsDraw();
+    }
+
+    /// <summary>Jumps to the middle entry in the panel (Alt+R). (#27)</summary>
+    public void JumpToMiddle()
+    {
+        if (_listing.Entries.Count == 0) return;
+        _cursorIndex = (_listing.Entries.Count - 1) / 2;
+        EnsureCursorVisible();
+        UpdateStatus();
+        CursorChanged?.Invoke(this, _cursorIndex);
+        SetNeedsDraw();
+    }
+
+    /// <summary>Jumps to the last entry in the panel (Alt+J). (#27)</summary>
+    public void JumpToLast()
+    {
+        if (_listing.Entries.Count == 0) return;
+        _cursorIndex = _listing.Entries.Count - 1;
+        EnsureCursorVisible();
+        UpdateStatus();
+        CursorChanged?.Invoke(this, _cursorIndex);
+        SetNeedsDraw();
+    }
+
+    /// <summary>Cycles the listing mode Full → Brief → Long → Full (Alt+T). (#25)</summary>
+    public void CycleListingMode()
+    {
+        _listingMode = _listingMode switch
+        {
+            PanelListingMode.Full  => PanelListingMode.Brief,
+            PanelListingMode.Brief => PanelListingMode.Long,
+            PanelListingMode.Long  => PanelListingMode.Full,
+            _                      => PanelListingMode.Full,
+        };
         SetNeedsDraw();
     }
 

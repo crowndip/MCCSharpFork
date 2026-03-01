@@ -18,10 +18,26 @@ public static class SortDialog
         };
 
         var fields = Enum.GetValues<SortField>();
+        // Human-readable labels matching original MC sort dialog (#45)
+        static string Label(SortField f) => f switch
+        {
+            SortField.Name             => "Name",
+            SortField.Extension        => "Extension",
+            SortField.Size             => "Size",
+            SortField.ModificationTime => "Modify time",
+            SortField.AccessTime       => "Access time",
+            SortField.CreationTime     => "Change time",
+            SortField.Permissions      => "Permissions",
+            SortField.Owner            => "Owner",
+            SortField.Group            => "Group",
+            SortField.Inode            => "Inode",
+            SortField.Unsorted         => "Unsorted",
+            _                          => f.ToString(),
+        };
         var radioGroup = new RadioGroup
         {
             X = 1, Y = 1,
-            RadioLabels = fields.Select(f => f.ToString()).ToArray(),
+            RadioLabels = fields.Select(Label).ToArray(),
             SelectedItem = Array.IndexOf(fields, current.Field),
             ColorScheme = McTheme.Dialog,
         };

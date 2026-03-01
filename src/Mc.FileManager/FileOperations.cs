@@ -5,6 +5,9 @@ namespace Mc.FileManager;
 public enum OperationConflict { Ask, Overwrite, Skip, Rename }
 public enum OperationResult { Success, Skipped, Error, Cancelled }
 
+/// <summary>Per-file overwrite decision returned by a conflict callback.</summary>
+public enum OverwriteAction { Overwrite, OverwriteAll, Skip, SkipAll, Append }
+
 public sealed class OperationProgress
 {
     public string CurrentFile { get; set; } = string.Empty;
@@ -29,6 +32,8 @@ public sealed class FileOperations
         IReadOnlyList<VfsPath> sources,
         VfsPath destination,
         OperationConflict onConflict = OperationConflict.Ask,
+        Func<string, string, OverwriteAction>? conflictCallback = null,
+        bool preserveAttributes = false,
         IProgress<OperationProgress>? progress = null,
         CancellationToken ct = default)
     {
@@ -39,6 +44,10 @@ public sealed class FileOperations
             try { totalBytes += _vfs.Stat(src).Size; } catch { }
         }
         prog.TotalBytes = totalBytes;
+
+        // Shared overwrite decision (OverwriteAll/SkipAll persists across files)
+        var overwriteAll = false;
+        var skipAll      = false;
 
         for (int i = 0; i < sources.Count; i++)
         {
@@ -53,11 +62,29 @@ public sealed class FileOperations
 
             if (stat.IsDirectory)
             {
-                await CopyDirectoryAsync(src, destPath, onConflict, prog, progress, ct);
+                await CopyDirectoryAsync(src, destPath, onConflict, conflictCallback,
+                    preserveAttributes, prog, progress, ct);
             }
             else
             {
-                await CopySingleFileAsync(src, destPath, stat.Size, onConflict, prog, progress, ct);
+                // Resolve conflict when destination exists
+                bool destExists = false;
+                try { _vfs.Stat(destPath); destExists = true; } catch { }
+                if (destExists)
+                {
+                    if (skipAll) { prog.FilesDone++; continue; }
+                    if (!overwriteAll)
+                    {
+                        var action = conflictCallback != null
+                            ? conflictCallback(stat.Name, destPath.Path)
+                            : OverwriteAction.Overwrite;
+                        if (action == OverwriteAction.Skip) continue;
+                        if (action == OverwriteAction.SkipAll) { skipAll = true; continue; }
+                        if (action == OverwriteAction.OverwriteAll) overwriteAll = true;
+                    }
+                }
+
+                await CopySingleFileAsync(src, destPath, stat.Size, preserveAttributes, prog, progress, ct);
             }
         }
 
@@ -91,7 +118,7 @@ public sealed class FileOperations
             catch
             {
                 // Cross-device: copy then delete
-                await CopySingleFileAsync(src, destPath, stat.Size, onConflict, prog, progress, ct);
+                await CopySingleFileAsync(src, destPath, stat.Size, false, prog, progress, ct);
                 _vfs.DeleteFile(src);
             }
             prog.BytesDone += stat.Size;
@@ -142,28 +169,31 @@ public sealed class FileOperations
     private async Task CopyDirectoryAsync(
         VfsPath src, VfsPath dest,
         OperationConflict onConflict,
+        Func<string, string, OverwriteAction>? conflictCallback,
+        bool preserveAttributes,
         OperationProgress prog,
         IProgress<OperationProgress>? progress,
         CancellationToken ct)
     {
-        _vfs.CreateDirectory(dest);
+        try { _vfs.Stat(dest); } catch { _vfs.CreateDirectory(dest); }
         var entries = _vfs.ListDirectory(src);
         foreach (var entry in entries)
         {
             ct.ThrowIfCancellationRequested();
             if (entry.Name == "..") continue;
-            var childSrc = entry.FullPath;
+            var childSrc  = entry.FullPath;
             var childDest = dest.Combine(entry.Name);
             if (entry.IsDirectory)
-                await CopyDirectoryAsync(childSrc, childDest, onConflict, prog, progress, ct);
+                await CopyDirectoryAsync(childSrc, childDest, onConflict, conflictCallback, preserveAttributes, prog, progress, ct);
             else
-                await CopySingleFileAsync(childSrc, childDest, entry.Size, onConflict, prog, progress, ct);
+                await CopySingleFileAsync(childSrc, childDest, entry.Size, preserveAttributes, prog, progress, ct);
         }
+        if (preserveAttributes) PreserveAttrs(src, dest);
     }
 
     private async Task CopySingleFileAsync(
         VfsPath src, VfsPath dest, long size,
-        OperationConflict onConflict,
+        bool preserveAttributes,
         OperationProgress prog,
         IProgress<OperationProgress>? progress,
         CancellationToken ct)
@@ -181,5 +211,31 @@ public sealed class FileOperations
             progress?.Report(prog);
         }
         prog.FilesDone++;
+
+        if (preserveAttributes) PreserveAttrs(src, dest);
+    }
+
+    private void PreserveAttrs(VfsPath src, VfsPath dest)
+    {
+        try
+        {
+            var stat = _vfs.Stat(src);
+            // Copy timestamps
+            if (stat.ModificationTime != DateTime.MinValue)
+                File.SetLastWriteTime(dest.Path, stat.ModificationTime);
+            if (stat.AccessTime != DateTime.MinValue)
+                File.SetLastAccessTime(dest.Path, stat.AccessTime);
+            // Copy Unix file mode (permissions) — .NET 7+
+            if (OperatingSystem.IsLinux() || OperatingSystem.IsMacOS())
+            {
+                try
+                {
+                    var srcMode = File.GetUnixFileMode(src.Path);
+                    File.SetUnixFileMode(dest.Path, srcMode);
+                }
+                catch { /* non-local VFS or unsupported */ }
+            }
+        }
+        catch { /* best-effort */ }
     }
 }

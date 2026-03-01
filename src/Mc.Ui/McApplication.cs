@@ -115,12 +115,12 @@ public sealed class McApplication : Toplevel
                     new("F_iltered view",        string.Empty, () => ViewFiltered()),
                     new("_Edit",                 "F4",         () => EditCurrent()),
                     new("_Copy",                 "F5",         () => CopyFiles()),
-                    new("C_hmod",                string.Empty, () => Chmod()),
-                    new("_Link",                 string.Empty, () => CreateLink()),
-                    new("_Symlink",              string.Empty, () => CreateSymlink()),
-                    new("Relati_ve symlink",      string.Empty, () => CreateRelativeSymlink()),
+                    new("C_hmod",                "Ctrl+X C",   () => Chmod()),
+                    new("_Link",                 "Ctrl+X L",   () => CreateLink()),
+                    new("_Symlink",              "Ctrl+X S",   () => CreateSymlink()),
+                    new("Relati_ve symlink",     "Ctrl+X V",   () => CreateRelativeSymlink()),
                     new("Edit s_ymlink",         string.Empty, () => EditSymlink()),
-                    new("Ch_own",                string.Empty, () => Chown()),
+                    new("Ch_own",                "Ctrl+X O",   () => Chown()),
                     new("_Advanced chown",       string.Empty, () => AdvancedChown()),
                     new("Ch_attr",               "Ctrl+X A",   () => Chattr()),
                     new("_Rename/Move",          "F6",         () => MoveFiles()),
@@ -129,7 +129,7 @@ public sealed class McApplication : Toplevel
                     new("_Quick cd",             string.Empty, () => QuickCd()),
                     null!,
                     new("_Select group",         "+",          () => SelectGroup()),
-                    new("_Unselect group",       "-",          () => UnselectGroup()),
+                    new("_Unselect group",       "\\",         () => UnselectGroup()),
                     new("_Invert selection",     "*",          () => InvertSelection()),
                     null!,
                     new("E_xit",                 "F10",        () => ConfirmQuit()),
@@ -213,6 +213,7 @@ public sealed class McApplication : Toplevel
         _leftPanelView.BecameActive += (_, _) => SetActivePanel(_leftPanelView);
         _leftPanelView.IsActive = true;
         ApplyPanelSettings(_leftPanelView);
+        // ApplyFilterSettings() is called after both panels are constructed (see below)
 
         // Right panel overlaps the left panel's right border by 1 column so that
         // the shared divider is a single │ rather than a double ││. (#5)
@@ -225,6 +226,12 @@ public sealed class McApplication : Toplevel
         _rightPanelView.EntryActivated += OnPanelEntryActivated;
         _rightPanelView.BecameActive += (_, _) => SetActivePanel(_rightPanelView);
         ApplyPanelSettings(_rightPanelView);
+
+        // Apply filter settings now that both panels are constructed (#4)
+        _controller.LeftPanel.Filter.ShowHidden  = _settings.ShowHiddenFiles;
+        _controller.LeftPanel.Filter.ShowBackups = _settings.ShowBackupFiles;
+        _controller.RightPanel.Filter.ShowHidden  = _settings.ShowHiddenFiles;
+        _controller.RightPanel.Filter.ShowBackups = _settings.ShowBackupFiles;
 
         // Cursor-change hooks: update overlay when active-panel cursor moves
         _leftPanelView.CursorChanged  += (_, _) => { if (_rightMode != PanelDisplayMode.Normal) UpdateOverlay(false); };
@@ -285,13 +292,24 @@ public sealed class McApplication : Toplevel
             _ctrlXPrefix = false;
             switch (keyEvent.KeyCode)
             {
-                case KeyCode.C: Chmod(); return true;           // Ctrl+X C → chmod
-                case KeyCode.O: Chown(); return true;           // Ctrl+X O → chown
+                case KeyCode.C: Chmod(); return true;                                        // Ctrl+X C → chmod (#46)
+                case KeyCode.O: Chown(); return true;                                        // Ctrl+X O → chown (#46)
                 case KeyCode.Q: ToggleOverlayMode(PanelDisplayMode.QuickView); return true; // Ctrl+X Q → quick view
                 case KeyCode.I: ToggleOverlayMode(PanelDisplayMode.Info);      return true; // Ctrl+X I → info panel
-                case KeyCode.T: ToggleOverlayMode(PanelDisplayMode.Tree);      return true; // Ctrl+X T → tree panel
                 case KeyCode.A: Chattr(); return true;                                       // Ctrl+X A → chattr
-                case KeyCode.P: PastePathToCommandLine(); return true;                       // Ctrl+X P → copy path to cmd line (#50)
+                case KeyCode.P when !keyEvent.IsCtrl:
+                    PastePathToCommandLine(); return true;                                   // Ctrl+X P → active panel path (#50)
+                case KeyCode.P when keyEvent.IsCtrl:
+                    PasteOtherPanelPathToCommandLine(); return true;                         // Ctrl+X Ctrl+P → other panel path (#48)
+                case KeyCode.T when !keyEvent.IsCtrl:
+                    PasteTaggedFilesToCommandLine(); return true;                            // Ctrl+X T → tagged files → cmdline (#47)
+                case KeyCode.T when keyEvent.IsCtrl:
+                    PasteTaggedFilesFromOtherPanelToCommandLine(); return true;              // Ctrl+X Ctrl+T → tagged from other panel
+                case KeyCode.H: AddCurrentDirToHotlist(); return true;                      // Ctrl+X H → add to hotlist (#12)
+                case KeyCode.D: CompareDirs(); return true;                                  // Ctrl+X D → compare dirs (#13)
+                case KeyCode.L: CreateLink(); return true;                                   // Ctrl+X L → hard link (#14)
+                case KeyCode.S: CreateSymlink(); return true;                                // Ctrl+X S → absolute symlink (#14)
+                case KeyCode.V: CreateRelativeSymlink(); return true;                        // Ctrl+X V → relative symlink (#14)
             }
             return true; // consume unknown Ctrl+X subkey
         }
@@ -359,11 +377,52 @@ public sealed class McApplication : Toplevel
                 ShowInfo();
                 return true;
 
+            // Alt+C → Quick CD (#5)
+            case KeyCode.C | KeyCode.AltMask:
+                QuickCd();
+                return true;
+
+            // Alt+I is already handled above, but Alt+O is here too
+            // Alt+T → cycle panel listing mode (#25)
+            case KeyCode.T | KeyCode.AltMask:
+                CycleListingMode();
+                return true;
+
+            // Alt+G → jump to first, Alt+R → middle, Alt+J → last in panel (#27)
+            case KeyCode.G | KeyCode.AltMask:
+                GetActivePanel().JumpToFirst(); return true;
+            case KeyCode.R | KeyCode.AltMask:
+                GetActivePanel().JumpToMiddle(); return true;
+            case KeyCode.J | KeyCode.AltMask:
+                GetActivePanel().JumpToLast(); return true;
+
+            // Ctrl+Space → calculate/show directory size (#10)
+            case KeyCode.Space when keyEvent.IsCtrl:
+                ShowDirSizeForCurrentEntry();
+                return true;
+
+            // Ctrl+O → switch panels on/off / subshell (#original MC)
+            case KeyCode.O when keyEvent.IsCtrl:
+                LaunchShell();
+                return true;
+
             default:
                 // Alt+. → toggle hidden files (#11) — KeyCode.Period doesn't exist in TG2; match by rune value
                 if (keyEvent.IsAlt && keyEvent.AsRune.Value == '.')
                 {
                     ToggleHiddenFiles();
+                    return true;
+                }
+                // Alt+? → Find file (#6)
+                if (keyEvent.IsAlt && keyEvent.AsRune.Value == '?')
+                {
+                    ShowFindDialog();
+                    return true;
+                }
+                // Alt+, → toggle split direction (#26)
+                if (keyEvent.IsAlt && keyEvent.AsRune.Value == ',')
+                {
+                    ToggleSplitDirection();
                     return true;
                 }
                 return base.OnKeyDown(keyEvent);
@@ -418,13 +477,26 @@ public sealed class McApplication : Toplevel
         _commandLine.AppendText(path);
     }
 
+    /// <summary>
+    /// Pushes ShowHiddenFiles and ShowBackupFiles from settings into both panel filter objects,
+    /// then reloads both panels so the change takes effect immediately. (#4)
+    /// </summary>
+    private void ApplyFilterSettings()
+    {
+        _controller.LeftPanel.Filter.ShowHidden  = _settings.ShowHiddenFiles;
+        _controller.LeftPanel.Filter.ShowBackups = _settings.ShowBackupFiles;
+        _controller.RightPanel.Filter.ShowHidden  = _settings.ShowHiddenFiles;
+        _controller.RightPanel.Filter.ShowBackups = _settings.ShowBackupFiles;
+        _controller.LeftPanel.Reload();
+        _controller.RightPanel.Reload();
+    }
+
     /// <summary>Toggles display of hidden (dot) files via Alt+. (#11)</summary>
     private void ToggleHiddenFiles()
     {
         _settings.ShowHiddenFiles = !_settings.ShowHiddenFiles;
         _settings.Save();
-        _controller.LeftPanel.Reload();
-        _controller.RightPanel.Reload();
+        ApplyFilterSettings(); // #4: propagate to filter objects
     }
 
     /// <summary>Synchronises the inactive panel to the active panel's current path (Alt+I). (#12)</summary>
@@ -443,6 +515,97 @@ public sealed class McApplication : Toplevel
             ? entry.FullPath
             : VfsPath.FromLocal(Path.GetDirectoryName(entry.FullPath.Path) ?? entry.FullPath.Path);
         _controller.InactivePanel.Load(dir);
+    }
+
+    /// <summary>Adds the active panel's current directory to the hotlist (Ctrl+X H). (#12)</summary>
+    private void AddCurrentDirToHotlist()
+    {
+        var path = _controller.ActivePanel.CurrentPath.Path;
+        var name = Path.GetFileName(path.TrimEnd('/')) ?? path;
+        _controller.Hotlist.Add(name, path);
+        ShowStatus($"Added to hotlist: {path}");
+    }
+
+    /// <summary>Pastes tagged files from the active panel to the command line (Ctrl+X T). (#47)</summary>
+    private void PasteTaggedFilesToCommandLine()
+    {
+        var marked = _controller.ActivePanel.GetMarkedEntries();
+        if (marked.Count == 0)
+        {
+            var cur = GetCurrentEntry();
+            if (cur != null) _commandLine.AppendText(cur.Name + " ");
+            return;
+        }
+        foreach (var e in marked)
+            _commandLine.AppendText(e.Name + " ");
+    }
+
+    /// <summary>Pastes tagged files from the INACTIVE panel to the command line (Ctrl+X Ctrl+T).</summary>
+    private void PasteTaggedFilesFromOtherPanelToCommandLine()
+    {
+        var marked = _controller.InactivePanel.GetMarkedEntries();
+        foreach (var e in marked)
+            _commandLine.AppendText(e.Name + " ");
+    }
+
+    /// <summary>Pastes the INACTIVE panel's current path to the command line (Ctrl+X Ctrl+P). (#48)</summary>
+    private void PasteOtherPanelPathToCommandLine()
+    {
+        _commandLine.AppendText(_controller.InactivePanel.CurrentPath.Path);
+    }
+
+    /// <summary>Cycles the active panel through Full → Brief → Long listing modes (Alt+T). (#25)</summary>
+    private void CycleListingMode()
+    {
+        var panel = GetActivePanel();
+        panel.CycleListingMode();
+    }
+
+    /// <summary>Toggles between vertical and horizontal panel split (Alt+,). (#26)</summary>
+    private void ToggleSplitDirection()
+    {
+        _settings.HorizontalSplit = !_settings.HorizontalSplit;
+        _settings.Save();
+        ApplyLayoutSettings();
+    }
+
+    /// <summary>Shows directory size of the current entry in-panel (Ctrl+Space). (#10)</summary>
+    private void ShowDirSizeForCurrentEntry()
+    {
+        var entry = GetCurrentEntry();
+        if (entry == null || entry.IsParentDir) return;
+        if (entry.IsDirectory)
+        {
+            ShowStatus($"Calculating size of {entry.Name}…");
+            _ = Task.Run(() =>
+            {
+                try
+                {
+                    long size = CalculateDirectorySize(entry.FullPath.Path);
+                    Application.Invoke(() =>
+                    {
+                        ShowStatus($"{entry.Name}: {FileSizeFormatter.Format(size)}");
+                    });
+                }
+                catch { Application.Invoke(() => ShowStatus($"{entry.Name}: (error)")); }
+            });
+        }
+        else
+        {
+            ShowStatus($"{entry.Name}: {FileSizeFormatter.Format(entry.Size)}");
+        }
+    }
+
+    private static long CalculateDirectorySize(string path)
+    {
+        long total = 0;
+        try
+        {
+            foreach (var f in Directory.EnumerateFiles(path, "*", SearchOption.AllDirectories))
+                try { total += new FileInfo(f).Length; } catch { }
+        }
+        catch { }
+        return total;
     }
 
     /// <summary>Goes back in the active panel's directory history (Alt+Y). (#9)</summary>
@@ -466,6 +629,8 @@ public sealed class McApplication : Toplevel
         panel.LynxLikeMotion           = _settings.LynxLikeMotion;
         panel.MarkMovesCursor          = _settings.MarkMovesCursor;
         panel.QuickSearchCaseSensitive = _settings.QuickSearchCaseSensitive;
+        panel.ShowScrollbar            = _settings.ShowScrollbar;   // #9
+        panel.ShowMiniStatus           = _settings.ShowMiniStatus;  // #24
     }
 
     private void OnPanelEntryActivated(object? sender, FileEntry? entry)
@@ -615,7 +780,29 @@ public sealed class McApplication : Toplevel
         var opts = CopyMoveDialog.Show(false, sourceName, dest, defaultSource);
         if (opts?.Confirmed != true) return;
 
-        RunFileOperation("Copy", opts.RunInBackground, _controller.CopyMarkedAsync);
+        // Overwrite confirmation: pre-check which files would be overwritten (#1)
+        if (_settings.ConfirmOverwrite)
+        {
+            var sources = _controller.ActivePanel.GetMarkedEntries();
+            if (sources.Count == 0 && entry != null) sources = new List<FileEntry> { entry };
+            var conflicts = sources
+                .Where(e => !e.IsDirectory && File.Exists(Path.Combine(opts.DestinationPath, e.Name)))
+                .Select(e => e.Name)
+                .ToList();
+            if (conflicts.Count > 0)
+            {
+                var msg = conflicts.Count == 1
+                    ? $"Overwrite \"{conflicts[0]}\"?"
+                    : $"Overwrite {conflicts.Count} existing files?\n  " + string.Join("\n  ", conflicts.Take(5))
+                      + (conflicts.Count > 5 ? $"\n  …and {conflicts.Count - 5} more" : string.Empty);
+                if (!MessageDialog.Confirm("Overwrite?", msg, "Overwrite", "Cancel"))
+                    return;
+            }
+        }
+
+        var preserveAttrs = opts.PreserveAttributes;
+        RunFileOperation("Copy", opts.RunInBackground, (progress, ct) =>
+            _controller.CopyMarkedAsync(progress, ct, preserveAttrs));
     }
 
     private void MoveFiles()
@@ -3113,12 +3300,11 @@ public sealed class McApplication : Toplevel
             _settings.QuickSearchCaseSensitive = caseSensitive.CheckedState == CheckState.Checked;
             _settings.ShowFreeSpace            = freeSpace.CheckedState     == CheckState.Checked;
             _settings.Save();
-            // Apply live settings to panels (#5 #6 #7)
+            // Apply live settings to panels (#5 #6 #7 #9 #24)
             ApplyPanelSettings(_leftPanelView);
             ApplyPanelSettings(_rightPanelView);
-            // Apply panel reload for hidden/backup file visibility change
-            _controller.LeftPanel.Reload();
-            _controller.RightPanel.Reload();
+            // Apply filter settings (ShowHidden, ShowBackup) to both panels (#4)
+            ApplyFilterSettings();
             Application.RequestStop(d);
         };
         var cancel = new Button { Text = "Cancel" };

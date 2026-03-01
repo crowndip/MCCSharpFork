@@ -81,11 +81,15 @@ public sealed class FileManagerController
         }
     }
 
-    public async Task CopyMarkedAsync(IProgress<OperationProgress>? progress = null, CancellationToken ct = default)
+    public async Task CopyMarkedAsync(
+        IProgress<OperationProgress>? progress = null,
+        CancellationToken ct = default,
+        bool preserveAttributes = false)
     {
         var sources = GetSourceEntries().Select(e => e.FullPath).ToList();
         if (sources.Count == 0) return;
-        await Operations.CopyAsync(sources, InactivePanel.CurrentPath, progress: progress, ct: ct);
+        await Operations.CopyAsync(sources, InactivePanel.CurrentPath,
+            preserveAttributes: preserveAttributes, progress: progress, ct: ct);
         InactivePanel.Reload();
     }
 

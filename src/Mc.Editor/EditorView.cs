@@ -20,6 +20,9 @@ public sealed class EditorView : View
     private bool _selecting;
     private int  _selectionAnchor = -1;
 
+    // Syntax-highlighting toggle (Ctrl+T). (#51)
+    private bool _syntaxHighlightingOn = true;
+
     // Line-number gutter width (#23)
     private int GutterWidth => _showLineNumbers ? _editor.Buffer.GetLineCount().ToString().Length + 1 : 0;
 
@@ -86,7 +89,7 @@ public sealed class EditorView : View
             var line = _editor.Buffer.GetLine(lineNo);
             var lineOffset = _editor.Buffer.LineColToOffset(lineNo, 0);
 
-            if (_editor.Highlighter != null)
+            if (_syntaxHighlightingOn && _editor.Highlighter != null)
             {
                 var tokens = _editor.Highlighter.Tokenize(line);
                 DrawLineWithSyntaxAndSelection(row, line, tokens, _leftCol, textWidth, lineOffset);
@@ -104,6 +107,7 @@ public sealed class EditorView : View
         var mode = _insertMode ? "INS" : "OVR";
         var status = $" {_editor.FilePath ?? "new"} | Ln {ln + 1}, Col {col + 1} | {mode} | {(_editor.IsModified ? "Modified" : "Saved")}";
         if (_showLineNumbers) status += " | Nums";
+        if (!_syntaxHighlightingOn) status += " | NoHL";
         if (status.Length > viewport.Width) status = status[..viewport.Width];
         Driver.AddStr(status.PadRight(viewport.Width));
 
@@ -213,6 +217,8 @@ public sealed class EditorView : View
             case KeyCode.F2:  SaveFile(); return true;
             case KeyCode.F10: OnRequestClose(); return true;
             case KeyCode.F7:  ShowFind(); return true;
+            case KeyCode.F7 | KeyCode.ShiftMask: FindAgain(); return true;   // (#17)
+            case KeyCode.F9:  ShowEditorMenu(); return true;                 // (#18)
             case KeyCode.Esc: OnRequestClose(); return true;
 
             // F4 = Find+Replace (#1)
@@ -266,12 +272,6 @@ public sealed class EditorView : View
                 SaveAs();
                 return true;
 
-            // Toggle line numbers (#23)
-            case KeyCode.F9:
-                _showLineNumbers = !_showLineNumbers;
-                SetNeedsDraw();
-                return true;
-
             case KeyCode.CursorUp:   _editor.MoveUp(); return true;
             case KeyCode.CursorDown: _editor.MoveDown(); return true;
             case KeyCode.CursorLeft  when !keyEvent.IsCtrl: _editor.MoveLeft(); return true;
@@ -286,17 +286,49 @@ public sealed class EditorView : View
             case KeyCode.CursorLeft  when keyEvent.IsCtrl: _editor.MoveWordLeft(); return true;
 
             case KeyCode.Backspace: _editor.Backspace(); return true;
+
+            // Shift+Delete = cut (#36)
+            case KeyCode.Delete | KeyCode.ShiftMask:
+                _clipboardText = _editor.Copy();
+                _editor.Cut();
+                _selecting = false;
+                _editor.ClearSelection();
+                return true;
+
             case KeyCode.Delete:    _editor.DeleteForward(); return true;
             case KeyCode.Y when keyEvent.IsCtrl: _editor.DeleteLine(); return true;
+
+            // Ctrl+Insert = copy, Shift+Insert = paste (#36)
+            case KeyCode.Insert | KeyCode.CtrlMask:
+                _clipboardText = _editor.Copy();
+                _selecting = false;
+                _editor.ClearSelection();
+                return true;
+            case KeyCode.Insert | KeyCode.ShiftMask:
+                if (_clipboardText != null) _editor.Paste(_clipboardText);
+                return true;
 
             case KeyCode.Insert:
                 _insertMode = !_insertMode;
                 SetNeedsDraw();
                 return true;
 
-            // Undo Ctrl+Z / Redo Ctrl+Y (when not delete-line) (#2)
+            // Undo Ctrl+Z / Ctrl+U (#33), Redo Ctrl+R (#2)
             case KeyCode.Z when keyEvent.IsCtrl: _editor.Undo(); return true;
+            case KeyCode.U when keyEvent.IsCtrl: _editor.Undo(); return true;  // (#33)
             case KeyCode.R when keyEvent.IsCtrl: _editor.Redo(); return true;
+
+            // Alt+L = go to line (#37)
+            case KeyCode.L | KeyCode.AltMask: ShowGotoLine(); return true;
+
+            // Ctrl+D = insert date/time (#50)
+            case KeyCode.D when keyEvent.IsCtrl: InsertDateTime(); return true;
+
+            // Ctrl+T = toggle syntax highlighting (#51)
+            case KeyCode.T when keyEvent.IsCtrl:
+                _syntaxHighlightingOn = !_syntaxHighlightingOn;
+                SetNeedsDraw();
+                return true;
 
             case KeyCode.C when keyEvent.IsCtrl:
                 _clipboardText = _editor.Copy();
@@ -331,6 +363,12 @@ public sealed class EditorView : View
                 if (keyEvent == Key.Enter)
                 {
                     _editor.InsertNewlineWithIndent(); // #24 auto-indent
+                    return true;
+                }
+                // Shift+Enter = newline without auto-indent (#53)
+                if (keyEvent.KeyCode == (KeyCode.Enter | KeyCode.ShiftMask))
+                {
+                    _editor.InsertChar('\n');
                     return true;
                 }
                 if (keyEvent == Key.Tab)
@@ -376,17 +414,79 @@ public sealed class EditorView : View
         catch (Exception ex) { MessageBox.ErrorQuery("Save Failed", ex.Message, "OK"); }
     }
 
+    /// <summary>Find dialog with case-sensitive and regex options (F7). (#16, #63)</summary>
     private void ShowFind()
     {
-        var pattern = PromptInput("Find", "Search for:", _editor.LastSearch.Pattern);
-        if (pattern == null) return;
-        var opts = new SearchOptions { Pattern = pattern, CaseSensitive = false };
+        string? pattern = null;
+        bool caseSensitive = _editor.LastSearch.CaseSensitive;
+        bool useRegex      = _editor.LastSearch.Type == SearchType.Regex;
+
+        var d = new Dialog { Title = "Search", Width = 60, Height = 11 };
+        d.Add(new Label { X = 1, Y = 1, Text = "Search for:" });
+        var tf = new TextField { X = 1, Y = 2, Width = Dim.Fill(1), Text = _editor.LastSearch.Pattern };
+        d.Add(tf);
+        var caseCb  = new CheckBox { X = 1, Y = 4, Text = "Case sensitive",
+            CheckedState = caseSensitive ? CheckState.Checked : CheckState.UnChecked };
+        var regexCb = new CheckBox { X = 1, Y = 5, Text = "Regular expression",
+            CheckedState = useRegex     ? CheckState.Checked : CheckState.UnChecked };
+        d.Add(caseCb, regexCb);
+        var ok     = new Button { X = Pos.Center() - 5, Y = 8, Text = "OK", IsDefault = true };
+        ok.Accepting += (_, _) => { pattern = tf.Text?.ToString(); Application.RequestStop(d); };
+        var cancel = new Button { X = Pos.Center() + 3, Y = 8, Text = "Cancel" };
+        cancel.Accepting += (_, _) => Application.RequestStop(d);
+        d.AddButton(ok); d.AddButton(cancel);
+        Application.Run(d); d.Dispose();
+
+        if (string.IsNullOrEmpty(pattern)) return;
+        var opts = new SearchOptions
+        {
+            Pattern       = pattern,
+            CaseSensitive = caseCb.CheckedState  == CheckState.Checked,
+            Type          = regexCb.CheckedState == CheckState.Checked ? SearchType.Regex : SearchType.Normal,
+        };
         var result = _editor.FindNext(opts);
         if (!result.Found)
             MessageBox.Query("Find", "Pattern not found", "OK");
         else
             SetNeedsDraw();
     }
+
+    /// <summary>Repeat the last search without showing a dialog (Shift+F7). (#17)</summary>
+    private void FindAgain()
+    {
+        if (string.IsNullOrEmpty(_editor.LastSearch.Pattern)) { ShowFind(); return; }
+        var result = _editor.FindNext(_editor.LastSearch);
+        if (!result.Found)
+            MessageBox.Query("Find", "Pattern not found", "OK");
+        else
+            SetNeedsDraw();
+    }
+
+    /// <summary>Show a simple editor actions menu (F9). (#18)</summary>
+    private void ShowEditorMenu()
+    {
+        var items = new[]
+        {
+            "Save (F2)", "Save As (Shift+F2)", "Find (F7)", "Find+Replace (F4)",
+            "Go to line (Ctrl+G)", "Toggle line numbers", "Toggle syntax highlighting", "Close (F10)",
+        };
+        var choice = MessageBox.Query("Editor", "Select action:", items);
+        switch (choice)
+        {
+            case 0: SaveFile(); break;
+            case 1: SaveAs(); break;
+            case 2: ShowFind(); break;
+            case 3: ShowFindReplace(); break;
+            case 4: ShowGotoLine(); break;
+            case 5: _showLineNumbers = !_showLineNumbers; SetNeedsDraw(); break;
+            case 6: _syntaxHighlightingOn = !_syntaxHighlightingOn; SetNeedsDraw(); break;
+            case 7: OnRequestClose(); break;
+        }
+    }
+
+    /// <summary>Inserts the current date+time at the cursor (Ctrl+D). (#50)</summary>
+    private void InsertDateTime() =>
+        _editor.InsertText(DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"));
 
     /// <summary>Find+Replace dialog. (#1)</summary>
     private void ShowFindReplace()

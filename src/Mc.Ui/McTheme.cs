@@ -27,6 +27,7 @@ public static class McTheme
     public static Terminal.Gui.Attribute PanelMarkedCursor   { get; private set; }
     public static Terminal.Gui.Attribute PanelInactiveCursor { get; private set; }
     public static Terminal.Gui.Attribute PanelStatus         { get; private set; }
+    public static Terminal.Gui.Attribute PanelArchive        { get; private set; }
 
     public static void ApplyDefault()
     {
@@ -108,6 +109,7 @@ public static class McTheme
         PanelMarkedCursor   = new Terminal.Gui.Attribute(Color.BrightYellow, Color.Cyan);
         PanelInactiveCursor = new Terminal.Gui.Attribute(Color.White,        Color.Blue);
         PanelStatus         = new Terminal.Gui.Attribute(Color.Black,        Color.Cyan);
+        PanelArchive        = new Terminal.Gui.Attribute(Color.BrightCyan,   Color.Blue);
 
         // Apply to global colors
         Colors.ColorSchemes["Base"]   = Panel;
@@ -214,6 +216,8 @@ public static class McTheme
         PanelMarkedCursor   = new Terminal.Gui.Attribute(mkFg, sBg);
         PanelInactiveCursor = new Terminal.Gui.Attribute(drFg, pBg);
         PanelStatus         = new Terminal.Gui.Attribute(stFg, stBg);
+        var (arFg, _)       = Pair("panel", "compressed",  Color.BrightCyan, pBg);
+        PanelArchive        = new Terminal.Gui.Attribute(arFg, pBg);
 
         Colors.ColorSchemes["Base"]   = Panel;
         Colors.ColorSchemes["Dialog"] = Dialog;

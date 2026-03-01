@@ -66,17 +66,20 @@ public sealed class CommandLineView : View
             }
         }
         else if (key.KeyCode == (KeyCode.H | KeyCode.CtrlMask) ||
+                 key.KeyCode == (KeyCode.H | KeyCode.AltMask)  ||  // Alt+H = command history (#11)
                  (key == Key.CursorUp && string.IsNullOrEmpty(_input.Text?.ToString())))
         {
             ShowHistoryPopup();
             key.Handled = true;
         }
-        else if (key == Key.CursorUp)
+        else if (key == Key.CursorUp ||
+                 key.KeyCode == (KeyCode.P | KeyCode.AltMask))  // Alt+P = previous (#7)
         {
             NavigateHistory(1);
             key.Handled = true;
         }
-        else if (key == Key.CursorDown)
+        else if (key == Key.CursorDown ||
+                 key.KeyCode == (KeyCode.N | KeyCode.AltMask))  // Alt+N = next (#7)
         {
             NavigateHistory(-1);
             key.Handled = true;
