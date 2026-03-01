@@ -920,7 +920,6 @@ public sealed class McApplication : Toplevel
         _controller.ActivePanel.RefreshMarking();
 
         var progress = new ProgressDialog("Delete");
-        progress.Show();
         _ = Task.Run(async () =>
         {
             try { await _controller.DeleteMarkedAsync(progress, progress.CancellationToken); }
@@ -928,6 +927,7 @@ public sealed class McApplication : Toplevel
             catch (Exception ex) { Application.Invoke(() => MessageDialog.Error(ex.Message)); }
             finally { progress.Close(); Application.Invoke(RefreshPanels); }
         });
+        progress.Show();
     }
 
     private void ShowInfo()
