@@ -20,9 +20,9 @@ CommandLineView.cs, FindDialog.cs, CopyMoveDialog.cs, FileOperations.cs, HelpDia
 |------|-------|-------|-----------|
 | 1 — Critical | 5 | 5 | 0 |
 | 2 — High | 12 | 10 | 2 |
-| 3 — Medium | 18 | 12 | 6 |
-| 4 — Low | 11 | 4 | 7 |
-| **Total** | **46** | **31** | **15** |
+| 3 — Medium | 18 | 13 | 5 |
+| 4 — Low | 11 | 8 | 3 |
+| **Total** | **46** | **36** | **10** |
 
 ---
 
@@ -78,7 +78,7 @@ CommandLineView.cs, FindDialog.cs, CopyMoveDialog.cs, FileOperations.cs, HelpDia
 | 32 | `[ ]` | **VFS: CPIO / ZIP archives as navigable VFS** | `Mc.Vfs.Archives` project exists but coverage of CPIO and ZIP browsing as VFS directories is incomplete/unverified. | `Mc.Vfs.Archives` |
 | 33 | `[ ]` | **VFS: External filesystem scripts (extfs)** | No extfs handler. Original MC supports scripts in `/usr/lib/mc/extfs.d/` that expose e.g. RPM packages, Debian packages, audio CDs as VFS directories. | (no extfs code) |
 | 34 | `[ ]` | **VFS: SFS (single-file filesystem)** | No SFS provider. Original MC uses `mc.sfs` config to mount single-file containers (e.g. ISO images) via external helpers. | (no SFS code) |
-| 35 | `[ ]` | **Copy: preserve ext2 file attributes** | "Preserve ext2 attributes" checkbox is absent from the `CopyMoveDialog`. Original MC can copy immutable, append-only, and other ext2 attributes alongside timestamps and permissions. | `CopyMoveDialog.cs` |
+| 35 | `[x]` | **Copy: preserve ext2 file attributes** | Fixed: "Preserve ext2 attributes" checkbox added to `CopyMoveDialog` (disabled for Move, Linux-only). `CopyMoveOptions.PreserveExt2Attributes` wired through `FileManagerController.CopyMarkedAsync()` → `FileOperations.CopyAsync()` → `CopySingleFileAsync()`. `TryCopyExt2Attributes()` uses `lsattr`/`chattr` subprocess on Linux. | `CopyMoveDialog.cs`, `FileOperations.cs`, `FileManagerController.cs` |
 
 ---
 
@@ -88,14 +88,14 @@ CommandLineView.cs, FindDialog.cs, CopyMoveDialog.cs, FileOperations.cs, HelpDia
 |---|--------|------|-----------------|----------|
 | 36 | `[x]` | **Panel: executable files — optional `*` suffix (like `ls -F`)** | Fixed: `FilePanelView.ShowExecutableSuffix` property added. `FormatEntry()` and `FormatBriefCell()` append `*` to executable names when enabled. `McSettings.ShowExecutableSuffix` persists to config. Added checkbox in Panel Options dialog. | `FilePanelView.cs`, `McSettings.cs`, `McApplication.cs` |
 | 37 | `[x]` | **Panel: symlink-to-directory shown in directory colour** | Fixed: `VfsDirEntry.IsSymlinkToDirectory` added. `LocalVfsProvider` checks if symlink target is a directory via `Directory.Exists()`. `FilePanelView.FollowSymlinks` property controls the color. `GetEntryAttr()` returns `PanelDirectory` for symlinks-to-dirs when `FollowSymlinks` is on. Added checkbox in Panel Options. | `VfsDirEntry.cs`, `LocalVfsProvider.cs`, `FilePanelView.cs`, `McSettings.cs` |
-| 38 | `[ ]` | **Panel: quick search cursor positioned after typed chars** | Quick search appends `_` to the search term in the status strip but the actual terminal cursor is not moved there. Original MC positions the blinking hardware cursor after the last typed character. | `FilePanelView.cs:187` |
-| 39 | `[ ]` | **Panel: sort column name drawn in distinct colour (not just ↑/↓ suffix)** | The active sort column has `↑`/`↓` appended to its header name but no separate colour attribute. Original MC draws the sorted column name in a brighter/inverted colour. | `FilePanelView.cs` — `DrawColumnHeader()` |
-| 40 | `[ ]` | **Subshell: typed command carried into shell (type then Ctrl+O)** | When the user types a command in the command line and presses `Ctrl+O`, original MC passes the typed text to the subshell so it appears ready to execute. Current `LaunchShell()` ignores any text in the command line. | `McApplication.cs` — `LaunchShell()` |
+| 38 | `[x]` | **Panel: quick search cursor positioned after typed chars** | Fixed: `FilePanelView.PositionCursor()` overridden to return the column after the last typed character in the quick search status line when `_quickSearchActive` is true. Hardware cursor now tracks the search term. | `FilePanelView.cs` — `PositionCursor()` |
+| 39 | `[x]` | **Panel: sort column name drawn in distinct colour (not just ↑/↓ suffix)** | Fixed: `McTheme.PanelHeaderSorted` added (bright white on blue). `DrawColumnHeader()` rewritten to draw each column segment individually, applying `PanelHeaderSorted` to the active sort column and `PanelHeader` to the others. | `FilePanelView.cs` — `DrawColumnHeader()`, `McTheme.cs` |
+| 40 | `[x]` | **Subshell: typed command carried into shell (type then Ctrl+O)** | Fixed: `LaunchShell()` reads `_commandLine.Text` before suspending MC. For bash, writes a temp init file that sources `.bashrc` and sets `READLINE_LINE`/`READLINE_POINT`, then starts bash with `--init-file`. For zsh, uses `print -z` via ZDOTDIR. Other shells get `MC_PENDING_CMD` env var. | `McApplication.cs` — `LaunchShell()` |
 | 41 | `[ ]` | **Subshell: shell prompt shown in command line (live)** | Original MC with subshell support shows the actual shell prompt (e.g. `user@host:~/dir$`) in the command line. Current implementation shows a simplified truncated-path prompt constructed by MC, not the real shell prompt. | `CommandLineView.cs` — `SetDirectory()` |
 | 42 | `[ ]` | **Subshell: multiple screens** | `Command > Screen list` is not implemented. Original MC supports multiple pseudo-terminal subshell sessions, each accessible from the screen manager. | `McApplication.cs` — screen list stub |
-| 43 | `[ ]` | **Viewer: per-file display settings not remembered** | Original mcview remembers wrap/hex mode per file within a session. The port always resets to default mode when opening a new file. | `ViewerView.cs` |
-| 44 | `[ ]` | **Learn Keys dialog: interactive key tester** | The current Learn Keys dialog (`ShowLearnKeysDialog()`) shows a static table of bindings. Original MC's Learn Keys is interactive: press a key and it shows what MC recognises it as, allowing the user to teach MC about terminal key sequences. | `ShowLearnKeysDialog()` implementation |
-| 45 | `[ ]` | **Configuration: "Rotating dash" busy indicator** | Original MC animates a spinning dash `-\|/` in the panel title while loading large directories. The port has no such indicator. | `FilePanelView.cs` — no busy spinner |
+| 43 | `[x]` | **Viewer: per-file display settings not remembered** | Fixed: `_perFileSettings` dictionary added to `ViewerView` keyed by file path. Settings (mode, wrapLines, nroffMode) are saved via `SaveCurrentFileSettings()` on every toggle (F2/F4/F8/F9) and on `NavigateFile()`. Restored when navigating back to a previously-viewed file. | `ViewerView.cs` — `_perFileSettings`, `SaveCurrentFileSettings()`, `NavigateFile()` |
+| 44 | `[x]` | **Learn Keys dialog: interactive key tester** | Fixed: Dialog now has two sections — the static binding table (top) and an interactive key tester (bottom). `d.KeyDown` handler decodes the pressed key (Ctrl/Alt/Shift modifiers + key name or rune) and looks it up in the binding table. Shows matching action next to the decoded key. | `McApplication.cs` — `ShowLearnKeysDialog()` |
+| 45 | `[x]` | **Configuration: "Rotating dash" busy indicator** | Fixed: `DirectoryListing.Reloading` event added, fires at start of each `Reload()`. `FilePanelView` subscribes and sets `_isLoading = true`, advances `_spinnerIndex`. `DrawBorderAndPath()` prepends `SpinnerChars[_spinnerIndex]` to the path in the title. `OnListingChanged` clears `_isLoading`. | `DirectoryListing.cs`, `FilePanelView.cs` |
 | 46 | `[x]` | **Configuration: "Cd follows links" option** | Fixed: `McSettings.CdFollowsLinks` property added (persisted to config). `OnPanelEntryActivated()` resolves symlink targets to real paths via `Path.GetFullPath()` when option is on and entry is a symlink-to-dir. | `McSettings.cs`, `McApplication.cs` |
 
 ---

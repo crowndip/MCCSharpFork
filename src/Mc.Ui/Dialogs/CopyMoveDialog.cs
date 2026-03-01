@@ -12,6 +12,7 @@ public sealed class CopyMoveOptions
     public bool FollowSymlinks { get; set; }
     public bool DiveIntoSubdir { get; set; }
     public bool StableSymlinks { get; set; }
+    public bool PreserveExt2Attributes { get; set; }  // #35
     public bool OverwriteAll { get; set; }
     public bool SkipAll { get; set; }
     public bool RunInBackground { get; set; }
@@ -42,7 +43,7 @@ public static class CopyMoveDialog
         {
             Title = title,
             Width = 70,
-            Height = 17,
+            Height = 18,
             ColorScheme = McTheme.Dialog,
         };
 
@@ -100,21 +101,30 @@ public static class CopyMoveDialog
         // "Stable symlinks" only relevant for Copy
         stableCb.Enabled = !isMove;
 
-        d.Add(shellPatternsCb, preserveCb, followSymCb, diveCb, stableCb);
+        var ext2Cb = new CheckBox
+        {
+            X = 1, Y = 14, Text = "Preserve ext2 file attributes (Linux only)",  // #35
+            CheckedState = CheckState.UnChecked, ColorScheme = McTheme.Dialog,
+        };
+        // ext2 attribute preservation only relevant on Linux and for Copy
+        ext2Cb.Enabled = !isMove && OperatingSystem.IsLinux();
+
+        d.Add(shellPatternsCb, preserveCb, followSymCb, diveCb, stableCb, ext2Cb);
 
         var ok = new Button { Text = isMove ? "Move" : "Copy", IsDefault = true };
         ok.Accepting += (_, _) =>
         {
             result = new CopyMoveOptions
             {
-                SourceMask         = sourceInput.Text?.ToString() ?? defaultSource,
-                DestinationPath    = destInput.Text?.ToString() ?? defaultDest,
-                Confirmed          = true,
-                UseShellPatterns   = shellPatternsCb.CheckedState == CheckState.Checked,
-                PreserveAttributes = preserveCb.CheckedState == CheckState.Checked,
-                FollowSymlinks     = followSymCb.CheckedState == CheckState.Checked,
-                DiveIntoSubdir     = diveCb.CheckedState == CheckState.Checked,
-                StableSymlinks     = stableCb.CheckedState == CheckState.Checked,
+                SourceMask              = sourceInput.Text?.ToString() ?? defaultSource,
+                DestinationPath         = destInput.Text?.ToString() ?? defaultDest,
+                Confirmed               = true,
+                UseShellPatterns        = shellPatternsCb.CheckedState == CheckState.Checked,
+                PreserveAttributes      = preserveCb.CheckedState == CheckState.Checked,
+                FollowSymlinks          = followSymCb.CheckedState == CheckState.Checked,
+                DiveIntoSubdir          = diveCb.CheckedState == CheckState.Checked,
+                StableSymlinks          = stableCb.CheckedState == CheckState.Checked,
+                PreserveExt2Attributes  = ext2Cb.CheckedState == CheckState.Checked,  // #35
             };
             Application.RequestStop(d);
         };
@@ -124,15 +134,16 @@ public static class CopyMoveDialog
         {
             result = new CopyMoveOptions
             {
-                SourceMask         = sourceInput.Text?.ToString() ?? defaultSource,
-                DestinationPath    = destInput.Text?.ToString() ?? defaultDest,
-                Confirmed          = true,
-                RunInBackground    = true,
-                UseShellPatterns   = shellPatternsCb.CheckedState == CheckState.Checked,
-                PreserveAttributes = preserveCb.CheckedState == CheckState.Checked,
-                FollowSymlinks     = followSymCb.CheckedState == CheckState.Checked,
-                DiveIntoSubdir     = diveCb.CheckedState == CheckState.Checked,
-                StableSymlinks     = stableCb.CheckedState == CheckState.Checked,
+                SourceMask              = sourceInput.Text?.ToString() ?? defaultSource,
+                DestinationPath         = destInput.Text?.ToString() ?? defaultDest,
+                Confirmed               = true,
+                RunInBackground         = true,
+                UseShellPatterns        = shellPatternsCb.CheckedState == CheckState.Checked,
+                PreserveAttributes      = preserveCb.CheckedState == CheckState.Checked,
+                FollowSymlinks          = followSymCb.CheckedState == CheckState.Checked,
+                DiveIntoSubdir          = diveCb.CheckedState == CheckState.Checked,
+                StableSymlinks          = stableCb.CheckedState == CheckState.Checked,
+                PreserveExt2Attributes  = ext2Cb.CheckedState == CheckState.Checked,  // #35
             };
             Application.RequestStop(d);
         };

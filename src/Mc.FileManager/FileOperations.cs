@@ -1,3 +1,4 @@
+using System.Runtime.InteropServices;
 using System.Text.RegularExpressions;
 using Mc.Core.Vfs;
 
@@ -39,6 +40,7 @@ public sealed class FileOperations
         bool followSymlinks = false,
         bool diveIntoSubdir = true,
         bool stableSymlinks = false,
+        bool preserveExt2Attributes = false,  // #35
         IProgress<OperationProgress>? progress = null,
         CancellationToken ct = default)
     {
@@ -86,7 +88,7 @@ public sealed class FileOperations
                 // Dive-into-subdir: if destination directory exists and diveIntoSubdir=true, merge into it
                 // If diveIntoSubdir=false and dest exists, still merge (preserves current behaviour)
                 await CopyDirectoryAsync(src, destPath, onConflict, conflictCallback,
-                    preserveAttributes, followSymlinks, stableSymlinks, prog, progress, ct);
+                    preserveAttributes, followSymlinks, stableSymlinks, preserveExt2Attributes, prog, progress, ct);
             }
             else
             {
@@ -107,7 +109,7 @@ public sealed class FileOperations
                     }
                 }
 
-                await CopySingleFileAsync(src, destPath, stat.Size, preserveAttributes, prog, progress, ct);
+                await CopySingleFileAsync(src, destPath, stat.Size, preserveAttributes, preserveExt2Attributes, prog, progress, ct);
             }
         }
 
@@ -141,7 +143,7 @@ public sealed class FileOperations
             catch
             {
                 // Cross-device: copy then delete
-                await CopySingleFileAsync(src, destPath, stat.Size, false, prog, progress, ct);
+                await CopySingleFileAsync(src, destPath, stat.Size, false, false, prog, progress, ct);
                 _vfs.DeleteFile(src);
             }
             prog.BytesDone += stat.Size;
@@ -196,6 +198,7 @@ public sealed class FileOperations
         bool preserveAttributes,
         bool followSymlinks,
         bool stableSymlinks,
+        bool preserveExt2Attributes,  // #35
         OperationProgress prog,
         IProgress<OperationProgress>? progress,
         CancellationToken ct)
@@ -216,9 +219,9 @@ public sealed class FileOperations
                 try { _vfs.CreateSymlink(VfsPath.FromLocal(linkTarget), childDest); } catch { }
             }
             else if (entry.IsDirectory)
-                await CopyDirectoryAsync(childSrc, childDest, onConflict, conflictCallback, preserveAttributes, followSymlinks, stableSymlinks, prog, progress, ct);
+                await CopyDirectoryAsync(childSrc, childDest, onConflict, conflictCallback, preserveAttributes, followSymlinks, stableSymlinks, preserveExt2Attributes, prog, progress, ct);
             else
-                await CopySingleFileAsync(childSrc, childDest, entry.Size, preserveAttributes, prog, progress, ct);
+                await CopySingleFileAsync(childSrc, childDest, entry.Size, preserveAttributes, preserveExt2Attributes, prog, progress, ct);
         }
         if (preserveAttributes) PreserveAttrs(src, dest);
     }
@@ -226,6 +229,7 @@ public sealed class FileOperations
     private async Task CopySingleFileAsync(
         VfsPath src, VfsPath dest, long size,
         bool preserveAttributes,
+        bool preserveExt2Attributes,  // #35
         OperationProgress prog,
         IProgress<OperationProgress>? progress,
         CancellationToken ct)
@@ -245,6 +249,7 @@ public sealed class FileOperations
         prog.FilesDone++;
 
         if (preserveAttributes) PreserveAttrs(src, dest);
+        if (preserveExt2Attributes) TryCopyExt2Attributes(src.Path, dest.Path); // #35
     }
 
     /// <summary>Glob pattern match: supports * (any chars) and ? (single char).</summary>
@@ -294,5 +299,45 @@ public sealed class FileOperations
             }
         }
         catch { /* best-effort */ }
+    }
+
+    /// <summary>
+    /// Copy ext2/ext4 file attributes (immutable, append-only, etc.) from src to dest. (#35)
+    /// Uses ioctl FS_IOC_GETFLAGS / FS_IOC_SETFLAGS on Linux.  Best-effort — silently ignores errors.
+    /// </summary>
+    [System.Runtime.Versioning.SupportedOSPlatform("linux")]
+    private static void TryCopyExt2Attributes(string srcPath, string destPath)
+    {
+        if (!OperatingSystem.IsLinux()) return;
+        try
+        {
+            // Read flags from source file via lsattr, set on dest via chattr.
+            // This avoids P/Invoke ioctl complexity while remaining functionally correct.
+            var lsPsi = new System.Diagnostics.ProcessStartInfo
+            {
+                FileName = "lsattr",
+                ArgumentList = { "-d", srcPath },
+                RedirectStandardOutput = true,
+                UseShellExecute = false,
+            };
+            using var lsProc = System.Diagnostics.Process.Start(lsPsi);
+            var line = lsProc?.StandardOutput.ReadLine();
+            lsProc?.WaitForExit();
+
+            // lsattr output: "----i--------e-- /path/to/file"
+            if (string.IsNullOrEmpty(line) || line.Length < 20) return;
+            var flagStr = line[..line.IndexOf(' ')].Replace("-", string.Empty).Trim();
+            if (string.IsNullOrEmpty(flagStr)) return;
+
+            var chattrPsi = new System.Diagnostics.ProcessStartInfo
+            {
+                FileName = "chattr",
+                ArgumentList = { "=" + flagStr, destPath },
+                UseShellExecute = false,
+            };
+            using var chattrProc = System.Diagnostics.Process.Start(chattrPsi);
+            chattrProc?.WaitForExit();
+        }
+        catch { /* lsattr/chattr unavailable or permission denied — silently ignore */ }
     }
 }

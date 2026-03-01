@@ -19,6 +19,10 @@ public sealed class ViewerView : View
     private bool _showRuler;   // Alt+R (#18)
     private bool _nroffMode;   // F9 (#13)
 
+    // Per-file display settings remembered within session (#43)
+    // Key = absolute file path; value = (mode, wrapLines, nroffMode)
+    private readonly Dictionary<string, (ViewMode mode, bool wrap, bool nroff)> _perFileSettings = [];
+
     // 10 bookmarks accessed by digit prefix (#20)
     private readonly long[] _bookmarks = new long[10];
     private bool _digitPrefix;
@@ -264,18 +268,19 @@ public sealed class ViewerView : View
 
             case KeyCode.F4:
                 _viewer.Mode = _viewer.Mode == ViewMode.Hex ? ViewMode.Text : ViewMode.Hex;
-                SetNeedsDraw(); return true;
+                SaveCurrentFileSettings(); SetNeedsDraw(); return true;
 
             case KeyCode.F8:  // Raw mode toggle (#43)
                 _viewer.Mode = _viewer.Mode == ViewMode.Raw ? ViewMode.Text : ViewMode.Raw;
-                SetNeedsDraw(); return true;
+                SaveCurrentFileSettings(); SetNeedsDraw(); return true;
 
             case KeyCode.F9:  // Nroff toggle (#13)
                 _nroffMode = !_nroffMode;
-                SetNeedsDraw(); return true;
+                SaveCurrentFileSettings(); SetNeedsDraw(); return true;
 
             case KeyCode.F2:
-                _viewer.WrapLines = !_viewer.WrapLines; SetNeedsDraw(); return true;
+                _viewer.WrapLines = !_viewer.WrapLines;
+                SaveCurrentFileSettings(); SetNeedsDraw(); return true;
 
             case KeyCode.F7:
                 ShowSearch(backward: false); return true;
@@ -360,13 +365,34 @@ public sealed class ViewerView : View
         }
     }
 
+    /// <summary>Store display settings for the current file so they survive Ctrl+F/B navigation. (#43)</summary>
+    private void SaveCurrentFileSettings()
+    {
+        if (_viewer.FilePath != null)
+            _perFileSettings[_viewer.FilePath] = (_viewer.Mode, _viewer.WrapLines, _nroffMode);
+    }
+
     private void NavigateFile(int delta)
     {
         if (_fileList == null || _fileList.Count == 0 || _fileListIndex < 0) return;
         var newIndex = _fileListIndex + delta;
         if (newIndex < 0 || newIndex >= _fileList.Count) return;
+
+        // Save settings for the current file (#43)
+        if (_viewer.FilePath != null)
+            _perFileSettings[_viewer.FilePath] = (_viewer.Mode, _viewer.WrapLines, _nroffMode);
+
         _fileListIndex = newIndex;
         _viewer.LoadFile(_fileList[_fileListIndex]);
+
+        // Restore settings if we've seen this file before (#43)
+        if (_viewer.FilePath != null && _perFileSettings.TryGetValue(_viewer.FilePath, out var saved))
+        {
+            _viewer.Mode      = saved.mode;
+            _viewer.WrapLines = saved.wrap;
+            _nroffMode        = saved.nroff;
+        }
+
         SetNeedsDraw();
     }
 

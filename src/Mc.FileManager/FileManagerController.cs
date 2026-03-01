@@ -90,7 +90,8 @@ public sealed class FileManagerController
         string? sourceMask = null,
         bool followSymlinks = false,
         bool diveIntoSubdir = true,
-        bool stableSymlinks = false)
+        bool stableSymlinks = false,
+        bool preserveExt2Attributes = false)  // #35
     {
         var sources = GetSourceEntries(currentEntry).Select(e => e.FullPath).ToList();
         if (sources.Count == 0) return;
@@ -101,6 +102,7 @@ public sealed class FileManagerController
             followSymlinks: followSymlinks,
             diveIntoSubdir: diveIntoSubdir,
             stableSymlinks: stableSymlinks,
+            preserveExt2Attributes: preserveExt2Attributes,  // #35
             progress: progress, ct: ct);
         InactivePanel.Reload();
     }

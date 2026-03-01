@@ -30,6 +30,7 @@ public static class McTheme
     public static Terminal.Gui.Attribute PanelArchive        { get; private set; }
     public static Terminal.Gui.Attribute PanelDevice         { get; private set; }  // #27 block/char device
     public static Terminal.Gui.Attribute PanelSpecialFile    { get; private set; }  // #27 FIFO / socket
+    public static Terminal.Gui.Attribute PanelHeaderSorted   { get; private set; }  // #39 active sort column (brighter)
 
     public static void ApplyDefault()
     {
@@ -114,6 +115,7 @@ public static class McTheme
         PanelArchive        = new Terminal.Gui.Attribute(Color.BrightCyan,   Color.Blue);
         PanelDevice         = new Terminal.Gui.Attribute(Color.BrightYellow, Color.Blue);  // #27 device = yellow
         PanelSpecialFile    = new Terminal.Gui.Attribute(Color.BrightMagenta,Color.Blue);  // #27 FIFO/socket = magenta
+        PanelHeaderSorted   = new Terminal.Gui.Attribute(Color.White,        Color.Blue);  // #39 sorted column = bright white
 
         // Apply to global colors
         Colors.ColorSchemes["Base"]   = Panel;

@@ -36,6 +36,11 @@ public sealed class FilePanelView : View
     private string _quickSearch = string.Empty;
     private bool _quickSearchActive;
 
+    // Rotating dash busy indicator (#45): spinner cycles while a reload is in progress
+    private static readonly char[] SpinnerChars = ['-', '\\', '|', '/'];
+    private int _spinnerIndex;
+    private bool _isLoading;
+
     // Public options (set from McSettings after construction)
     public bool ShowFreeSpace            { get; set; } = true;
     public bool LynxLikeMotion          { get; set; } = true;   // #6
@@ -83,7 +88,8 @@ public sealed class FilePanelView : View
         CanFocus = true;
         ColorScheme = McTheme.Panel;
 
-        _listing.Changed += OnListingChanged;
+        _listing.Changed    += OnListingChanged;
+        _listing.Reloading  += OnListingReloading;  // #45
         MouseClick += OnMouseClick;
 
         UpdateStatus();
@@ -138,10 +144,21 @@ public sealed class FilePanelView : View
         }
     }
 
+    private void OnListingReloading(object? sender, EventArgs e)  // #45
+    {
+        Application.Invoke(() =>
+        {
+            _isLoading = true;
+            _spinnerIndex = (_spinnerIndex + 1) % SpinnerChars.Length;
+            SetNeedsDraw();
+        });
+    }
+
     private void OnListingChanged(object? sender, EventArgs e)
     {
         Application.Invoke(() =>
         {
+            _isLoading = false;  // #45: reload done — stop spinner
             _quickSearchActive = false;
             _quickSearch = string.Empty;
             if (_cursorIndex >= _listing.Entries.Count)
@@ -251,7 +268,9 @@ public sealed class FilePanelView : View
         var frameAttr = _isActive ? McTheme.PanelHeader : McTheme.PanelFrame;
 
         // ── Top border: ┌─── ~/path/ ───┐  (trailing slash per #32) ──────
+        // Spinning dash while loading (#45)
         var pathStr = PathUtils.TildePath(_listing.CurrentPath.ToString());
+        if (_isLoading) pathStr = $"{SpinnerChars[_spinnerIndex]} {pathStr}";
         if (!pathStr.EndsWith('/')) pathStr += '/';
 
         var displayPath = $" {pathStr} ";
@@ -316,17 +335,29 @@ public sealed class FilePanelView : View
         (int nameWidth, int sizeWidth, int dateWidth) = ColumnWidths(innerWidth);
         var sort = _listing.Sort;
 
-        // Sort direction indicator on active sort column (#9, #31)
-        string nameInd = sort.Field == SortField.Name             ? (sort.Descending ? "↓" : "↑") : string.Empty;
-        string sizeInd = sort.Field == SortField.Size             ? (sort.Descending ? "↓" : "↑") : string.Empty;
-        string dateInd = sort.Field == SortField.ModificationTime ? (sort.Descending ? "↓" : "↑") : string.Empty;
+        // Sort direction indicator on active sort column (#9, #31, #39)
+        string sortInd = sort.Descending ? "↓" : "↑";
+        bool sortName  = sort.Field == SortField.Name;
+        bool sortSize  = sort.Field == SortField.Size;
+        bool sortDate  = sort.Field == SortField.ModificationTime;
 
-        var header = (" Name" + nameInd).PadRight(nameWidth)
-                   + ("Size" + sizeInd).PadLeft(sizeWidth) + " "
-                   + ("Modify time" + dateInd).PadRight(dateWidth);
+        // Draw each column segment, using PanelHeaderSorted for the active sort column (#39)
+        void DrawSeg(string text, bool isSorted, int padWidth, bool padLeft = false)
+        {
+            var txt = padLeft ? text.PadLeft(padWidth) : text.PadRight(padWidth);
+            if (txt.Length > padWidth) txt = txt[..padWidth];
+            Driver.SetAttribute(isSorted ? McTheme.PanelHeaderSorted : McTheme.PanelHeader);
+            Driver.AddStr(txt);
+        }
 
-        if (header.Length > innerWidth) header = header[..innerWidth];
-        Driver.AddStr(header.PadRight(innerWidth));
+        string nameSeg = " Name" + (sortName ? sortInd : string.Empty);
+        string sizeSeg = "Size" + (sortSize ? sortInd : string.Empty);
+        string dateSeg = "Modify time" + (sortDate ? sortInd : string.Empty);
+
+        DrawSeg(nameSeg, sortName, nameWidth);
+        DrawSeg(sizeSeg, sortSize, sizeWidth, padLeft: true);
+        Driver.SetAttribute(McTheme.PanelHeader); Driver.AddStr(" ");
+        DrawSeg(dateSeg, sortDate, dateWidth);
     }
 
     private void DrawFileEntries(int w, int h)
@@ -535,6 +566,27 @@ public sealed class FilePanelView : View
         _quickSearch = string.Empty;
         UpdateStatus();
         SetNeedsDraw();
+    }
+
+    // --- Cursor positioning (#38) ---
+
+    /// <summary>
+    /// Place the hardware cursor after the last typed character in the quick search bar. (#38)
+    /// Original MC positions the blinking cursor at the search term when in quick search mode.
+    /// </summary>
+    public override System.Drawing.Point? PositionCursor()
+    {
+        if (_quickSearchActive)
+        {
+            int h = Viewport.Height;
+            // Status line is at view-local row h-2; prefix is " Quick search: "
+            int statusRow = h - 2;
+            const string prefix = " Quick search: ";
+            int col = 1 + prefix.Length + _quickSearch.Length;
+            Move(col, statusRow);
+            return new System.Drawing.Point(col, statusRow);
+        }
+        return base.PositionCursor();
     }
 
     // --- Keyboard input ---

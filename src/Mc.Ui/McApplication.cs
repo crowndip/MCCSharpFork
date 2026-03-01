@@ -862,11 +862,12 @@ public sealed class McApplication : Toplevel
             }
         }
 
-        var preserveAttrs  = opts.PreserveAttributes;
-        var sourceMask     = string.IsNullOrWhiteSpace(opts.SourceMask) ? null : opts.SourceMask;
-        var followSymlinks = opts.FollowSymlinks;
-        var diveIntoSubdir = opts.DiveIntoSubdir;
-        var stableSymlinks = opts.StableSymlinks;
+        var preserveAttrs      = opts.PreserveAttributes;
+        var sourceMask         = string.IsNullOrWhiteSpace(opts.SourceMask) ? null : opts.SourceMask;
+        var followSymlinks     = opts.FollowSymlinks;
+        var diveIntoSubdir     = opts.DiveIntoSubdir;
+        var stableSymlinks     = opts.StableSymlinks;
+        var preserveExt2Attrs  = opts.PreserveExt2Attributes;  // #35
         var destPath = ResolveDestinationPath(opts.DestinationPath);
         RunFileOperation("Copy", opts.RunInBackground, (progress, ct) =>
             _controller.CopyMarkedAsync(entry, destPath, progress, ct,
@@ -874,7 +875,8 @@ public sealed class McApplication : Toplevel
                 sourceMask: sourceMask,
                 followSymlinks: followSymlinks,
                 diveIntoSubdir: diveIntoSubdir,
-                stableSymlinks: stableSymlinks));
+                stableSymlinks: stableSymlinks,
+                preserveExt2Attributes: preserveExt2Attrs));
     }
 
     private void MoveFiles()
@@ -1550,17 +1552,63 @@ public sealed class McApplication : Toplevel
 
     private void LaunchShell()
     {
+        // Capture any text already typed in the command line before suspending MC (#40)
+        var pendingCmd = _commandLine.Text.Trim();
+
         Application.Driver?.End();
         Console.Clear();
         var shell = OperatingSystem.IsWindows()
             ? (Environment.GetEnvironmentVariable("COMSPEC") ?? "cmd.exe")
             : (Environment.GetEnvironmentVariable("SHELL") ?? "/bin/sh");
-        using var proc = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+
+        var psi = new System.Diagnostics.ProcessStartInfo
         {
             FileName = shell,
             UseShellExecute = false,
-        });
+        };
+
+        // For bash: pre-fill readline buffer with any typed command (#40)
+        // We write a temp init file that sources .bashrc then sets READLINE_LINE.
+        // For other shells, fall back to setting MC_PENDING_CMD env var as a hint.
+        string? tempInit = null;
+        if (!OperatingSystem.IsWindows() && !string.IsNullOrEmpty(pendingCmd))
+        {
+            var shellName = Path.GetFileName(shell);
+            if (shellName is "bash")
+            {
+                tempInit = Path.GetTempFileName();
+                var escaped = pendingCmd.Replace("'", "'\\''");
+                File.WriteAllText(tempInit,
+                    "[ -f ~/.bashrc ] && . ~/.bashrc\n" +
+                    $"READLINE_LINE='{escaped}'\n" +
+                    $"READLINE_POINT={pendingCmd.Length}\n");
+                psi.ArgumentList.Add("--init-file");
+                psi.ArgumentList.Add(tempInit);
+            }
+            else if (shellName is "zsh")
+            {
+                // zsh: pre-populate history so Up-arrow gives the command
+                var escaped = pendingCmd.Replace("'", "'\\''");
+                psi.EnvironmentVariables["MC_PENDING_CMD"] = pendingCmd;
+                // ZDOTDIR trick: put command into a pre-executed zshrc snippet
+                tempInit = Path.GetTempFileName();
+                File.WriteAllText(tempInit,
+                    "[ -f ~/.zshrc ] && source ~/.zshrc\n" +
+                    $"print -z '{escaped}'\n");
+                psi.EnvironmentVariables["ZDOTDIR"] = Path.GetDirectoryName(tempInit)!;
+                File.WriteAllText(Path.Combine(Path.GetDirectoryName(tempInit)!, ".zshrc"), File.ReadAllText(tempInit));
+            }
+            else
+            {
+                psi.EnvironmentVariables["MC_PENDING_CMD"] = pendingCmd;
+            }
+        }
+
+        using var proc = System.Diagnostics.Process.Start(psi);
         proc?.WaitForExit();
+
+        if (tempInit != null) try { File.Delete(tempInit); } catch { }
+
         Application.Driver?.Init();
         RefreshPanels();
         Application.LayoutAndDraw(true);
@@ -3555,11 +3603,16 @@ public sealed class McApplication : Toplevel
             ("- (keypad)",  "Unselect group"),
         };
 
+        // Interactive key tester section (#44)
+        // The dialog is split: top half = binding list, bottom = interactive key tester.
+        const int listHeight = 16;
+        const int dialogHeight = listHeight + 8;
+
         var d = new Dialog
         {
             Title = "Learn keys",
             Width = 60,
-            Height = Math.Min(bindings.Length + 6, 28),
+            Height = dialogHeight,
             ColorScheme = McTheme.Dialog,
         };
 
@@ -3569,12 +3622,52 @@ public sealed class McApplication : Toplevel
         {
             X = 1, Y = 2,
             Width = Dim.Fill(1),
-            Height = Dim.Fill(4),
+            Height = listHeight,
             ColorScheme = McTheme.Panel,
         };
         var items = bindings.Select(b => $"{b.Item1,-20} {b.Item2}").ToList();
         lv.SetSource(new ObservableCollection<string>(items));
         d.Add(lv);
+
+        // Separator and key tester (#44)
+        int sep = listHeight + 2;
+        d.Add(new Label { X = 1, Y = sep,     Text = new string('─', 56), ColorScheme = McTheme.Dialog });
+        d.Add(new Label { X = 1, Y = sep + 1, Text = "Key tester — press any key to identify it:", ColorScheme = McTheme.Dialog });
+        var keyLabel = new Label
+        {
+            X = 1, Y = sep + 2,
+            Width = Dim.Fill(1),
+            Text = "(waiting for keypress...)",
+            ColorScheme = McTheme.Dialog,
+        };
+        d.Add(keyLabel);
+
+        // The ListView intercepts all keys for navigation; we use its KeyDown event
+        // to capture keys in the tester area and also let the list handle them.
+        d.KeyDown += (_, k) =>
+        {
+            // Build a readable key description (#44)
+            var parts = new System.Text.StringBuilder();
+            if (k.IsCtrl)  parts.Append("Ctrl+");
+            if (k.IsAlt)   parts.Append("Alt+");
+            if (k.IsShift && k.KeyCode != (k.KeyCode & ~KeyCode.ShiftMask)) parts.Append("Shift+");
+
+            var code = k.KeyCode & ~KeyCode.CtrlMask & ~KeyCode.AltMask & ~KeyCode.ShiftMask;
+            var rune = k.AsRune;
+            if (rune.Value >= 32)
+                parts.Append((char)rune.Value);
+            else
+                parts.Append(code.ToString());
+
+            // Find matching action in binding table
+            string desc = string.Empty;
+            var keyStr = parts.ToString();
+            var match = bindings.FirstOrDefault(b => b.Item1.Equals(keyStr, StringComparison.OrdinalIgnoreCase));
+            if (match != default)
+                desc = $"  →  {match.Item2}";
+
+            keyLabel.Text = $"Pressed: {keyStr}{desc}";
+        };
 
         var ok = new Button { Text = "OK", IsDefault = true };
         ok.Accepting += (_, _) => Application.RequestStop(d);

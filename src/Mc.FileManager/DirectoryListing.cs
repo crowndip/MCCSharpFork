@@ -32,6 +32,8 @@ public sealed class DirectoryListing
     public int MarkedCount { get; private set; }
 
     public event EventHandler? Changed;
+    /// <summary>Fires at the start of every Reload() call — used for busy-spinner. (#45)</summary>
+    public event EventHandler? Reloading;
 
     public DirectoryListing(VfsRegistry vfs)
     {
@@ -70,6 +72,7 @@ public sealed class DirectoryListing
 
     public void Reload()
     {
+        Reloading?.Invoke(this, EventArgs.Empty); // #45
         try
         {
             var raw = _vfs.ListDirectory(_currentPath);
