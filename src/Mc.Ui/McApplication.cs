@@ -154,7 +154,7 @@ public sealed class McApplication : Toplevel
                     new("Directory _hotlist",           "Ctrl+\\",    ShowHotlist),
                     new("Active _VFS list",             string.Empty, ShowActiveVfsList),
                     new("_Background jobs",             string.Empty, ShowBackgroundJobs),
-                    new("Screen _list",                 string.Empty, () => NotImplemented("Screen list")),
+                    new("Screen _list",                 string.Empty, ShowScreenList),
                     null!,
                     new("Edit e_xtension file",         string.Empty, () => EditConfigFile(ConfigPaths.ExtFile)),
                     new("Edit _menu file",              string.Empty, () => EditConfigFile(ConfigPaths.MenuFile)),
@@ -652,8 +652,10 @@ public sealed class McApplication : Toplevel
         panel.LynxLikeMotion           = _settings.LynxLikeMotion;
         panel.MarkMovesCursor          = _settings.MarkMovesCursor;
         panel.QuickSearchCaseSensitive = _settings.QuickSearchCaseSensitive;
-        panel.ShowScrollbar            = _settings.ShowScrollbar;   // #9
-        panel.ShowMiniStatus           = _settings.ShowMiniStatus;  // #24
+        panel.ShowScrollbar            = _settings.ShowScrollbar;        // #9
+        panel.ShowMiniStatus           = _settings.ShowMiniStatus;       // #24
+        panel.ShowExecutableSuffix     = _settings.ShowExecutableSuffix; // #36
+        panel.FollowSymlinks           = _settings.PanelFollowSymlinks;  // #37
     }
 
     private void OnPanelEntryActivated(object? sender, FileEntry? entry)
@@ -661,7 +663,37 @@ public sealed class McApplication : Toplevel
         if (entry == null) return;
         if (entry.IsDirectory || entry.IsParentDir)
         {
-            _controller.NavigateTo(entry.FullPath);
+            var targetPath = entry.FullPath;
+            // CdFollowsLinks: resolve symlinks to their physical path (#46)
+            if (_settings.CdFollowsLinks && entry.IsSymlink && entry.IsSymlinkToDirectory)
+            {
+                try
+                {
+                    var resolved = Path.GetFullPath(entry.SymlinkTarget ?? entry.FullPath.Path);
+                    targetPath = VfsPath.FromLocal(resolved);
+                }
+                catch { /* keep original path on error */ }
+            }
+            _controller.NavigateTo(targetPath);
+            return;
+        }
+        // Symlink to directory: navigate into it (#37)
+        if (entry.IsSymlink && entry.IsSymlinkToDirectory)
+        {
+            var targetPath = entry.FullPath;
+            if (_settings.CdFollowsLinks && entry.SymlinkTarget != null)
+            {
+                try
+                {
+                    var resolved = Path.IsPathRooted(entry.SymlinkTarget)
+                        ? entry.SymlinkTarget
+                        : Path.GetFullPath(entry.SymlinkTarget,
+                            Path.GetDirectoryName(entry.FullPath.Path) ?? "/");
+                    targetPath = VfsPath.FromLocal(resolved);
+                }
+                catch { }
+            }
+            _controller.NavigateTo(targetPath);
             return;
         }
 
@@ -1378,6 +1410,13 @@ public sealed class McApplication : Toplevel
                     }
                 }
 
+                // Precompute date/size filter boundaries (#7, #8)
+                var now = DateTime.Now;
+                DateTime? newerThanDate = opts.NewerThanDays > 0 ? now.AddDays(-opts.NewerThanDays) : null;
+                DateTime? olderThanDate = opts.OlderThanDays > 0 ? now.AddDays(-opts.OlderThanDays) : null;
+                long minBytes = opts.MinSizeKB * 1024;
+                long maxBytes = opts.MaxSizeKB * 1024;
+
                 foreach (var file in EnumerateFiles(startDir))
                 {
                     if (token.IsCancellationRequested) break;
@@ -1385,6 +1424,24 @@ public sealed class McApplication : Toplevel
                     // Update progress label with current directory
                     var scanDir = Path.GetDirectoryName(file) ?? startDir;
                     Application.Invoke(() => statusLabel.Text = $" Scanning: {scanDir}");
+
+                    // Date filter (#7)
+                    if (newerThanDate.HasValue || olderThanDate.HasValue)
+                    {
+                        DateTime mtime;
+                        try { mtime = File.GetLastWriteTime(file); } catch { continue; }
+                        if (newerThanDate.HasValue && mtime < newerThanDate.Value) continue;
+                        if (olderThanDate.HasValue && mtime > olderThanDate.Value) continue;
+                    }
+
+                    // Size filter (#8)
+                    if (opts.MinSizeKB > 0 || opts.MaxSizeKB > 0)
+                    {
+                        long size;
+                        try { size = new FileInfo(file).Length; } catch { continue; }
+                        if (opts.MinSizeKB > 0 && size < minBytes) continue;
+                        if (opts.MaxSizeKB > 0 && size > maxBytes) continue;
+                    }
 
                     // Content filter
                     if (!string.IsNullOrEmpty(opts.ContentPattern))
@@ -2699,9 +2756,11 @@ public sealed class McApplication : Toplevel
 
         if (string.IsNullOrWhiteSpace(chosenCommand)) return;
 
-        // Macro expansion — matches original MC expand_format() (#18)
-        var fileEntry   = GetCurrentEntry();
-        var markedFiles = _controller.ActivePanel.GetMarkedEntries();
+        // Macro expansion — matches original MC expand_format() (#18 #30)
+        var fileEntry      = GetCurrentEntry();
+        var otherPanelView = _controller.ActivePanel == _controller.LeftPanel ? _rightPanelView : _leftPanelView;
+        var otherFileEntry = otherPanelView.CurrentEntry;
+        var markedFiles    = _controller.ActivePanel.GetMarkedEntries();
 
         // %{Prompt} — interactive prompt replacement
         var cmd = System.Text.RegularExpressions.Regex.Replace(chosenCommand,
@@ -2712,19 +2771,33 @@ public sealed class McApplication : Toplevel
                 return InputDialog.Show("User menu prompt", promptText, string.Empty) ?? string.Empty;
             });
 
-        // %s / %t — space-separated list of tagged/marked files (or current file if none marked)
+        // %s / %t — space-separated list of tagged/marked files (full paths) (or current file if none marked)
         var taggedList = markedFiles.Count > 0
             ? string.Join(" ", markedFiles.Select(e => $"\"{e.FullPath.Path}\""))
             : (fileEntry != null ? $"\"{fileEntry.FullPath.Path}\"" : string.Empty);
 
+        // %m — marked file names only (no directory) (#30)
+        var markedNames = markedFiles.Count > 0
+            ? string.Join(" ", markedFiles.Select(e => $"\"{e.Name}\""))
+            : (fileEntry != null ? $"\"{fileEntry.Name}\"" : string.Empty);
+
+        // %a — archive name: VFS path root if inside a VFS archive, else empty (#30)
+        var activePathStr = _controller.ActivePanel.CurrentPath.Path;
+        var archiveName   = activePathStr.Contains('#') ? activePathStr[..(activePathStr.IndexOf('#') + 1)] : string.Empty;
+
         cmd = cmd
             .Replace("%f",  fileEntry?.FullPath.Path ?? string.Empty)
+            .Replace("%p",  fileEntry?.Name ?? string.Empty)                                               // #30 basename of current file in active panel
+            .Replace("%P",  otherFileEntry?.Name ?? string.Empty)                                          // #30 basename of current file in other panel
             .Replace("%b",  Path.GetFileNameWithoutExtension(fileEntry?.Name ?? string.Empty))
+            .Replace("%n",  Path.GetFileNameWithoutExtension(fileEntry?.Name ?? string.Empty))             // #30 same as %b (name without extension)
             .Replace("%e",  Path.GetExtension(fileEntry?.Name ?? string.Empty).TrimStart('.'))
             .Replace("%d",  _controller.ActivePanel.CurrentPath.Path)
             .Replace("%D",  _controller.InactivePanel.CurrentPath.Path)
             .Replace("%s",  taggedList)   // #18
-            .Replace("%t",  taggedList);  // #18
+            .Replace("%t",  taggedList)   // #18
+            .Replace("%m",  markedNames)  // #30 marked file names only
+            .Replace("%a",  archiveName); // #30 archive name
 
         ExecuteUserMenuCommand(cmd);
     }
@@ -3090,6 +3163,77 @@ public sealed class McApplication : Toplevel
         }
     }
 
+    // --- Command menu: Screen list (#15) ---
+
+    /// <summary>
+    /// Shows the screen list dialog — a numbered list of the file manager and all files
+    /// that have been opened in the editor or viewer during this session.
+    /// Selecting a screen re-opens it (or returns to the file manager for screen 0).
+    /// Equivalent to do_screen_list() in src/filemanager/screen.c.
+    /// </summary>
+    private void ShowScreenList()
+    {
+        // Build screen entries: 0 = MC (file manager), then editors, then viewers
+        var screens = new List<(string Label, string Path, bool IsEditor)>();
+        screens.Add(("  0  MC  Midnight Commander", string.Empty, false));  // index 0 = main MC
+
+        int idx = 1;
+        foreach (var p in _editedFiles)
+        {
+            screens.Add(($"  {idx,-3} Edit  {p}", p, true));
+            idx++;
+        }
+        foreach (var p in _viewedFiles.Where(v => !_editedFiles.Contains(v)))
+        {
+            screens.Add(($"  {idx,-3} View  {p}", p, false));
+            idx++;
+        }
+
+        int chosenIdx = -1;
+        var d = new Dialog
+        {
+            Title       = "Screen list",
+            Width       = Math.Min(78, Application.Screen.Width - 4),
+            Height      = Math.Min(screens.Count + 6, Application.Screen.Height - 4),
+            ColorScheme = McTheme.Dialog,
+        };
+
+        var lv = new ListView
+        {
+            X = 1, Y = 1,
+            Width = Dim.Fill(1), Height = Dim.Fill(4),
+            ColorScheme = McTheme.Panel,
+        };
+        var displayItems = screens.Select(s => s.Label).ToList();
+        lv.SetSource(new ObservableCollection<string>(displayItems));
+        lv.SelectedItem = 0;
+        d.Add(lv);
+
+        lv.OpenSelectedItem += (_, _) =>
+        {
+            chosenIdx = lv.SelectedItem;
+            Application.RequestStop(d);
+        };
+
+        var ok = new Button { Text = "OK", IsDefault = true };
+        ok.Accepting += (_, _) => { chosenIdx = lv.SelectedItem; Application.RequestStop(d); };
+        var cancel = new Button { Text = "Cancel" };
+        cancel.Accepting += (_, _) => Application.RequestStop(d);
+        d.AddButton(ok); d.AddButton(cancel);
+
+        lv.SetFocus();
+        Application.Run(d); d.Dispose();
+
+        if (chosenIdx < 0) return;
+        if (chosenIdx == 0) return;  // screen 0 = MC — already there
+
+        var chosen = screens[chosenIdx];
+        if (chosen.IsEditor)
+            EditFileDirectly(chosen.Path);
+        else
+            ViewFile(chosen.Path);
+    }
+
     // --- Command menu: Active VFS list ---
 
     /// <summary>
@@ -3339,8 +3483,11 @@ public sealed class McApplication : Toplevel
         var mixFiles     = CB(8,  "Mix all files (dirs + files)",   _settings.MixAllFiles);
         var caseSensitive= CB(9,  "Case-sensitive quick search",    _settings.QuickSearchCaseSensitive);
         var freeSpace    = CB(10, "Show free space",                _settings.ShowFreeSpace);
+        var execSuffix   = CB(11, "Show * suffix for executables",  _settings.ShowExecutableSuffix);  // #36
+        var followLinks  = CB(12, "Symlinks to dirs in dir color",  _settings.PanelFollowSymlinks);   // #37
         d.Add(showHidden, showBackup, markMoves, miniStatus, lynxMotion,
-              scrollbar, highlight, mixFiles, caseSensitive, freeSpace);
+              scrollbar, highlight, mixFiles, caseSensitive, freeSpace,
+              execSuffix, followLinks);
 
         var ok = new Button { Text = "OK", IsDefault = true };
         ok.Accepting += (_, _) =>
@@ -3355,6 +3502,8 @@ public sealed class McApplication : Toplevel
             _settings.MixAllFiles              = mixFiles.CheckedState      == CheckState.Checked;
             _settings.QuickSearchCaseSensitive = caseSensitive.CheckedState == CheckState.Checked;
             _settings.ShowFreeSpace            = freeSpace.CheckedState     == CheckState.Checked;
+            _settings.ShowExecutableSuffix     = execSuffix.CheckedState    == CheckState.Checked;  // #36
+            _settings.PanelFollowSymlinks      = followLinks.CheckedState   == CheckState.Checked;  // #37
             _settings.Save();
             // Apply live settings to panels (#5 #6 #7 #9 #24)
             ApplyPanelSettings(_leftPanelView);

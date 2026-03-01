@@ -1,3 +1,4 @@
+using System.Runtime.InteropServices;
 using Mc.Core.Vfs;
 
 namespace Mc.Vfs.Local;
@@ -163,6 +164,32 @@ public sealed class LocalVfsProvider : IVfsProvider
             try { mode = f.UnixFileMode; } catch { }
         }
         bool isExec = (mode & (UnixFileMode.UserExecute | UnixFileMode.GroupExecute | UnixFileMode.OtherExecute)) != 0;
+
+        // Detect special file types via lstat() (#27)
+        bool isBlockDevice = false, isCharDevice = false, isFifo = false, isSocket = false;
+        if (OperatingSystem.IsLinux() || OperatingSystem.IsMacOS())
+        {
+            var typeBits = GetFileTypeBits(f.FullName);
+            isBlockDevice = (typeBits & S_IFMT) == S_IFBLK;
+            isCharDevice  = (typeBits & S_IFMT) == S_IFCHR;
+            isFifo        = (typeBits & S_IFMT) == S_IFIFO;
+            isSocket      = (typeBits & S_IFMT) == S_IFSOCK;
+        }
+
+        // Detect if a symlink points to a directory (#37)
+        bool isSymlinkToDir = false;
+        if (isSymlink && f.LinkTarget != null)
+        {
+            try
+            {
+                var absTarget = Path.IsPathRooted(f.LinkTarget)
+                    ? f.LinkTarget
+                    : Path.GetFullPath(f.LinkTarget, Path.GetDirectoryName(f.FullName)!);
+                isSymlinkToDir = Directory.Exists(absTarget);
+            }
+            catch { }
+        }
+
         return new VfsDirEntry
         {
             Name = f.Name,
@@ -176,13 +203,20 @@ public sealed class LocalVfsProvider : IVfsProvider
             SymlinkTarget = f.LinkTarget,
             IsHidden = f.Name.StartsWith('.') || (f.Attributes & FileAttributes.Hidden) != 0,
             IsExecutable = isExec,
+            IsBlockDevice = isBlockDevice,
+            IsCharDevice  = isCharDevice,
+            IsFifo        = isFifo,
+            IsSocket      = isSocket,
+            IsSymlinkToDirectory = isSymlinkToDir,  // #37
             Permissions = mode,
         };
     }
 
+    // --- Native P/Invoke helpers ---
+
     // DllImport is resolved lazily in .NET JIT; the runtime guard below prevents
     // the call on Windows, but we also wrap in try/catch for defence-in-depth.
-    [System.Runtime.InteropServices.DllImport("libc", EntryPoint = "lchown")]
+    [DllImport("libc", EntryPoint = "lchown")]
     [System.Runtime.Versioning.SupportedOSPlatform("linux")]
     [System.Runtime.Versioning.SupportedOSPlatform("macos")]
     private static extern int lchown(string path, uint owner, uint group);
@@ -192,5 +226,37 @@ public sealed class LocalVfsProvider : IVfsProvider
         if (!OperatingSystem.IsLinux() && !OperatingSystem.IsMacOS()) return;
         try { lchown(path, (uint)uid, (uint)gid); }
         catch { /* silently ignore on unsupported platforms or missing libc */ }
+    }
+
+    // File type bits from st_mode (#27)
+    private const uint S_IFMT  = 0xF000u;
+    private const uint S_IFBLK = 0x6000u;  // block device
+    private const uint S_IFCHR = 0x2000u;  // character device
+    private const uint S_IFIFO = 0x1000u;  // FIFO / named pipe
+    private const uint S_IFSOCK= 0xC000u;  // Unix domain socket
+
+    [DllImport("libc", EntryPoint = "lstat", SetLastError = true)]
+    [System.Runtime.Versioning.SupportedOSPlatform("linux")]
+    [System.Runtime.Versioning.SupportedOSPlatform("macos")]
+    private static extern int NativeLstat(string path, IntPtr buf);
+
+    /// <summary>
+    /// Returns st_mode from lstat() so we can identify special file types.
+    /// On Linux x86_64: st_mode is at offset 24 in the stat struct.
+    /// On macOS x86_64/arm64: st_mode is at offset 8.
+    /// Returns 0 on any error.
+    /// </summary>
+    private static uint GetFileTypeBits(string path)
+    {
+        if (!OperatingSystem.IsLinux() && !OperatingSystem.IsMacOS()) return 0;
+        var buf = Marshal.AllocHGlobal(256); // larger than any stat struct
+        try
+        {
+            if (NativeLstat(path, buf) != 0) return 0;
+            int modeOffset = OperatingSystem.IsMacOS() ? 8 : 24;
+            return (uint)Marshal.ReadInt32(buf, modeOffset);
+        }
+        catch { return 0; }
+        finally { Marshal.FreeHGlobal(buf); }
     }
 }

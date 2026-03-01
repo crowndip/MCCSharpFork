@@ -23,6 +23,11 @@ public sealed class EditorView : View
     // Syntax-highlighting toggle (Ctrl+T). (#51)
     private bool _syntaxHighlightingOn = true;
 
+    // Macro recording / playback (#22)
+    private bool _isRecordingMacro = false;
+    private bool _isPlayingMacro   = false;
+    private readonly List<Key> _macroKeys = [];
+
     // Line-number gutter width (#23)
     private int GutterWidth => _showLineNumbers ? _editor.Buffer.GetLineCount().ToString().Length + 1 : 0;
 
@@ -183,6 +188,13 @@ public sealed class EditorView : View
 
     protected override bool OnKeyDown(Key keyEvent)
     {
+        // Macro recording: record every keystroke except the toggle key itself (#22)
+        if (_isRecordingMacro && !_isPlayingMacro
+            && keyEvent.KeyCode != (KeyCode.R | KeyCode.CtrlMask))
+        {
+            _macroKeys.Add(keyEvent);
+        }
+
         // Shift+Arrow: extend block selection (#3)
         if (keyEvent.IsShift && keyEvent.KeyCode is
             KeyCode.CursorUp or KeyCode.CursorDown or
@@ -319,10 +331,15 @@ public sealed class EditorView : View
                 SetNeedsDraw();
                 return true;
 
-            // Undo Ctrl+Z / Ctrl+U (#33), Redo Ctrl+R (#2)
-            case KeyCode.Z when keyEvent.IsCtrl: _editor.Undo(); return true;
+            // Undo Ctrl+Z / Ctrl+U (#33); Redo Ctrl+Shift+Z
+            case KeyCode.Z when keyEvent.IsCtrl && !keyEvent.IsShift: _editor.Undo(); return true;
             case KeyCode.U when keyEvent.IsCtrl: _editor.Undo(); return true;  // (#33)
-            case KeyCode.R when keyEvent.IsCtrl: _editor.Redo(); return true;
+            case KeyCode.Z | KeyCode.ShiftMask when keyEvent.IsCtrl: _editor.Redo(); return true;  // Redo
+
+            // Ctrl+R = begin/end macro recording (#22)
+            case KeyCode.R when keyEvent.IsCtrl: ToggleMacroRecord(); return true;
+            // Ctrl+E = play back recorded macro (#22)
+            case KeyCode.E when keyEvent.IsCtrl: PlayMacro(); return true;
 
             // Alt+L = go to line (#37)
             case KeyCode.L | KeyCode.AltMask: ShowGotoLine(); return true;
@@ -356,6 +373,11 @@ public sealed class EditorView : View
                 SetNeedsDraw();
                 return true;
 
+            // Ctrl+Tab = word completion (#23)
+            case KeyCode.Tab | KeyCode.CtrlMask:
+                WordComplete();
+                return true;
+
             default:
                 var rune = keyEvent.AsRune;
                 if (rune.Value >= 32)
@@ -384,6 +406,123 @@ public sealed class EditorView : View
                 }
                 return base.OnKeyDown(keyEvent);
         }
+    }
+
+    // --- Macro recording / playback (#22) ---
+
+    private void ToggleMacroRecord()
+    {
+        if (_isRecordingMacro)
+        {
+            _isRecordingMacro = false;
+            MessageBox.Query("Macro",
+                $"Macro recording stopped. {_macroKeys.Count} keystrokes saved.\nPress Ctrl+E to play back.",
+                "OK");
+        }
+        else
+        {
+            _macroKeys.Clear();
+            _isRecordingMacro = true;
+            MessageBox.Query("Macro", "Macro recording started. Press Ctrl+R to stop.", "OK");
+        }
+        SetNeedsDraw();
+    }
+
+    private void PlayMacro()
+    {
+        if (_isPlayingMacro || _macroKeys.Count == 0)
+        {
+            if (_macroKeys.Count == 0)
+                MessageBox.Query("Macro", "No macro recorded. Press Ctrl+R to start recording.", "OK");
+            return;
+        }
+        _isPlayingMacro = true;
+        // Save a snapshot to avoid issues if the macro modifies _macroKeys
+        var snapshot = _macroKeys.ToList();
+        foreach (var key in snapshot)
+            OnKeyDown(key);
+        _isPlayingMacro = false;
+        SetNeedsDraw();
+    }
+
+    // --- Word completion (#23) ---
+
+    /// <summary>
+    /// Ctrl+Tab word completion: scans the buffer for words that start with the text
+    /// before the cursor, then either completes to the single match or shows a popup.
+    /// Equivalent to complete_word() in src/editor/editcmd.c.
+    /// </summary>
+    private void WordComplete()
+    {
+        var text   = _editor.Buffer.ToString();
+        var cursor = _editor.CursorOffset;
+
+        // Find the word fragment before the cursor
+        var wordStart = cursor;
+        while (wordStart > 0 && (char.IsLetterOrDigit(text[wordStart - 1]) || text[wordStart - 1] == '_'))
+            wordStart--;
+        var prefix = text[wordStart..cursor];
+        if (prefix.Length == 0) return;
+
+        // Collect unique words in the buffer that start with the prefix (excluding the prefix itself at cursor)
+        var pattern = new System.Text.RegularExpressions.Regex(
+            @"\b" + System.Text.RegularExpressions.Regex.Escape(prefix) + @"[\w]+",
+            System.Text.RegularExpressions.RegexOptions.None);
+        var matches = pattern.Matches(text)
+            .Cast<System.Text.RegularExpressions.Match>()
+            .Select(m => m.Value)
+            .Where(w => w.Length > prefix.Length)
+            .Distinct()
+            .OrderBy(w => w)
+            .ToList();
+
+        if (matches.Count == 0) return;
+
+        if (matches.Count == 1)
+        {
+            // Single match: insert the completion suffix immediately
+            _editor.InsertText(matches[0][prefix.Length..]);
+        }
+        else
+        {
+            // Multiple matches: show a popup list
+            ShowWordCompletePopup(matches, prefix);
+        }
+        SetNeedsDraw();
+    }
+
+    private void ShowWordCompletePopup(IReadOnlyList<string> matches, string prefix)
+    {
+        string? chosen = null;
+        var d = new Dialog
+        {
+            Title       = "Word completion",
+            Width       = Math.Min(50, Application.Screen.Width - 4),
+            Height      = Math.Min(matches.Count + 5, 18),
+            ColorScheme = ColorScheme,
+        };
+        var lv = new ListView
+        {
+            X = 1, Y = 1,
+            Width = Dim.Fill(1), Height = Dim.Fill(4),
+        };
+        lv.SetSource(new System.Collections.ObjectModel.ObservableCollection<string>(matches));
+        lv.SelectedItem = 0;
+        d.Add(lv);
+        lv.OpenSelectedItem += (_, _) =>
+        {
+            if (lv.SelectedItem >= 0) chosen = matches[lv.SelectedItem];
+            Application.RequestStop(d);
+        };
+        var ok = new Button { Text = "OK", IsDefault = true };
+        ok.Accepting += (_, _) => { if (lv.SelectedItem >= 0) chosen = matches[lv.SelectedItem]; Application.RequestStop(d); };
+        var cancel = new Button { Text = "Cancel" };
+        cancel.Accepting += (_, _) => Application.RequestStop(d);
+        d.AddButton(ok); d.AddButton(cancel);
+        lv.SetFocus();
+        Application.Run(d); d.Dispose();
+        if (chosen != null)
+            _editor.InsertText(chosen[prefix.Length..]);
     }
 
     private void MoveWithShift(Key key)

@@ -43,6 +43,8 @@ public sealed class FilePanelView : View
     public bool QuickSearchCaseSensitive { get; set; }          // #5
     public bool ShowScrollbar            { get; set; }           // #9
     public bool ShowMiniStatus           { get; set; } = true;  // #24
+    public bool ShowExecutableSuffix     { get; set; }          // #36 append * to executables
+    public bool FollowSymlinks           { get; set; }          // #37 symlink-to-dir gets dir color
 
     public event EventHandler<FileEntry?>? EntryActivated;
     public event EventHandler<int>? CursorChanged;
@@ -404,15 +406,18 @@ public sealed class FilePanelView : View
         bool activeCursor   = _isActive  && entryIdx == _cursorIndex;
         bool inactiveCursor = !_isActive && entryIdx == _cursorIndex;
 
-        if      (activeCursor && entry.IsMarked)            return McTheme.PanelMarkedCursor;
-        else if (activeCursor)                              return McTheme.PanelCursor;
-        else if (inactiveCursor)                            return McTheme.PanelInactiveCursor; // (#8, #19)
-        else if (entry.IsMarked)                            return McTheme.PanelMarked;
-        else if (entry.IsDirectory || entry.IsParentDir)    return McTheme.PanelDirectory;
-        else if (entry.IsSymlink)                           return McTheme.PanelSymlink;
-        else if (entry.IsExecutable)                        return McTheme.PanelExecutable;
-        else if (IsArchiveFile(entry.Name))                 return McTheme.PanelArchive;  // (#22)
-        else                                                return McTheme.PanelFile;
+        if      (activeCursor && entry.IsMarked)                return McTheme.PanelMarkedCursor;
+        else if (activeCursor)                                  return McTheme.PanelCursor;
+        else if (inactiveCursor)                                return McTheme.PanelInactiveCursor; // (#8, #19)
+        else if (entry.IsMarked)                                return McTheme.PanelMarked;
+        else if (entry.IsDirectory || entry.IsParentDir)                           return McTheme.PanelDirectory;
+        else if (entry.IsSymlink && FollowSymlinks && entry.IsSymlinkToDirectory) return McTheme.PanelDirectory;  // #37
+        else if (entry.IsSymlink)                                                 return McTheme.PanelSymlink;
+        else if (entry.IsBlockDevice || entry.IsCharDevice)                       return McTheme.PanelDevice;       // #27
+        else if (entry.IsFifo || entry.IsSocket)                                  return McTheme.PanelSpecialFile;  // #27
+        else if (entry.IsExecutable)                            return McTheme.PanelExecutable;
+        else if (IsArchiveFile(entry.Name))                     return McTheme.PanelArchive;  // (#22)
+        else                                                    return McTheme.PanelFile;
     }
 
     private void DrawStatusLine(int w, int h)
@@ -446,7 +451,7 @@ public sealed class FilePanelView : View
         return dt.ToString(fmt).PadRight(width);
     }
 
-    private static string FormatEntry(FileEntry entry, int innerWidth)
+    private string FormatEntry(FileEntry entry, int innerWidth)
     {
         var (nameWidth, sizeWidth, dateWidth) = ColumnWidths(innerWidth);
 
@@ -454,6 +459,8 @@ public sealed class FilePanelView : View
 
         // No prefix chars for directories/symlinks — colour alone distinguishes them (#1, #2)
         string name = entry.IsParentDir ? ".." : entry.Name;
+        // Append * suffix for executables when option is on (#36)
+        if (ShowExecutableSuffix && entry.IsExecutable && !entry.IsDirectory) name += "*";
         if (name.Length > nameWidth) name = name[..(nameWidth - 1)] + "~";
         name = name.PadRight(nameWidth);
 
@@ -467,10 +474,11 @@ public sealed class FilePanelView : View
         return $"{marker}{name}{size} {date}";
     }
 
-    private static string FormatBriefCell(FileEntry entry, int width)
+    private string FormatBriefCell(FileEntry entry, int width)
     {
         var marker = entry.IsMarked ? "*" : " ";
         string name = entry.IsParentDir ? ".." : entry.Name; // no prefix chars (#1, #2)
+        if (ShowExecutableSuffix && entry.IsExecutable && !entry.IsDirectory) name += "*"; // #36
         int nameWidth = width - 1;
         if (name.Length > nameWidth) name = name[..(nameWidth - 1)] + "~";
         return marker + name.PadRight(nameWidth);

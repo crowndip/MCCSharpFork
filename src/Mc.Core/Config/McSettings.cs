@@ -245,6 +245,25 @@ public sealed class McSettings
         set => _config.Set("Layout", "keybar_visible", value);
     }
 
+    // --- Navigation (#46) ---
+    public bool CdFollowsLinks  // #46 — when true, cd resolves symlinks to their real path
+    {
+        get => _config.GetBool("Midnight-Commander", "cd_follows_links");
+        set => _config.Set("Midnight-Commander", "cd_follows_links", value);
+    }
+
+    public bool ShowExecutableSuffix  // #36 — append * to executable names in panels
+    {
+        get => _config.GetBool("Panels", "show_executable_suffix");
+        set => _config.Set("Panels", "show_executable_suffix", value);
+    }
+
+    public bool PanelFollowSymlinks  // #37 — symlinks to dirs shown in dir color
+    {
+        get => _config.GetBool("Panels", "follow_symlinks");
+        set => _config.Set("Panels", "follow_symlinks", value);
+    }
+
     // --- VFS settings (vfs_setup.c) ---
     public int VfsCacheTimeout
     {

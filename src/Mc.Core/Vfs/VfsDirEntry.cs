@@ -17,6 +17,11 @@ public sealed class VfsDirEntry
     public string? SymlinkTarget { get; init; }
     public bool IsHidden { get; init; }
     public bool IsExecutable { get; init; }
+    public bool IsBlockDevice { get; init; }        // #27 block device (e.g. /dev/sda)
+    public bool IsCharDevice { get; init; }         // #27 character device (e.g. /dev/tty)
+    public bool IsFifo { get; init; }               // #27 named pipe
+    public bool IsSocket { get; init; }             // #27 Unix domain socket
+    public bool IsSymlinkToDirectory { get; init; } // #37 symlink whose target is a directory
     public UnixFileMode Permissions { get; init; }
     public int OwnerUid { get; init; }
     public int OwnerGid { get; init; }

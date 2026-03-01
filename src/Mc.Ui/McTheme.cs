@@ -28,6 +28,8 @@ public static class McTheme
     public static Terminal.Gui.Attribute PanelInactiveCursor { get; private set; }
     public static Terminal.Gui.Attribute PanelStatus         { get; private set; }
     public static Terminal.Gui.Attribute PanelArchive        { get; private set; }
+    public static Terminal.Gui.Attribute PanelDevice         { get; private set; }  // #27 block/char device
+    public static Terminal.Gui.Attribute PanelSpecialFile    { get; private set; }  // #27 FIFO / socket
 
     public static void ApplyDefault()
     {
@@ -110,6 +112,8 @@ public static class McTheme
         PanelInactiveCursor = new Terminal.Gui.Attribute(Color.White,        Color.Blue);
         PanelStatus         = new Terminal.Gui.Attribute(Color.Black,        Color.Cyan);
         PanelArchive        = new Terminal.Gui.Attribute(Color.BrightCyan,   Color.Blue);
+        PanelDevice         = new Terminal.Gui.Attribute(Color.BrightYellow, Color.Blue);  // #27 device = yellow
+        PanelSpecialFile    = new Terminal.Gui.Attribute(Color.BrightMagenta,Color.Blue);  // #27 FIFO/socket = magenta
 
         // Apply to global colors
         Colors.ColorSchemes["Base"]   = Panel;
@@ -216,8 +220,12 @@ public static class McTheme
         PanelMarkedCursor   = new Terminal.Gui.Attribute(mkFg, sBg);
         PanelInactiveCursor = new Terminal.Gui.Attribute(drFg, pBg);
         PanelStatus         = new Terminal.Gui.Attribute(stFg, stBg);
-        var (arFg, _)       = Pair("panel", "compressed",  Color.BrightCyan, pBg);
-        PanelArchive        = new Terminal.Gui.Attribute(arFg, pBg);
+        var (arFg, _)  = Pair("panel", "compressed",  Color.BrightCyan,    pBg);
+        var (dvFg, _)  = Pair("panel", "device",      Color.BrightYellow,  pBg);  // #27
+        var (spFg, _)  = Pair("panel", "special",     Color.BrightMagenta, pBg);  // #27
+        PanelArchive     = new Terminal.Gui.Attribute(arFg, pBg);
+        PanelDevice      = new Terminal.Gui.Attribute(dvFg, pBg);   // #27
+        PanelSpecialFile = new Terminal.Gui.Attribute(spFg, pBg);   // #27
 
         Colors.ColorSchemes["Base"]   = Panel;
         Colors.ColorSchemes["Dialog"] = Dialog;

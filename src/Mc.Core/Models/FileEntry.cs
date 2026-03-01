@@ -24,6 +24,11 @@ public sealed class FileEntry
     public bool IsSymlink => DirEntry.IsSymlink;
     public bool IsExecutable => DirEntry.IsExecutable;
     public bool IsHidden => DirEntry.IsHidden;
+    public bool IsBlockDevice => DirEntry.IsBlockDevice;               // #27
+    public bool IsCharDevice => DirEntry.IsCharDevice;                 // #27
+    public bool IsFifo => DirEntry.IsFifo;                             // #27
+    public bool IsSocket => DirEntry.IsSocket;                         // #27
+    public bool IsSymlinkToDirectory => DirEntry.IsSymlinkToDirectory; // #37
     public UnixFileMode Permissions => DirEntry.Permissions;
     public string? OwnerName => DirEntry.OwnerName;
     public string? GroupName => DirEntry.GroupName;

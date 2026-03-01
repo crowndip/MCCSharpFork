@@ -13,6 +13,13 @@ public sealed class FindOptions
     public bool CaseSensitive { get; set; }
     public bool ContentRegex { get; set; }
     public string IgnoreDirs { get; set; } = string.Empty;  // #33
+
+    // Date/size filters (#7, #8)
+    public int NewerThanDays { get; set; }   // 0 = disabled; files newer than N days
+    public int OlderThanDays { get; set; }   // 0 = disabled; files older than N days
+    public long MinSizeKB { get; set; }      // 0 = disabled; minimum size in KB
+    public long MaxSizeKB { get; set; }      // 0 = disabled; maximum size in KB
+
     public bool Confirmed { get; set; }
 }
 
@@ -75,11 +82,30 @@ public static class FindDialog
         var ignoreDirsInput = new TextField { X = 1, Y = 16, Width = 66, Height = 1, Text = string.Empty, ColorScheme = McTheme.Dialog };
         d.Add(ignoreDirsInput);
 
-        d.Height = 20; // expand dialog to fit new row
+        // ── Date filters (#7) ─────────────────────────────────────────
+        d.Add(new Label { X = 1, Y = 18, Text = "Newer than (days, 0=any):" });
+        var newerThanInput = new TextField { X = 26, Y = 18, Width = 6, Text = "0", ColorScheme = McTheme.Dialog };
+        d.Add(new Label { X = 34, Y = 18, Text = "Older than (days, 0=any):" });
+        var olderThanInput = new TextField { X = 59, Y = 18, Width = 6, Text = "0", ColorScheme = McTheme.Dialog };
+        d.Add(newerThanInput, olderThanInput);
+
+        // ── Size filters (#8) ─────────────────────────────────────────
+        d.Add(new Label { X = 1, Y = 20, Text = "Min size KB (0=any):" });
+        var minSizeInput = new TextField { X = 21, Y = 20, Width = 10, Text = "0", ColorScheme = McTheme.Dialog };
+        d.Add(new Label { X = 34, Y = 20, Text = "Max size KB (0=any):" });
+        var maxSizeInput = new TextField { X = 55, Y = 20, Width = 10, Text = "0", ColorScheme = McTheme.Dialog };
+        d.Add(minSizeInput, maxSizeInput);
+
+        d.Height = 24; // expand dialog to fit new rows
 
         var ok = new Button { Text = "Find", IsDefault = true };
         ok.Accepting += (_, _) =>
         {
+            int.TryParse(newerThanInput.Text?.ToString(), out var newerDays);
+            int.TryParse(olderThanInput.Text?.ToString(), out var olderDays);
+            long.TryParse(minSizeInput.Text?.ToString(), out var minSizeKB);
+            long.TryParse(maxSizeInput.Text?.ToString(), out var maxSizeKB);
+
             result = new FindOptions
             {
                 StartDirectory  = startInput.Text?.ToString() ?? startDir,
@@ -91,6 +117,10 @@ public static class FindDialog
                 CaseSensitive   = caseCb.CheckedState       == CheckState.Checked,
                 ContentRegex    = regexCb.CheckedState      == CheckState.Checked,
                 IgnoreDirs      = ignoreDirsInput.Text?.ToString() ?? string.Empty, // #33
+                NewerThanDays   = newerDays,   // #7
+                OlderThanDays   = olderDays,   // #7
+                MinSizeKB       = minSizeKB,   // #8
+                MaxSizeKB       = maxSizeKB,   // #8
                 Confirmed = true,
             };
             Application.RequestStop(d);
