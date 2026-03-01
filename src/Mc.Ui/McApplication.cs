@@ -860,7 +860,9 @@ public sealed class McApplication : Toplevel
         else
         {
             var progress = new ProgressDialog(name);
-            progress.Show();
+            // Start the operation on a thread-pool thread BEFORE showing the dialog.
+            // When the operation finishes it calls progress.Close() which posts
+            // Application.RequestStop to the main thread, unblocking Show() below.
             _ = Task.Run(async () =>
             {
                 try { await operation(progress, progress.CancellationToken); }
@@ -868,6 +870,8 @@ public sealed class McApplication : Toplevel
                 catch (Exception ex) { Application.Invoke(() => MessageDialog.Error(ex.Message)); }
                 finally { progress.Close(); Application.Invoke(RefreshPanels); }
             });
+            // Block the main thread in a nested modal event loop until the task finishes.
+            progress.Show();
         }
     }
 

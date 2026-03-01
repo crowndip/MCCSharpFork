@@ -59,10 +59,12 @@ public sealed class ProgressDialog : IProgress<OperationProgress>, IDisposable
         _dialog.AddButton(cancel);
     }
 
-    public void Show()
-    {
-        Task.Run(() => Application.Run(_dialog));
-    }
+    /// <summary>
+    /// Runs the dialog modally on the calling (main) thread.
+    /// Start the background task BEFORE calling this; it will block until
+    /// the task calls <see cref="Close"/>.
+    /// </summary>
+    public void Show() => Application.Run(_dialog);
 
     public void Report(OperationProgress value)
     {
