@@ -17,6 +17,26 @@ public sealed class ButtonBarView : View
         Width = Dim.Fill();
         ColorScheme = McTheme.ButtonBar;
         CanFocus = false;
+        MouseClick += OnMouseClick;
+    }
+
+    private void OnMouseClick(object? sender, MouseEventArgs e)
+    {
+        if (!e.Flags.HasFlag(MouseFlags.Button1Clicked) &&
+            !e.Flags.HasFlag(MouseFlags.Button1DoubleClicked))
+            return;
+
+        int totalWidth = Viewport.Width;
+        int count = _buttons.Length;
+        if (count == 0 || totalWidth == 0) return;
+        int baseWidth = totalWidth / count;
+        if (baseWidth == 0) return;
+
+        // All buttons are baseWidth wide; last button absorbs any remainder.
+        // Math.Min clamps clicks on the last button's extra columns to index count-1.
+        int idx = Math.Min(e.Position.X / baseWidth, count - 1);
+        _buttons[idx].Callback?.Invoke();
+        e.Handled = true;
     }
 
     public static ButtonBarView CreateDefault(

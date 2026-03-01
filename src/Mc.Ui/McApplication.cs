@@ -801,8 +801,9 @@ public sealed class McApplication : Toplevel
         }
 
         var preserveAttrs = opts.PreserveAttributes;
+        var destPath = ResolveDestinationPath(opts.DestinationPath);
         RunFileOperation("Copy", opts.RunInBackground, (progress, ct) =>
-            _controller.CopyMarkedAsync(progress, ct, preserveAttrs));
+            _controller.CopyMarkedAsync(entry, destPath, progress, ct, preserveAttrs));
     }
 
     private void MoveFiles()
@@ -825,7 +826,18 @@ public sealed class McApplication : Toplevel
         var opts = CopyMoveDialog.Show(true, sourceName, dest, moveSource);
         if (opts?.Confirmed != true) return;
 
-        RunFileOperation("Move", opts.RunInBackground, _controller.MoveMarkedAsync);
+        var destPath = ResolveDestinationPath(opts.DestinationPath);
+        RunFileOperation("Move", opts.RunInBackground, (progress, ct) =>
+            _controller.MoveMarkedAsync(entry, destPath, progress, ct));
+    }
+
+    private VfsPath ResolveDestinationPath(string path)
+    {
+        if (Path.IsPathRooted(path))
+            return VfsPath.FromLocal(path);
+        // Relative path: resolve against the inactive panel's directory
+        return VfsPath.FromLocal(
+            Path.Combine(_controller.InactivePanel.CurrentPath.Path, path));
     }
 
     private void RunFileOperation(string name, bool background,

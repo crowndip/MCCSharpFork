@@ -82,22 +82,30 @@ public sealed class FileManagerController
     }
 
     public async Task CopyMarkedAsync(
+        FileEntry? currentEntry = null,
+        VfsPath? destination = null,
         IProgress<OperationProgress>? progress = null,
         CancellationToken ct = default,
         bool preserveAttributes = false)
     {
-        var sources = GetSourceEntries().Select(e => e.FullPath).ToList();
+        var sources = GetSourceEntries(currentEntry).Select(e => e.FullPath).ToList();
         if (sources.Count == 0) return;
-        await Operations.CopyAsync(sources, InactivePanel.CurrentPath,
+        var dest = destination ?? InactivePanel.CurrentPath;
+        await Operations.CopyAsync(sources, dest,
             preserveAttributes: preserveAttributes, progress: progress, ct: ct);
         InactivePanel.Reload();
     }
 
-    public async Task MoveMarkedAsync(IProgress<OperationProgress>? progress = null, CancellationToken ct = default)
+    public async Task MoveMarkedAsync(
+        FileEntry? currentEntry = null,
+        VfsPath? destination = null,
+        IProgress<OperationProgress>? progress = null,
+        CancellationToken ct = default)
     {
-        var sources = GetSourceEntries().Select(e => e.FullPath).ToList();
+        var sources = GetSourceEntries(currentEntry).Select(e => e.FullPath).ToList();
         if (sources.Count == 0) return;
-        await Operations.MoveAsync(sources, InactivePanel.CurrentPath, progress: progress, ct: ct);
+        var dest = destination ?? InactivePanel.CurrentPath;
+        await Operations.MoveAsync(sources, dest, progress: progress, ct: ct);
         ActivePanel.Reload();
         InactivePanel.Reload();
     }
@@ -144,12 +152,13 @@ public sealed class FileManagerController
     public void MarkByPattern(string pattern) => ActivePanel.MarkByPattern(pattern);
     public void Refresh() { ActivePanel.Reload(); InactivePanel.Reload(); }
 
-    private IReadOnlyList<FileEntry> GetSourceEntries()
+    private IReadOnlyList<FileEntry> GetSourceEntries(FileEntry? currentEntry = null)
     {
         var marked = ActivePanel.GetMarkedEntries();
         if (marked.Count > 0) return marked;
 
-        // If nothing marked, use current cursor item (caller's responsibility to provide)
+        // Fall back to cursor entry (matches original MC behaviour: panel->current when panel->marked == 0)
+        if (currentEntry != null) return [currentEntry];
         return [];
     }
 
