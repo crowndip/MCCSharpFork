@@ -61,6 +61,13 @@ public sealed class FileOperations
         var overwriteAll = false;
         var skipAll      = false;
 
+        // Determine once whether destination is an existing directory.
+        // Matches original MC move_file_file() / copy_file_file() logic:
+        //   - existing dir  → place each source INSIDE it (dest/srcname)
+        //   - non-dir, single source → use destination as the exact target path (rename)
+        //   - non-dir, multiple sources → create the directory then place inside it
+        bool destIsExistingDir = Directory.Exists(destination.Path);
+
         for (int i = 0; i < filteredSources.Count; i++)
         {
             ct.ThrowIfCancellationRequested();
@@ -70,18 +77,34 @@ public sealed class FileOperations
             prog.FilesDone = i;
             progress?.Report(prog);
 
+            // Resolve the per-file destination path (mirrors original MC behaviour)
+            VfsPath destPath;
+            if (destIsExistingDir)
+            {
+                destPath = destination.Combine(stat.Name);
+            }
+            else if (filteredSources.Count == 1)
+            {
+                // Single file/dir → destination IS the new name (rename/copy-to-new-name)
+                destPath = destination;
+            }
+            else
+            {
+                // Multiple sources, destination doesn't exist yet → treat as a new directory
+                _vfs.CreateDirectory(destination);
+                destIsExistingDir = true;
+                destPath = destination.Combine(stat.Name);
+            }
+
             // If source is a symlink and we are NOT following symlinks, copy the symlink itself
             if (stat.IsSymlink && !followSymlinks && stat.SymlinkTarget != null)
             {
-                var symlinkDest = destination.Combine(stat.Name);
                 var linkTarget = stableSymlinks
                     ? MakeRelativeSymlinkTarget(stat.SymlinkTarget, destination.Path)
                     : stat.SymlinkTarget;
-                try { _vfs.CreateSymlink(VfsPath.FromLocal(linkTarget), symlinkDest); } catch { }
+                try { _vfs.CreateSymlink(VfsPath.FromLocal(linkTarget), destPath); } catch { }
                 continue;
             }
-
-            var destPath = destination.Combine(stat.Name);
 
             if (stat.IsDirectory)
             {
@@ -125,6 +148,10 @@ public sealed class FileOperations
     {
         var prog = new OperationProgress { TotalFiles = sources.Count };
 
+        // Matches original MC move_file_file() logic:
+        // existing dir → place each file INSIDE it; non-dir + single source → exact rename target.
+        bool destIsExistingDir = Directory.Exists(destination.Path);
+
         for (int i = 0; i < sources.Count; i++)
         {
             ct.ThrowIfCancellationRequested();
@@ -134,7 +161,23 @@ public sealed class FileOperations
             prog.FilesDone = i;
             progress?.Report(prog);
 
-            var destPath = destination.Combine(stat.Name);
+            VfsPath destPath;
+            if (destIsExistingDir)
+            {
+                destPath = destination.Combine(stat.Name);
+            }
+            else if (sources.Count == 1)
+            {
+                // Single file → destination is the exact rename target
+                destPath = destination;
+            }
+            else
+            {
+                // Multiple sources, non-existent destination → create dir and move inside
+                _vfs.CreateDirectory(destination);
+                destIsExistingDir = true;
+                destPath = destination.Combine(stat.Name);
+            }
 
             try
             {

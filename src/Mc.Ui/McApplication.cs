@@ -891,7 +891,10 @@ public sealed class McApplication : Toplevel
         }
         else if (entry != null)
         {
-            dest = entry.Name;
+            // Pre-fill with the full destination path (other panel dir + filename),
+            // matching original MC: the user can change the filename to rename,
+            // or change the directory part to move elsewhere.
+            dest = Path.Combine(_controller.InactivePanel.CurrentPath.Path, entry.Name);
             sourceName = entry.Name;
         }
         else return;
