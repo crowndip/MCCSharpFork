@@ -292,6 +292,21 @@ public sealed class EditorController
 
     // --- Save ---
 
+    /// <summary>Load a new file into the editor, replacing current content. (#10)</summary>
+    public void LoadFile(string path)
+    {
+        _filePath = path;
+        var content = File.Exists(path) ? File.ReadAllText(path) : string.Empty;
+        _buffer.SetContent(content);
+        _cursorOffset = 0;
+        _selectionStart = -1;
+        _selectionEnd = -1;
+        _undoStack.Clear();
+        _redoStack.Clear();
+        Highlighter = SyntaxHighlighter.ForFile(path);
+        Changed?.Invoke(this, EventArgs.Empty);
+    }
+
     public void Save()
     {
         if (_filePath == null) throw new InvalidOperationException("No file path set");

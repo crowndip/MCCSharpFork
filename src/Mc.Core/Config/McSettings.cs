@@ -220,6 +220,12 @@ public sealed class McSettings
         set => _config.Set("Panels", "show_free_space", value);
     }
 
+    public bool ShowHints
+    {
+        get => _config.GetBool("Midnight-Commander", "show_hints", true);
+        set => _config.Set("Midnight-Commander", "show_hints", value);
+    }
+
     // --- Layout (layout_box) ---
     public bool ShowMenubar
     {

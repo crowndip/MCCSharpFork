@@ -138,6 +138,17 @@ public sealed class TextBuffer
         return new TextBuffer(text);
     }
 
+    /// <summary>Replace all content in this buffer (for Ctrl+O load-in-place). (#10)</summary>
+    public void SetContent(string content)
+    {
+        _buf = new char[content.Length + InitialGapSize];
+        content.CopyTo(0, _buf, 0, content.Length);
+        _gapStart = content.Length;
+        _gapEnd = _buf.Length;
+        DetectLineEnding(content);
+        IsModified = false;
+    }
+
     public void SaveFile(string path)
     {
         File.WriteAllText(path, ToString());

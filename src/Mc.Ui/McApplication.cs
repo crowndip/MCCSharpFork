@@ -29,6 +29,7 @@ public sealed class McApplication : Toplevel
     private ButtonBarView _buttonBar = null!;
     private CommandLineView _commandLine = null!;
     private MenuBar _menuBar = null!;
+    private HintsBarView _hintsBar = null!;
 
     // File history: most-recently-used first
     private readonly List<string> _viewedFiles = [];
@@ -203,11 +204,15 @@ public sealed class McApplication : Toplevel
         Add(_menuBar);
 
         // Split view
+        // Hints bar height (1 row when shown, 0 when hidden)
+        int hintsRows = _settings.ShowHints ? 1 : 0;
+        int panelFill = 2 + hintsRows; // cmdline + buttonbar + optional hints
+
         _leftPanelView = new FilePanelView(_controller.LeftPanel)
         {
             X = 0, Y = 1,
             Width = Dim.Percent(50),
-            Height = Dim.Fill(2),
+            Height = Dim.Fill(panelFill),
         };
         _leftPanelView.EntryActivated += OnPanelEntryActivated;
         _leftPanelView.BecameActive += (_, _) => SetActivePanel(_leftPanelView);
@@ -221,7 +226,7 @@ public sealed class McApplication : Toplevel
         {
             X = Pos.Right(_leftPanelView) - 1, Y = 1,
             Width = Dim.Fill(),
-            Height = Dim.Fill(2),
+            Height = Dim.Fill(panelFill),
         };
         _rightPanelView.EntryActivated += OnPanelEntryActivated;
         _rightPanelView.BecameActive += (_, _) => SetActivePanel(_rightPanelView);
@@ -233,16 +238,24 @@ public sealed class McApplication : Toplevel
         _controller.RightPanel.Filter.ShowHidden  = _settings.ShowHiddenFiles;
         _controller.RightPanel.Filter.ShowBackups = _settings.ShowBackupFiles;
 
-        // Cursor-change hooks: update overlay when active-panel cursor moves
-        _leftPanelView.CursorChanged  += (_, _) => { if (_rightMode != PanelDisplayMode.Normal) UpdateOverlay(false); };
-        _rightPanelView.CursorChanged += (_, _) => { if (_leftMode  != PanelDisplayMode.Normal) UpdateOverlay(true); };
+        // Cursor-change hooks: update overlay when active-panel cursor moves; also advance hints tip (#14)
+        _leftPanelView.CursorChanged  += (_, _) =>
+        {
+            if (_rightMode != PanelDisplayMode.Normal) UpdateOverlay(false);
+            _hintsBar?.NextTip();
+        };
+        _rightPanelView.CursorChanged += (_, _) =>
+        {
+            if (_leftMode  != PanelDisplayMode.Normal) UpdateOverlay(true);
+            _hintsBar?.NextTip();
+        };
 
         // Overlay views (initially hidden; replace the inactive panel in Quick View / Info modes)
         _leftOverlay = new View
         {
             X = 0, Y = 1,
             Width  = Dim.Percent(50),
-            Height = Dim.Fill(2),
+            Height = Dim.Fill(panelFill),
             Visible = false,
             ColorScheme = McTheme.Panel,
         };
@@ -250,16 +263,26 @@ public sealed class McApplication : Toplevel
         {
             X      = Pos.Right(_leftPanelView) - 1, Y = 1,
             Width  = Dim.Fill(),
-            Height = Dim.Fill(2),
+            Height = Dim.Fill(panelFill),
             Visible = false,
             ColorScheme = McTheme.Panel,
         };
         Add(_leftPanelView, _rightPanelView, _leftOverlay, _rightOverlay);
 
+        // Hints bar (between panels and command line) (#14)
+        _hintsBar = new HintsBarView
+        {
+            X = 0, Y = Pos.Bottom(_leftPanelView),
+            Width = Dim.Fill(),
+            Height = 1,
+            Visible = _settings.ShowHints,
+        };
+        Add(_hintsBar);
+
         // Command line
         _commandLine = new CommandLineView
         {
-            X = 0, Y = Pos.Bottom(_leftPanelView),
+            X = 0, Y = _settings.ShowHints ? Pos.Bottom(_hintsBar) : Pos.Bottom(_leftPanelView),
             Width = Dim.Fill(),
             Height = 1,
         };
@@ -717,6 +740,13 @@ public sealed class McApplication : Toplevel
         _viewedFiles.Remove(path);
         _viewedFiles.Insert(0, path);
 
+        // Build file list from the active panel for Ctrl+F/Ctrl+B navigation (#5)
+        var panelFiles = _controller.ActivePanel.Entries
+            .Where(e => !e.IsDirectory && !e.IsParentDir)
+            .Select(e => e.FullPath.Path)
+            .ToList();
+        var fileIndex = panelFiles.IndexOf(path);
+
         var viewerWin = new Window
         {
             X = 0, Y = 0,
@@ -724,7 +754,7 @@ public sealed class McApplication : Toplevel
             Height = Dim.Fill(),
             ColorScheme = McTheme.Dialog,
         };
-        var viewer = new ViewerView(path);
+        var viewer = new ViewerView(path, panelFiles.Count > 0 ? panelFiles : null, fileIndex);
         viewer.X = 0; viewer.Y = 0;
         viewer.Width = Dim.Fill(); viewer.Height = Dim.Fill();
         viewer.RequestClose += (_, _) => Application.RequestStop(viewerWin);
@@ -800,10 +830,19 @@ public sealed class McApplication : Toplevel
             }
         }
 
-        var preserveAttrs = opts.PreserveAttributes;
+        var preserveAttrs  = opts.PreserveAttributes;
+        var sourceMask     = string.IsNullOrWhiteSpace(opts.SourceMask) ? null : opts.SourceMask;
+        var followSymlinks = opts.FollowSymlinks;
+        var diveIntoSubdir = opts.DiveIntoSubdir;
+        var stableSymlinks = opts.StableSymlinks;
         var destPath = ResolveDestinationPath(opts.DestinationPath);
         RunFileOperation("Copy", opts.RunInBackground, (progress, ct) =>
-            _controller.CopyMarkedAsync(entry, destPath, progress, ct, preserveAttrs));
+            _controller.CopyMarkedAsync(entry, destPath, progress, ct,
+                preserveAttributes: preserveAttrs,
+                sourceMask: sourceMask,
+                followSymlinks: followSymlinks,
+                diveIntoSubdir: diveIntoSubdir,
+                stableSymlinks: stableSymlinks));
     }
 
     private void MoveFiles()
@@ -826,9 +865,10 @@ public sealed class McApplication : Toplevel
         var opts = CopyMoveDialog.Show(true, sourceName, dest, moveSource);
         if (opts?.Confirmed != true) return;
 
+        var moveMask = string.IsNullOrWhiteSpace(opts.SourceMask) ? null : opts.SourceMask;
         var destPath = ResolveDestinationPath(opts.DestinationPath);
         RunFileOperation("Move", opts.RunInBackground, (progress, ct) =>
-            _controller.MoveMarkedAsync(entry, destPath, progress, ct));
+            _controller.MoveMarkedAsync(entry, destPath, progress, ct, sourceMask: moveMask));
     }
 
     private VfsPath ResolveDestinationPath(string path)

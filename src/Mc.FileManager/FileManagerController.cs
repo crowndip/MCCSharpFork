@@ -86,13 +86,22 @@ public sealed class FileManagerController
         VfsPath? destination = null,
         IProgress<OperationProgress>? progress = null,
         CancellationToken ct = default,
-        bool preserveAttributes = false)
+        bool preserveAttributes = false,
+        string? sourceMask = null,
+        bool followSymlinks = false,
+        bool diveIntoSubdir = true,
+        bool stableSymlinks = false)
     {
         var sources = GetSourceEntries(currentEntry).Select(e => e.FullPath).ToList();
         if (sources.Count == 0) return;
         var dest = destination ?? InactivePanel.CurrentPath;
         await Operations.CopyAsync(sources, dest,
-            preserveAttributes: preserveAttributes, progress: progress, ct: ct);
+            preserveAttributes: preserveAttributes,
+            sourceMask: sourceMask,
+            followSymlinks: followSymlinks,
+            diveIntoSubdir: diveIntoSubdir,
+            stableSymlinks: stableSymlinks,
+            progress: progress, ct: ct);
         InactivePanel.Reload();
     }
 
@@ -100,10 +109,25 @@ public sealed class FileManagerController
         FileEntry? currentEntry = null,
         VfsPath? destination = null,
         IProgress<OperationProgress>? progress = null,
-        CancellationToken ct = default)
+        CancellationToken ct = default,
+        string? sourceMask = null)
     {
         var sources = GetSourceEntries(currentEntry).Select(e => e.FullPath).ToList();
         if (sources.Count == 0) return;
+        // Apply source mask filter for move
+        if (!string.IsNullOrEmpty(sourceMask) && sourceMask != "*")
+        {
+            sources = sources.Where(s =>
+            {
+                var name = System.IO.Path.GetFileName(s.Path);
+                return System.Text.RegularExpressions.Regex.IsMatch(name,
+                    "^" + string.Concat(sourceMask.Select(c => c switch
+                    {
+                        '*' => ".*", '?' => ".", '.' => "\\.",
+                        _ => System.Text.RegularExpressions.Regex.Escape(c.ToString())
+                    })) + "$", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+            }).ToList();
+        }
         var dest = destination ?? InactivePanel.CurrentPath;
         await Operations.MoveAsync(sources, dest, progress: progress, ct: ct);
         ActivePanel.Reload();

@@ -93,6 +93,9 @@ public sealed class VfsRegistry : IDisposable
     public void DeleteDirectory(VfsPath path, bool recursive)
         => Resolve(path).DeleteDirectory(path, recursive);
 
+    public void CreateSymlink(VfsPath target, VfsPath link)
+        => Resolve(link).CreateSymlink(target, link);
+
     public IReadOnlyList<IVfsProvider> GetAllProviders() => _providers.AsReadOnly();
 
     public void Dispose()

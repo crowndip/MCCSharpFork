@@ -18,8 +18,8 @@ public sealed class ViewerController : IDisposable
     private Encoding _encoding = Encoding.UTF8;
 
     public ViewMode Mode { get; set; } = ViewMode.Text;
-    public int ScrollLine { get; private set; }
-    public int ScrollCol { get; private set; }
+    public int ScrollLine { get; set; }
+    public int ScrollCol { get; set; }
     public bool WrapLines { get; set; } = true;
     public string? FilePath => _filePath;
     public long FileSize => _data.Length;

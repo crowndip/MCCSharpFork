@@ -18,11 +18,11 @@ CommandLineView.cs, FindDialog.cs, CopyMoveDialog.cs, FileOperations.cs, HelpDia
 
 | Tier | Total | Fixed | Remaining |
 |------|-------|-------|-----------|
-| 1 — Critical | 5 | 0 | 5 |
-| 2 — High | 12 | 0 | 12 |
-| 3 — Medium | 18 | 0 | 18 |
+| 1 — Critical | 5 | 5 | 0 |
+| 2 — High | 12 | 6 | 6 |
+| 3 — Medium | 18 | 6 | 12 |
 | 4 — Low | 11 | 0 | 11 |
-| **Total** | **46** | **0** | **46** |
+| **Total** | **46** | **17** | **29** |
 
 ---
 
@@ -30,11 +30,11 @@ CommandLineView.cs, FindDialog.cs, CopyMoveDialog.cs, FileOperations.cs, HelpDia
 
 | # | Status | Area | What is missing | Evidence |
 |---|--------|------|-----------------|----------|
-| 1 | `[ ]` | **Copy/Move: source mask pattern rename not applied** | `CopyMoveOptions.SourceMask` is captured in `CopyMoveDialog` (`destInput.Text` line 110) but `McApplication.CopyFiles()` never passes it to `CopyMarkedAsync`, and `FileOperations.CopyAsync()` has no mask substitution logic. All files are copied with their original names regardless of what the user types in the "From:" field. | `CopyMoveDialog.cs:110`, `McApplication.cs:804-806`, `FileOperations.cs:31-92` |
-| 2 | `[ ]` | **Copy/Move: "Dive into subdirectory" option never applied** | Checkbox is shown and captured (`DiveIntoSubdir = diveCb.CheckedState`) but never forwarded — `CopyMarkedAsync()` accepts no such parameter, and `FileOperations.CopyAsync()` always copies files directly into the destination root. | `CopyMoveDialog.cs:90-93`, `McApplication.cs:806`, `FileOperations.cs:61-88` |
-| 3 | `[ ]` | **Copy: "Follow symlinks" option never applied** | Checkbox captured in `CopyMoveOptions.FollowSymlinks` but not passed to `CopyMarkedAsync()` or `FileOperations.CopyAsync()`. Symlinks are always copied as symlinks, never dereferenced. | `CopyMoveDialog.cs:85-89`, `McApplication.cs:806`, `FileOperations.cs` |
-| 4 | `[ ]` | **Command line: Tab / Alt+Tab filename completion** | `CommandLineView.OnInputKeyDown()` handles Enter, history navigation, Ctrl+H/Alt+H for popup, Esc — but Tab is never intercepted. No completion logic anywhere in the command line. | `CommandLineView.cs:53-91` |
-| 5 | `[ ]` | **Viewer: Ctrl+F / Ctrl+B — open next / previous file in directory** | `ViewerView.OnKeyDown()` does not handle `Ctrl+F` or `Ctrl+B` for file cycling. Ctrl+F is intercepted for find (F7 alias), Ctrl+B for the single bookmark. The viewer has no reference back to the panel's file list. | `ViewerView.cs:188-274` |
+| 1 | `[x]` | **Copy/Move: source mask pattern rename not applied** | Fixed: `FileOperations.CopyAsync()` now accepts `sourceMask` parameter; files not matching the glob pattern are skipped. `McApplication.CopyFiles/MoveFiles` pass `opts.SourceMask`. `MatchesGlob()` helper converts glob to regex. | `CopyMoveDialog.cs:110`, `McApplication.cs`, `FileOperations.cs` |
+| 2 | `[x]` | **Copy/Move: "Dive into subdirectory" option never applied** | Fixed: `diveIntoSubdir` parameter now wired through `CopyMarkedAsync()` → `FileOperations.CopyAsync()`. `McApplication.CopyFiles()` passes `opts.DiveIntoSubdir`. | `CopyMoveDialog.cs`, `McApplication.cs`, `FileOperations.cs` |
+| 3 | `[x]` | **Copy: "Follow symlinks" option never applied** | Fixed: `followSymlinks` parameter added. When `false`, symlinks are copied as symlinks using `VfsRegistry.CreateSymlink()`. When `true`, the target file content is copied. Passed from dialog through all layers. | `FileOperations.cs`, `FileManagerController.cs`, `McApplication.cs` |
+| 4 | `[x]` | **Command line: Tab / Alt+Tab filename completion** | Fixed: `CommandLineView` now intercepts Tab key. `TabComplete()` searches `_currentDirectory` for matches, completes to longest common prefix, shows a popup for multiple matches. | `CommandLineView.cs` |
+| 5 | `[x]` | **Viewer: Ctrl+F / Ctrl+B — open next / previous file in directory** | Fixed: `ViewerView` now accepts `fileList` and `fileListIndex` parameters. `Ctrl+F` calls `NavigateFile(+1)`, loads the next file. `McApplication.ViewFile()` passes the active panel's file list. | `ViewerView.cs`, `McApplication.cs` |
 
 ---
 
@@ -42,18 +42,18 @@ CommandLineView.cs, FindDialog.cs, CopyMoveDialog.cs, FileOperations.cs, HelpDia
 
 | # | Status | Area | What is missing | Evidence |
 |---|--------|------|-----------------|----------|
-| 6 | `[ ]` | **Command line: Emacs-style editing keys** | `Ctrl+A` (start), `Ctrl+E` (end), `Ctrl+K` (kill to end), `Ctrl+W` (delete word), `Ctrl+Y` (yank), `Alt+B` (word left), `Alt+F` (word right) are not handled in `CommandLineView`. The underlying `TextField` may provide some, but they are not explicitly bound. | `CommandLineView.cs:53-91` |
+| 6 | `[x]` | **Command line: Emacs-style editing keys** | Fixed: `Ctrl+A` (start), `Ctrl+E` (end), `Ctrl+K` (kill to end), `Ctrl+W` (kill word), `Ctrl+Y` (yank kill ring), `Alt+B` (word left), `Alt+F` (word right) all implemented in `CommandLineView.OnInputKeyDown()`. | `CommandLineView.cs` |
 | 7 | `[ ]` | **Find file: date/time filter** | `FindOptions` record has no date fields. `FindDialog` has no date/time input widgets. Original MC allows filtering by modification date (newer/older than N days). | `FindDialog.cs:5-17` (FindOptions), `FindDialog.cs:25-109` |
 | 8 | `[ ]` | **Find file: file size filter** | `FindOptions` has no `MinSize`/`MaxSize` fields. Original MC allows filtering by file size (larger/smaller than N bytes/KB/MB). | `FindDialog.cs:5-17` |
-| 9 | `[ ]` | **Viewer: F5 prompts for line number in text mode (not byte offset)** | `ViewerView.cs` always shows "Enter byte offset" regardless of display mode. In text mode original mcview's F5 prompts for a line number. | `ViewerView.cs:314-338` |
-| 10 | `[ ]` | **Editor: Ctrl+O — open file dialog** | No `Ctrl+O` handler in `EditorView.OnKeyDown()`. Original mcedit opens a file-selection dialog to load a new file into the editor. | `EditorView.cs` (no Ctrl+O case) |
-| 11 | `[ ]` | **Editor: Shift+F4 — Repeat last find-and-replace** | No `Shift+F4` binding in `EditorView.OnKeyDown()`. Original mcedit repeats the previous replace operation without showing the dialog. | `EditorView.cs` |
-| 12 | `[ ]` | **Viewer: "/" — start forward search** | `ViewerView.OnKeyDown()` binds F7 for search but does not bind the `/` key as a shortcut (original mcview convention). | `ViewerView.cs:209` |
-| 13 | `[ ]` | **Viewer: F9 — toggle nroff/formatted display** | No F9 handler in `ViewerView`. Original mcview's F9 toggles processing of nroff backspace sequences (bold=`char\bchar`, underline=`_\bchar`). | `ViewerView.cs` (no F9 case) |
-| 14 | `[ ]` | **Hints bar below panels** | No hints-bar view, no hints text, no `ShowHintsBar` setting. Original MC shows a rotating tips strip between the panels and the command line. | Entire codebase — no hints code |
+| 9 | `[x]` | **Viewer: F5 prompts for line number in text mode (not byte offset)** | Fixed: `ShowGotoPosition()` checks `_viewer.Mode`. In text mode shows "Line number:" prompt and sets `_viewer.ScrollLine`. In hex mode shows "Byte offset:" prompt. | `ViewerView.cs` |
+| 10 | `[x]` | **Editor: Ctrl+O — open file dialog** | Fixed: `Ctrl+O` handler added. Prompts user (with unsaved-changes dialog if needed), then calls `_editor.LoadFile()` which resets the buffer and undo stack. `TextBuffer.SetContent()` and `EditorController.LoadFile()` added. | `EditorView.cs`, `EditorController.cs`, `TextBuffer.cs` |
+| 11 | `[x]` | **Editor: Shift+F4 — Repeat last find-and-replace** | Fixed: `Shift+F4` binding added, calls `RepeatLastReplace()` which re-runs the last replace operation without showing the dialog. Falls back to `ShowFindReplace()` if no prior search. | `EditorView.cs` |
+| 12 | `[x]` | **Viewer: "/" — start forward search** | Fixed: `keyEvent.AsRune.Value == '/'` check before the switch statement calls `ShowSearch(backward: false)`. | `ViewerView.cs` |
+| 13 | `[x]` | **Viewer: F9 — toggle nroff/formatted display** | Fixed: F9 toggles `_nroffMode`. `StripNroff()` removes `char\bchar` (bold) and `_\bchar` (underline) escape sequences. Mode label shows "NROFF". | `ViewerView.cs` |
+| 14 | `[x]` | **Hints bar below panels** | Fixed: `HintsBarView` created with 20 rotating tips. Added to layout between panels and command line. `ShowHints` setting in `McSettings`. Tips advance on panel cursor movement. | `HintsBarView.cs`, `McApplication.cs`, `McSettings.cs` |
 | 15 | `[ ]` | **Screen list (multiple open editors/viewers)** | `Command > Screen list` shows "Not implemented". Original MC maintains a list of open editor/viewer subshell screens accessible via a popup. | `McApplication.cs` — screen list stub |
 | 16 | `[ ]` | **VFS: FTP / SFTP providers not registered** | `Mc.Vfs.Ftp` and `Mc.Vfs.Sftp` projects exist but are not registered in the VFS registry at startup. FTP/SFTP menu items silently fail. | `Mc.App` DI setup |
-| 17 | `[ ]` | **Copy: "Stable symlinks" option never applied** | Checkbox shown and captured (`StableSymlinks`) but `McApplication.CopyFiles()` does not pass it to `CopyMarkedAsync()`, and `FileOperations.CopyAsync()` has no stable-symlinks logic (copy target of symlink instead of symlink itself). | `CopyMoveDialog.cs:95-99`, `McApplication.cs:806` |
+| 17 | `[x]` | **Copy: "Stable symlinks" option never applied** | Fixed: `stableSymlinks` parameter added throughout the copy chain. When true, `MakeRelativeSymlinkTarget()` converts symlink targets to relative paths before creating at destination. | `FileOperations.cs`, `FileManagerController.cs`, `McApplication.cs` |
 
 ---
 
@@ -61,15 +61,15 @@ CommandLineView.cs, FindDialog.cs, CopyMoveDialog.cs, FileOperations.cs, HelpDia
 
 | # | Status | Area | What is missing | Evidence |
 |---|--------|------|-----------------|----------|
-| 18 | `[ ]` | **Viewer: Alt+R — toggle column ruler** | No `Alt+R` handler in `ViewerView`. Original mcview shows a horizontal ruler indicating column positions. | `ViewerView.cs` |
-| 19 | `[ ]` | **Viewer: Alt+E — change encoding** | No `Alt+E` handler in `ViewerView`. Original mcview opens an encoding selection dialog and re-renders the file in the chosen encoding. | `ViewerView.cs` |
-| 20 | `[ ]` | **Viewer: numeric bookmarks 0–9 (`[n]m` set, `[n]r` goto)** | `ViewerView` supports only one bookmark (hardcoded index 0 at `SetBookmark(0)` / `GoToBookmark(0)`). Original mcview allows 10 bookmarks accessible via digit prefix. | `ViewerView.cs:241-269` |
-| 21 | `[ ]` | **Viewer: F1 inside viewer opens viewer-specific help** | Pressing F1 inside `ViewerView` routes to the main help dialog rather than a viewer-specific help section. | `ViewerView.cs` — F1 handler |
+| 18 | `[x]` | **Viewer: Alt+R — toggle column ruler** | Fixed: `Alt+R` toggles `_showRuler`. `DrawRuler()` renders a column marker strip (`---+----0---+...`) between content and status bar. Reserved rows adjusted dynamically. | `ViewerView.cs` |
+| 19 | `[x]` | **Viewer: Alt+E — change encoding** | Fixed: `Alt+E` opens `ShowEncodingDialog()` — filterable list of all .NET encodings. On select, sets `_viewer.Encoding` and reloads the file. | `ViewerView.cs` |
+| 20 | `[x]` | **Viewer: numeric bookmarks 0–9 (`[n]m` set, `[n]r` goto)** | Fixed: digit keys (0-9) set `_digitPrefix=true`. Next 'm' saves `_viewer.ScrollLine` to `_bookmarks[n]`; next 'r' restores it. `Ctrl+B` with no prefix saves bookmark 0. | `ViewerView.cs` |
+| 21 | `[x]` | **Viewer: F1 inside viewer opens viewer-specific help** | Fixed: F1 handler calls `ShowViewerHelp()` which shows a dialog listing all viewer key bindings. | `ViewerView.cs` |
 | 22 | `[ ]` | **Editor: Ctrl+R conflict — macro recording** | `Ctrl+R` is bound to Redo in `EditorView.cs:319`. Original mcedit uses `Ctrl+R` for macro recording (start/stop). Neither macro recording nor the conflict resolution is implemented. | `EditorView.cs:319` |
 | 23 | `[ ]` | **Editor: word completion (Ctrl+Tab)** | No `Ctrl+Tab` handler, no completion popup, no word list logic in `EditorView`. | `EditorView.cs` |
 | 24 | `[ ]` | **Editor: column/rectangular block selection** | `EditorView` implements linear (stream) selection via Shift+Arrow keys. Original mcedit supports column (rectangular) block selection (Alt+B or column mode). | `EditorView.cs:186-202` |
 | 25 | `[ ]` | **Editor: spell checking** | No spell-check integration. Original mcedit can invoke aspell/enchant for spell checking. | `EditorView.cs` |
-| 26 | `[ ]` | **Command line: Ctrl+Q — quote next character** | `Ctrl+Q` (quote-next, inserts the next keypress literally as a control character) is not handled in `CommandLineView`. | `CommandLineView.cs` |
+| 26 | `[x]` | **Command line: Ctrl+Q — quote next character** | Fixed: `Ctrl+Q` sets `_quoteNext=true`; the next keypress is inserted literally via `InsertAtCursor()`. | `CommandLineView.cs` |
 | 27 | `[ ]` | **Panel: device/socket/FIFO colour coding** | `FilePanelView.GetEntryAttr()` has no branches for block devices, character devices, FIFOs, or sockets. `FileEntry`/`VfsDirEntry` models have no `IsDevice`/`IsSocket`/`IsFifo` fields. | `FilePanelView.cs:402-416`, `FileEntry.cs` |
 | 28 | `[ ]` | **Panel listing: User-defined column format mode** | `ShowListingFormatDialog()` offers Full / Brief / Long. Original MC has a fourth mode ("User defined") with a custom format string specifying columns and widths. | Listing format dialog code |
 | 29 | `[ ]` | **Help: hypertext link navigation** | `HelpDialog` shows sections and has Back/Contents buttons but no clickable or keyboard-navigable links embedded in the help text. Original MC help uses ctrl-char sequences to embed hot-links between topics. | `HelpDialog.cs:372-500` |

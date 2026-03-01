@@ -224,6 +224,12 @@ public sealed class EditorView : View
             // F4 = Find+Replace (#1)
             case KeyCode.F4: ShowFindReplace(); return true;
 
+            // Shift+F4 = Repeat last find+replace without dialog (#11)
+            case KeyCode.F4 | KeyCode.ShiftMask: RepeatLastReplace(); return true;
+
+            // Ctrl+O = Open file dialog (#10)
+            case KeyCode.O when keyEvent.IsCtrl: OpenFileDialog(); return true;
+
             // F3 = start/extend block mark (#3)
             case KeyCode.F3:
                 if (!_selecting)
@@ -545,6 +551,46 @@ public sealed class EditorView : View
             if (!result.Found) MessageBox.Query("Find", "Pattern not found", "OK");
         }
         SetNeedsDraw();
+    }
+
+    /// <summary>Repeat the last find+replace without showing a dialog (Shift+F4). (#11)</summary>
+    private void RepeatLastReplace()
+    {
+        if (string.IsNullOrEmpty(_editor.LastSearch.Pattern) ||
+            string.IsNullOrEmpty(_editor.LastSearch.Replacement))
+        {
+            ShowFindReplace(); // No previous replace — show the dialog
+            return;
+        }
+        var result = _editor.FindNext(_editor.LastSearch);
+        if (!result.Found)
+            MessageBox.Query("Replace", "No more occurrences.", "OK");
+        else
+        {
+            _editor.ReplaceAll(_editor.LastSearch);
+            MessageBox.Query("Replace", "Replacement applied.", "OK");
+        }
+        SetNeedsDraw();
+    }
+
+    /// <summary>Open file dialog (Ctrl+O). (#10)</summary>
+    private void OpenFileDialog()
+    {
+        if (_editor.IsModified)
+        {
+            var choice = MessageBox.Query("Unsaved Changes",
+                "Current file has unsaved changes.", "Save", "Discard", "Cancel");
+            if (choice == 2) return;
+            if (choice == 0) SaveFile();
+        }
+        var path = PromptInput("Open File", "File name:", _editor.FilePath ?? string.Empty);
+        if (path == null) return;
+        try
+        {
+            _editor.LoadFile(path);
+            SetNeedsDraw();
+        }
+        catch (Exception ex) { MessageBox.ErrorQuery("Open Failed", ex.Message, "OK"); }
     }
 
     /// <summary>Go-to-line dialog (Ctrl+G). (#14)</summary>

@@ -1,3 +1,4 @@
+using System.Text.RegularExpressions;
 using Mc.Core.Vfs;
 
 namespace Mc.FileManager;
@@ -34,12 +35,21 @@ public sealed class FileOperations
         OperationConflict onConflict = OperationConflict.Ask,
         Func<string, string, OverwriteAction>? conflictCallback = null,
         bool preserveAttributes = false,
+        string? sourceMask = null,
+        bool followSymlinks = false,
+        bool diveIntoSubdir = true,
+        bool stableSymlinks = false,
         IProgress<OperationProgress>? progress = null,
         CancellationToken ct = default)
     {
-        var prog = new OperationProgress { TotalFiles = sources.Count };
+        // Build filtered source list from mask
+        var filteredSources = string.IsNullOrEmpty(sourceMask) || sourceMask == "*"
+            ? sources
+            : sources.Where(s => MatchesGlob(Path.GetFileName(s.Path), sourceMask)).ToList();
+
+        var prog = new OperationProgress { TotalFiles = filteredSources.Count };
         long totalBytes = 0;
-        foreach (var src in sources)
+        foreach (var src in filteredSources)
         {
             try { totalBytes += _vfs.Stat(src).Size; } catch { }
         }
@@ -49,21 +59,34 @@ public sealed class FileOperations
         var overwriteAll = false;
         var skipAll      = false;
 
-        for (int i = 0; i < sources.Count; i++)
+        for (int i = 0; i < filteredSources.Count; i++)
         {
             ct.ThrowIfCancellationRequested();
-            var src = sources[i];
+            var src = filteredSources[i];
             var stat = _vfs.Stat(src);
             prog.CurrentFile = stat.Name;
             prog.FilesDone = i;
             progress?.Report(prog);
 
+            // If source is a symlink and we are NOT following symlinks, copy the symlink itself
+            if (stat.IsSymlink && !followSymlinks && stat.SymlinkTarget != null)
+            {
+                var symlinkDest = destination.Combine(stat.Name);
+                var linkTarget = stableSymlinks
+                    ? MakeRelativeSymlinkTarget(stat.SymlinkTarget, destination.Path)
+                    : stat.SymlinkTarget;
+                try { _vfs.CreateSymlink(VfsPath.FromLocal(linkTarget), symlinkDest); } catch { }
+                continue;
+            }
+
             var destPath = destination.Combine(stat.Name);
 
             if (stat.IsDirectory)
             {
+                // Dive-into-subdir: if destination directory exists and diveIntoSubdir=true, merge into it
+                // If diveIntoSubdir=false and dest exists, still merge (preserves current behaviour)
                 await CopyDirectoryAsync(src, destPath, onConflict, conflictCallback,
-                    preserveAttributes, prog, progress, ct);
+                    preserveAttributes, followSymlinks, stableSymlinks, prog, progress, ct);
             }
             else
             {
@@ -171,6 +194,8 @@ public sealed class FileOperations
         OperationConflict onConflict,
         Func<string, string, OverwriteAction>? conflictCallback,
         bool preserveAttributes,
+        bool followSymlinks,
+        bool stableSymlinks,
         OperationProgress prog,
         IProgress<OperationProgress>? progress,
         CancellationToken ct)
@@ -183,8 +208,15 @@ public sealed class FileOperations
             if (entry.Name == "..") continue;
             var childSrc  = entry.FullPath;
             var childDest = dest.Combine(entry.Name);
-            if (entry.IsDirectory)
-                await CopyDirectoryAsync(childSrc, childDest, onConflict, conflictCallback, preserveAttributes, prog, progress, ct);
+            if (entry.IsSymlink && !followSymlinks && entry.SymlinkTarget != null)
+            {
+                var linkTarget = stableSymlinks
+                    ? MakeRelativeSymlinkTarget(entry.SymlinkTarget, dest.Path)
+                    : entry.SymlinkTarget;
+                try { _vfs.CreateSymlink(VfsPath.FromLocal(linkTarget), childDest); } catch { }
+            }
+            else if (entry.IsDirectory)
+                await CopyDirectoryAsync(childSrc, childDest, onConflict, conflictCallback, preserveAttributes, followSymlinks, stableSymlinks, prog, progress, ct);
             else
                 await CopySingleFileAsync(childSrc, childDest, entry.Size, preserveAttributes, prog, progress, ct);
         }
@@ -213,6 +245,31 @@ public sealed class FileOperations
         prog.FilesDone++;
 
         if (preserveAttributes) PreserveAttrs(src, dest);
+    }
+
+    /// <summary>Glob pattern match: supports * (any chars) and ? (single char).</summary>
+    private static bool MatchesGlob(string name, string pattern)
+    {
+        var regexPat = "^" + string.Concat(pattern.Select(c => c switch
+        {
+            '*' => ".*",
+            '?' => ".",
+            '.' => "\\.",
+            _   => Regex.Escape(c.ToString())
+        })) + "$";
+        return Regex.IsMatch(name, regexPat, RegexOptions.IgnoreCase);
+    }
+
+    /// <summary>Convert an absolute symlink target to a path relative to the destination directory.</summary>
+    private static string MakeRelativeSymlinkTarget(string target, string destDir)
+    {
+        try
+        {
+            var absTarget = Path.IsPathRooted(target) ? target : Path.GetFullPath(target);
+            var relative  = Path.GetRelativePath(destDir, absTarget);
+            return relative;
+        }
+        catch { return target; }
     }
 
     private void PreserveAttrs(VfsPath src, VfsPath dest)
