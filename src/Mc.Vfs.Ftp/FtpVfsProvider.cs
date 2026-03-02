@@ -154,7 +154,9 @@ public sealed class FtpVfsProvider : IVfsProvider
     private static FtpWebRequest CreateRequest(VfsPath path, string method)
     {
         var uri = path.ToString();
+#pragma warning disable SYSLIB0014 // FtpWebRequest requires WebRequest.Create — no HttpClient FTP alternative
         var request = (FtpWebRequest)WebRequest.Create(uri);
+#pragma warning restore SYSLIB0014
         request.Method = method;
         if (path.User != null)
             request.Credentials = new NetworkCredential(path.User, path.Password);

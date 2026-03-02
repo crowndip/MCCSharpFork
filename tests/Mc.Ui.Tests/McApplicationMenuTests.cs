@@ -55,7 +55,7 @@ public sealed class McApplicationMenuTests
         item.Title?.ToString()?.Replace("_", "") ?? string.Empty;
 
     private static MenuItem[] Items(MenuBarItem menu) =>
-        menu.Children.Where(c => c is not null).ToArray()!;
+        (menu.Children ?? []).OfType<MenuItem>().ToArray();
 
     // ==================================================================
     // TOP-LEVEL MENU BAR — Left | File | Command | Tools | Options | Right

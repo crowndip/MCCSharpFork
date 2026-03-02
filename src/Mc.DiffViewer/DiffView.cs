@@ -33,7 +33,7 @@ public sealed class DiffView : View
         };
     }
 
-    public string Title =>
+    public new string Title =>
         $"Diff: {Path.GetFileName(_diff.LeftPath ?? "?")} <> {Path.GetFileName(_diff.RightPath ?? "?")} ({_diff.TotalChanges} changes)";
 
     protected override bool OnDrawingContent(DrawContext? context)
@@ -45,12 +45,12 @@ public sealed class DiffView : View
 
         // Header
         Move(0, 0);
-        Driver.SetAttribute(_headerAttr);
+        Driver!.SetAttribute(_headerAttr);
         var leftHeader = $" {_diff.LeftPath ?? "Left"} ".PadRight(halfWidth);
         var rightHeader = $" {_diff.RightPath ?? "Right"} ".PadRight(halfWidth);
-        Driver.AddStr(leftHeader[..Math.Min(halfWidth, leftHeader.Length)]);
-        Driver.AddStr(" ");
-        Driver.AddStr(rightHeader[..Math.Min(halfWidth, rightHeader.Length)]);
+        Driver!.AddStr(leftHeader[..Math.Min(halfWidth, leftHeader.Length)]);
+        Driver!.AddStr(" ");
+        Driver!.AddStr(rightHeader[..Math.Min(halfWidth, rightHeader.Length)]);
 
         // Diff lines
         var visibleLines = _diff.GetVisibleLines(_diff.ScrollLine, contentHeight);
@@ -59,8 +59,8 @@ public sealed class DiffView : View
             Move(0, row + 1);
             if (row >= visibleLines.Count)
             {
-                Driver.SetAttribute(_contextAttr);
-                Driver.AddStr(new string(' ', viewport.Width));
+                Driver!.SetAttribute(_contextAttr);
+                Driver!.AddStr(new string(' ', viewport.Width));
                 continue;
             }
 
@@ -73,7 +73,7 @@ public sealed class DiffView : View
                 _                   => _contextAttr,
             };
 
-            Driver.SetAttribute(attr);
+            Driver!.SetAttribute(attr);
 
             // Left side
             var prefix = line.Type switch
@@ -85,11 +85,11 @@ public sealed class DiffView : View
             };
             var leftText = (prefix + (line.LeftText ?? string.Empty)).PadRight(halfWidth);
             if (leftText.Length > halfWidth) leftText = leftText[..halfWidth];
-            Driver.AddStr(leftText);
+            Driver!.AddStr(leftText);
 
             // Separator
-            Driver.SetAttribute(_headerAttr);
-            Driver.AddStr("|");
+            Driver!.SetAttribute(_headerAttr);
+            Driver!.AddStr("|");
 
             // Right side
             var rightPrefix = line.Type switch
@@ -99,18 +99,18 @@ public sealed class DiffView : View
                 DiffLineType.Changed => "~ ",
                 _                   => "  ",
             };
-            Driver.SetAttribute(attr);
+            Driver!.SetAttribute(attr);
             var rightText = (rightPrefix + (line.RightText ?? string.Empty)).PadRight(halfWidth);
             if (rightText.Length > halfWidth) rightText = rightText[..halfWidth];
-            Driver.AddStr(rightText);
+            Driver!.AddStr(rightText);
         }
 
         // Status bar
         Move(0, viewport.Height - 1);
-        Driver.SetAttribute(_headerAttr);
+        Driver!.SetAttribute(_headerAttr);
         var status = $" {_diff.TotalChanges} changes | Change {_diff.CurrentChange + 1}/{_diff.TotalChanges} | n=Next p=Prev q=Quit";
         if (status.Length > viewport.Width) status = status[..viewport.Width];
-        Driver.AddStr(status.PadRight(viewport.Width));
+        Driver!.AddStr(status.PadRight(viewport.Width));
         return false;
     }
 

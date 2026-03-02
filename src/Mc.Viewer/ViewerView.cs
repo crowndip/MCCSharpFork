@@ -48,7 +48,7 @@ public sealed class ViewerView : View
         };
     }
 
-    public string Title =>
+    public new string Title =>
         $"View: {(_viewer.FilePath != null ? Path.GetFileName(_viewer.FilePath) : "?")} ({_viewer.FileSize:N0} bytes) [{ModeLabel}]";
 
     private string ModeLabel => _viewer.Mode switch
@@ -100,7 +100,7 @@ public sealed class ViewerView : View
         for (int row = 0; row < contentHeight; row++)
         {
             Move(0, row);
-            Driver.SetAttribute(ColorScheme.Normal);
+            Driver!.SetAttribute(ColorScheme!.Normal);
             if (row < lines.Count)
             {
                 var line = lines[row];
@@ -124,12 +124,12 @@ public sealed class ViewerView : View
                 }
                 else
                 {
-                    Driver.AddStr(line.PadRight(viewport.Width));
+                    Driver!.AddStr(line.PadRight(viewport.Width));
                 }
             }
             else
             {
-                Driver.AddStr("~".PadRight(viewport.Width));
+                Driver!.AddStr("~".PadRight(viewport.Width));
             }
         }
     }
@@ -141,8 +141,8 @@ public sealed class ViewerView : View
         {
             var pre = line[..Math.Min(matchCol, line.Length)];
             if (pre.Length > width) pre = pre[..width];
-            Driver.SetAttribute(ColorScheme.Normal);
-            Driver.AddStr(pre);
+            Driver!.SetAttribute(ColorScheme!.Normal);
+            Driver!.AddStr(pre);
         }
         // Match highlight
         if (matchCol < width && matchLen > 0)
@@ -153,8 +153,8 @@ public sealed class ViewerView : View
             {
                 var mid = line[start..end];
                 if (start + mid.Length > width) mid = mid[..(width - start)];
-                Driver.SetAttribute(new Terminal.Gui.Attribute(Color.Black, Color.BrightCyan));
-                Driver.AddStr(mid);
+                Driver!.SetAttribute(new Terminal.Gui.Attribute(Color.Black, Color.BrightCyan));
+                Driver!.AddStr(mid);
             }
         }
         // After match
@@ -162,15 +162,15 @@ public sealed class ViewerView : View
         if (afterStart < line.Length && afterStart < width)
         {
             var post = line[afterStart..Math.Min(line.Length, width)];
-            Driver.SetAttribute(ColorScheme.Normal);
-            Driver.AddStr(post);
+            Driver!.SetAttribute(ColorScheme!.Normal);
+            Driver!.AddStr(post);
         }
         // Pad remainder
         int drawn = Math.Min(line.Length, width);
         if (drawn < width)
         {
-            Driver.SetAttribute(ColorScheme.Normal);
-            Driver.AddStr(new string(' ', width - drawn));
+            Driver!.SetAttribute(ColorScheme!.Normal);
+            Driver!.AddStr(new string(' ', width - drawn));
         }
     }
 
@@ -184,13 +184,13 @@ public sealed class ViewerView : View
             {
                 var line = lines[row];
                 if (line.Length > viewport.Width) line = line[..viewport.Width];
-                Driver.SetAttribute(ColorScheme.Normal);
-                Driver.AddStr(line.PadRight(viewport.Width));
+                Driver!.SetAttribute(ColorScheme!.Normal);
+                Driver!.AddStr(line.PadRight(viewport.Width));
             }
             else
             {
-                Driver.SetAttribute(ColorScheme.Normal);
-                Driver.AddStr(new string(' ', viewport.Width));
+                Driver!.SetAttribute(ColorScheme!.Normal);
+                Driver!.AddStr(new string(' ', viewport.Width));
             }
         }
     }
@@ -198,20 +198,20 @@ public sealed class ViewerView : View
     private void DrawRuler(System.Drawing.Rectangle viewport, int contentRow)
     {
         Move(0, contentRow);
-        Driver.SetAttribute(new Terminal.Gui.Attribute(Color.Black, Color.Gray));
+        Driver!.SetAttribute(new Terminal.Gui.Attribute(Color.Black, Color.Gray));
         var ruler = new System.Text.StringBuilder(viewport.Width);
         for (int col = 0; col < viewport.Width; col++)
         {
             int c1 = (col + 1) % 10;
             ruler.Append(c1 == 0 ? (char)('0' + ((col + 1) / 10) % 10) : (c1 == 5 ? '+' : '-'));
         }
-        Driver.AddStr(ruler.ToString());
+        Driver!.AddStr(ruler.ToString());
     }
 
     private void DrawStatusBar(System.Drawing.Rectangle viewport)
     {
         Move(0, viewport.Height - 1);
-        Driver.SetAttribute(new Terminal.Gui.Attribute(Color.Black, Color.Cyan));
+        Driver!.SetAttribute(new Terminal.Gui.Attribute(Color.Black, Color.Cyan));
         int reservedRows = 1 + (_showRuler ? 1 : 0);
         var totalLines = _viewer.Mode == ViewMode.Hex
             ? _viewer.TotalHexLineCount()
@@ -222,7 +222,7 @@ public sealed class ViewerView : View
         pct = Math.Clamp(pct, 0, 100);
         var status = $" {_viewer.FilePath ?? "?"} | {_viewer.FileSize:N0} bytes | {pct}% | {ModeLabel} | {(_viewer.WrapLines ? "Wrap" : "No wrap")} | F2=Wrap F4=Hex F5=Goto F7=Find F8=Raw F9=Nroff Alt+R=Ruler q=Quit";
         if (status.Length > viewport.Width) status = status[..viewport.Width];
-        Driver.AddStr(status.PadRight(viewport.Width));
+        Driver!.AddStr(status.PadRight(viewport.Width));
     }
 
     protected override bool OnKeyDown(Key keyEvent)

@@ -409,10 +409,11 @@ public static class HelpDialog
             });
 
             // Dialog dimensions — match original MC: full width-4, 2/3 or 18 rows min
-            int dialogW = Math.Max(76, Application.Driver.Cols - 4);
+            int dialogW = Math.Max(76, (Application.Driver?.Cols ?? 80) - 4);
             // Extra row for link buttons when there are cross-references
             int linkRows = links.Count > 0 ? 2 : 0;
-            int dialogH  = Math.Clamp(Application.Driver.Rows * 2 / 3, 18, Application.Driver.Rows - 4);
+            int driverRows = Application.Driver?.Rows ?? 40;
+            int dialogH  = Math.Clamp(driverRows * 2 / 3, 18, driverRows - 4);
 
             string? nextId = null;  // set to navigate away
 

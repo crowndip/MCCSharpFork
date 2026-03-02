@@ -56,7 +56,7 @@ public sealed class EditorView : View
         };
     }
 
-    public string Title => _editor.FilePath != null
+    public new string Title => _editor.FilePath != null
         ? $"Edit: {Path.GetFileName(_editor.FilePath)}{(_editor.IsModified ? " *" : string.Empty)}"
         : "Edit: [new file]";
 
@@ -83,17 +83,17 @@ public sealed class EditorView : View
             // Line-number gutter (#23)
             if (gutter > 0)
             {
-                Driver.SetAttribute(new Terminal.Gui.Attribute(Color.Gray, Color.Black));
+                Driver!.SetAttribute(new Terminal.Gui.Attribute(Color.Gray, Color.Black));
                 if (lineNo < _editor.Buffer.GetLineCount())
-                    Driver.AddStr((lineNo + 1).ToString().PadLeft(gutter - 1) + " ");
+                    Driver!.AddStr((lineNo + 1).ToString().PadLeft(gutter - 1) + " ");
                 else
-                    Driver.AddStr(new string(' ', gutter));
+                    Driver!.AddStr(new string(' ', gutter));
             }
 
             if (lineNo >= _editor.Buffer.GetLineCount())
             {
-                Driver.SetAttribute(ColorScheme.Normal);
-                Driver.AddStr(new string(' ', textWidth));
+                Driver!.SetAttribute(ColorScheme!.Normal);
+                Driver!.AddStr(new string(' ', textWidth));
                 continue;
             }
 
@@ -113,7 +113,7 @@ public sealed class EditorView : View
 
         // Status bar
         Move(0, contentHeight);
-        Driver.SetAttribute(new Terminal.Gui.Attribute(Color.Black, Color.Cyan));
+        Driver!.SetAttribute(new Terminal.Gui.Attribute(Color.Black, Color.Cyan));
         var (ln, col) = _editor.CursorPosition;
         var mode = _insertMode ? "INS" : "OVR";
         var status = $" {_editor.FilePath ?? "new"} | Ln {ln + 1}, Col {col + 1} | {mode} | {(_editor.IsModified ? "Modified" : "Saved")}";
@@ -121,7 +121,7 @@ public sealed class EditorView : View
         if (_showLineNumbers) status += " | Nums";
         if (!_syntaxHighlightingOn) status += " | NoHL";
         if (status.Length > viewport.Width) status = status[..viewport.Width];
-        Driver.AddStr(status.PadRight(viewport.Width));
+        Driver!.AddStr(status.PadRight(viewport.Width));
 
         // Position the terminal cursor
         var screenLine = cursorLine - _topLine;
@@ -142,10 +142,10 @@ public sealed class EditorView : View
         {
             char ch = pos < line.Length ? line[pos] : ' ';
             bool inSel = IsInSelection(row + _topLine, pos, lineStartOffset + pos);
-            Driver.SetAttribute(inSel
+            Driver!.SetAttribute(inSel
                 ? new Terminal.Gui.Attribute(Color.Black, Color.Cyan)
-                : ColorScheme.Normal);
-            Driver.AddStr(ch.ToString());
+                : ColorScheme!.Normal);
+            Driver!.AddStr(ch.ToString());
         }
     }
 
@@ -177,14 +177,14 @@ public sealed class EditorView : View
             bool inSel = IsInSelection(row + _topLine, pos, charOffset);
             if (inSel)
             {
-                Driver.SetAttribute(new Terminal.Gui.Attribute(Color.Black, Color.Cyan));
+                Driver!.SetAttribute(new Terminal.Gui.Attribute(Color.Black, Color.Cyan));
             }
             else
             {
                 var tok = FindToken(tokens, pos);
-                Driver.SetAttribute(tok != null ? GetTokenColor(tok.Type) : ColorScheme.Normal);
+                Driver!.SetAttribute(tok != null ? GetTokenColor(tok.Type) : ColorScheme!.Normal);
             }
-            Driver.AddStr(ch.ToString());
+            Driver!.AddStr(ch.ToString());
         }
     }
 

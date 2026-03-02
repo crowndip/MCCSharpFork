@@ -1226,8 +1226,9 @@ public sealed class McApplication : Toplevel
         var entries = result.ApplyToAll ? targets : [first];
         foreach (var target in entries)
         {
-            try { File.SetUnixFileMode(target.FullPath.Path, result.Mode); }
-            catch (Exception ex) { MessageDialog.Error($"{target.Name}: {ex.Message}"); }
+            if (OperatingSystem.IsLinux() || OperatingSystem.IsMacOS())
+                try { File.SetUnixFileMode(target.FullPath.Path, result.Mode); }
+                catch (Exception ex) { MessageDialog.Error($"{target.Name}: {ex.Message}"); }
         }
         RefreshPanels();
     }
@@ -1267,8 +1268,8 @@ public sealed class McApplication : Toplevel
         var d = new Dialog
         {
             Title = $"Find: {opts.FilePattern}",
-            Width = Dim.Fill() - 4,
-            Height = Dim.Fill() - 4,
+            Width = Dim.Fill(4),
+            Height = Dim.Fill(4),
             ColorScheme = McTheme.Dialog,
         };
 
@@ -1936,7 +1937,8 @@ public sealed class McApplication : Toplevel
             try
             {
                 ApplyChown(entry.FullPath.Path, result.Owner, result.Group);
-                File.SetUnixFileMode(entry.FullPath.Path, result.Mode);
+                if (OperatingSystem.IsLinux() || OperatingSystem.IsMacOS())
+                    File.SetUnixFileMode(entry.FullPath.Path, result.Mode);
             }
             catch (Exception ex) { MessageDialog.Error(ex.Message); break; }
         }
@@ -2386,7 +2388,7 @@ public sealed class McApplication : Toplevel
     private void ShowFilterDialog(bool left)
     {
         var listing = left ? _controller.LeftPanel : _controller.RightPanel;
-        var pattern = InputDialog.Show("Filter", "Filter pattern (* = all):", listing.Filter.Pattern);
+        var pattern = InputDialog.Show("Filter", "Filter pattern (* = all):", listing.Filter.Pattern ?? string.Empty);
         if (pattern == null) return;
         listing.Filter.Pattern = pattern;
         listing.Reload();
@@ -2565,8 +2567,8 @@ public sealed class McApplication : Toplevel
         var d = new Dialog
         {
             Title       = "Directory tree",
-            Width       = Dim.Fill() - 4,
-            Height      = Dim.Fill() - 4,
+            Width       = Dim.Fill(4),
+            Height      = Dim.Fill(4),
             ColorScheme = McTheme.Dialog,
         };
 
@@ -2765,7 +2767,7 @@ public sealed class McApplication : Toplevel
         // Dynamic dialog width: fit widest label (clamped to 62, matching original MC's max ~60+2)
         int maxLen = displayLines.Max(l => l.Length);
         int dlgW   = Math.Clamp(maxLen + 6, 40, 64);
-        int dlgH   = Math.Min(entries.Count + 7, Application.Driver.Rows - 2);
+        int dlgH   = Math.Min(entries.Count + 7, (Application.Driver?.Rows ?? 40) - 2);
 
         string? chosenCommand = null;
 
@@ -3102,8 +3104,8 @@ public sealed class McApplication : Toplevel
         var d = new Dialog
         {
             Title       = "Command history",
-            Width       = Dim.Fill() - 4,
-            Height      = Dim.Fill() - 4,
+            Width       = Dim.Fill(4),
+            Height      = Dim.Fill(4),
             ColorScheme = McTheme.Dialog,
         };
         var lv = new ListView
@@ -3165,8 +3167,8 @@ public sealed class McApplication : Toplevel
         var d = new Dialog
         {
             Title       = "Viewed/edited files history",
-            Width       = Dim.Fill() - 4,
-            Height      = Dim.Fill() - 4,
+            Width       = Dim.Fill(4),
+            Height      = Dim.Fill(4),
             ColorScheme = McTheme.Dialog,
         };
         var lv = new ListView
@@ -3950,7 +3952,7 @@ public sealed class McApplication : Toplevel
             _leftPanelView.X      = 0;
             _leftPanelView.Y      = 1;
             _leftPanelView.Width  = Dim.Fill();
-            _leftPanelView.Height = Dim.Percent(pct) - 1;
+            _leftPanelView.Height = Dim.Percent(pct)! - 1;
 
             _rightPanelView.X      = 0;
             _rightPanelView.Y      = Pos.Bottom(_leftPanelView) - 1; // share bottom/top border
@@ -3960,7 +3962,7 @@ public sealed class McApplication : Toplevel
             _leftOverlay.X      = 0;
             _leftOverlay.Y      = 1;
             _leftOverlay.Width  = Dim.Fill();
-            _leftOverlay.Height = Dim.Percent(pct) - 1;
+            _leftOverlay.Height = Dim.Percent(pct)! - 1;
 
             _rightOverlay.X      = 0;
             _rightOverlay.Y      = Pos.Bottom(_leftPanelView) - 1;

@@ -42,8 +42,8 @@ public sealed class BatchRenameDialog : IDisposable
         _d = new Dialog
         {
             Title  = "Batch Rename",
-            Width  = Dim.Fill() - 4,
-            Height = Dim.Fill() - 2,
+            Width  = Dim.Fill(4),
+            Height = Dim.Fill(2),
             ColorScheme = McTheme.Dialog,
         };
 

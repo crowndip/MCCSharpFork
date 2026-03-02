@@ -427,7 +427,7 @@ public sealed class CommandLineView : View
 
     public IReadOnlyList<string> History => _history;
 
-    public string Text => _input.Text?.ToString() ?? string.Empty;
+    public new string Text => _input.Text?.ToString() ?? string.Empty;
 
     public void SetText(string text)
     {

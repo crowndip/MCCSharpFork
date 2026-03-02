@@ -300,7 +300,7 @@ public sealed class FileOperations
         prog.FilesDone++;
 
         if (preserveAttributes) PreserveAttrs(src, dest);
-        if (preserveExt2Attributes) TryCopyExt2Attributes(src.Path, dest.Path); // #35
+        if (preserveExt2Attributes && OperatingSystem.IsLinux()) TryCopyExt2Attributes(src.Path, dest.Path); // #35
     }
 
     /// <summary>Glob pattern match: supports * (any chars) and ? (single char).</summary>

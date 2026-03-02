@@ -172,13 +172,6 @@ public static class McTheme
             sections[currentSection][key] = val;
         }
 
-        Color? Get(string section, string key)
-        {
-            if (!sections.TryGetValue(section, out var s)) return null;
-            if (!s.TryGetValue(key, out var v)) return null;
-            return ParseMcColor(v);
-        }
-
         (Color fg, Color bg) Pair(string section, string key, Color defFg, Color defBg)
         {
             if (!sections.TryGetValue(section, out var s)) return (defFg, defBg);

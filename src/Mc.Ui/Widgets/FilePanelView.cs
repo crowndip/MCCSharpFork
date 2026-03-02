@@ -302,26 +302,26 @@ public sealed class FilePanelView : View
         }
 
         Move(0, 0);
-        Driver.SetAttribute(frameAttr);
-        Driver.AddStr("┌" + new string('─', dashLeft) + displayPath + new string('─', dashRight) + "┐");
+        Driver!.SetAttribute(frameAttr);
+        Driver!.AddStr("┌" + new string('─', dashLeft) + displayPath + new string('─', dashRight) + "┐");
 
         // ── Side bars ────────────────────────────────────────────────────
         for (int y = 1; y < h - 1; y++)
         {
-            Move(0,     y); Driver.AddStr("│");
-            Move(w - 1, y); Driver.AddStr("│");
+            Move(0,     y); Driver!.AddStr("│");
+            Move(w - 1, y); Driver!.AddStr("│");
         }
 
         // ── Bottom border ─────────────────────────────────────────────────
         Move(0, h - 1);
-        Driver.AddStr("└" + new string('─', w - 2) + "┘");
+        Driver!.AddStr("└" + new string('─', w - 2) + "┘");
     }
 
     private void DrawColumnHeader(int w)
     {
         int innerWidth = w - 2;
         Move(1, 1);
-        Driver.SetAttribute(McTheme.PanelHeader);
+        Driver!.SetAttribute(McTheme.PanelHeader);
 
         if (_listingMode == PanelListingMode.Brief)
         {
@@ -329,11 +329,11 @@ public sealed class FilePanelView : View
             int colWidth  = (innerWidth - 1) / 2;
             int col2Width = innerWidth - 1 - colWidth;
             var frameAttr = _isActive ? McTheme.PanelHeader : McTheme.PanelFrame;
-            Driver.AddStr(" Name".PadRight(colWidth));
-            Driver.SetAttribute(frameAttr);
-            Driver.AddStr("│");
-            Driver.SetAttribute(McTheme.PanelHeader);
-            Driver.AddStr(" Name".PadRight(col2Width));
+            Driver!.AddStr(" Name".PadRight(colWidth));
+            Driver!.SetAttribute(frameAttr);
+            Driver!.AddStr("│");
+            Driver!.SetAttribute(McTheme.PanelHeader);
+            Driver!.AddStr(" Name".PadRight(col2Width));
             return;
         }
 
@@ -357,8 +357,8 @@ public sealed class FilePanelView : View
         {
             var txt = padLeft ? text.PadLeft(padWidth) : text.PadRight(padWidth);
             if (txt.Length > padWidth) txt = txt[..padWidth];
-            Driver.SetAttribute(isSorted ? McTheme.PanelHeaderSorted : McTheme.PanelHeader);
-            Driver.AddStr(txt);
+            Driver!.SetAttribute(isSorted ? McTheme.PanelHeaderSorted : McTheme.PanelHeader);
+            Driver!.AddStr(txt);
         }
 
         string nameSeg = " Name" + (sortName ? sortInd : string.Empty);
@@ -367,7 +367,7 @@ public sealed class FilePanelView : View
 
         DrawSeg(nameSeg, sortName, nameWidth);
         DrawSeg(sizeSeg, sortSize, sizeWidth, padLeft: true);
-        Driver.SetAttribute(McTheme.PanelHeader); Driver.AddStr(" ");
+        Driver!.SetAttribute(McTheme.PanelHeader); Driver!.AddStr(" ");
         DrawSeg(dateSeg, sortDate, dateWidth);
     }
 
@@ -395,13 +395,13 @@ public sealed class FilePanelView : View
 
             if (entryIdx >= entries.Count)
             {
-                Driver.SetAttribute(normalAttr);
-                Driver.AddStr(new string(' ', innerWidth));
+                Driver!.SetAttribute(normalAttr);
+                Driver!.AddStr(new string(' ', innerWidth));
                 continue;
             }
 
             var entry = entries[entryIdx];
-            Driver.SetAttribute(GetEntryAttr(entry, entryIdx));
+            Driver!.SetAttribute(GetEntryAttr(entry, entryIdx));
 
             var text = _listingMode switch
             {
@@ -409,7 +409,7 @@ public sealed class FilePanelView : View
                 PanelListingMode.User => FormatUserEntry(entry, innerWidth),  // #28
                 _                    => FormatEntry(entry, innerWidth),
             };
-            Driver.AddStr(text);
+            Driver!.AddStr(text);
         }
     }
 
@@ -426,7 +426,7 @@ public sealed class FilePanelView : View
         {
             int screenY = row + 2;
             DrawBriefCell(entries, _scrollOffset + row,               1,       screenY, colWidth);
-            Move(sepX, screenY); Driver.SetAttribute(frameAttr); Driver.AddStr("│");
+            Move(sepX, screenY); Driver!.SetAttribute(frameAttr); Driver!.AddStr("│");
             DrawBriefCell(entries, _scrollOffset + contentRows + row, sepX + 1, screenY, col2Width);
         }
     }
@@ -437,13 +437,13 @@ public sealed class FilePanelView : View
         Move(screenX, screenY);
         if (idx >= entries.Count)
         {
-            Driver.SetAttribute(McTheme.PanelFile);
-            Driver.AddStr(new string(' ', width));
+            Driver!.SetAttribute(McTheme.PanelFile);
+            Driver!.AddStr(new string(' ', width));
             return;
         }
         var entry = entries[idx];
-        Driver.SetAttribute(GetEntryAttr(entry, idx));
-        Driver.AddStr(FormatBriefCell(entry, width));
+        Driver!.SetAttribute(GetEntryAttr(entry, idx));
+        Driver!.AddStr(FormatBriefCell(entry, width));
     }
 
     private Terminal.Gui.Attribute GetEntryAttr(FileEntry entry, int entryIdx)
@@ -469,11 +469,11 @@ public sealed class FilePanelView : View
     {
         int innerWidth = w - 2;
         Move(1, h - 2);
-        Driver.SetAttribute(McTheme.PanelStatus);
+        Driver!.SetAttribute(McTheme.PanelStatus);
         var text = _statusText.Length <= innerWidth
             ? _statusText.PadRight(innerWidth)
             : _statusText[..innerWidth];
-        Driver.AddStr(text);
+        Driver!.AddStr(text);
     }
 
     // --- Entry formatting ---
@@ -615,8 +615,8 @@ public sealed class FilePanelView : View
         var sort   = _listing.Sort;
         string ind = sort.Descending ? "↓" : "↑";
         Move(1, 1);
-        Driver.SetAttribute(McTheme.PanelHeader);
-        Driver.AddStr(" "); // marker column
+        Driver!.SetAttribute(McTheme.PanelHeader);
+        Driver!.AddStr(" "); // marker column
         foreach (var (field, width) in cols)
         {
             bool isSorted = (field == "name"  && sort.Field == SortField.Name)
@@ -628,8 +628,8 @@ public sealed class FilePanelView : View
                          || (field == "inode" && sort.Field == SortField.Inode);
             var label = (char.ToUpper(field[0]) + field[1..]) + (isSorted ? ind : string.Empty);
             if (label.Length > width) label = label[..width];
-            Driver.SetAttribute(isSorted ? McTheme.PanelHeaderSorted : McTheme.PanelHeader);
-            Driver.AddStr(label.PadRight(width + 1)); // +1 for separator space
+            Driver!.SetAttribute(isSorted ? McTheme.PanelHeaderSorted : McTheme.PanelHeader);
+            Driver!.AddStr(label.PadRight(width + 1)); // +1 for separator space
         }
     }
 
@@ -874,11 +874,11 @@ public sealed class FilePanelView : View
             * Math.Max(1, visibleRows - 1));
         thumbPos = Math.Clamp(thumbPos, 0, visibleRows - 1);
 
-        Driver.SetAttribute(McTheme.PanelFrame);
+        Driver!.SetAttribute(McTheme.PanelFrame);
         for (int row = 0; row < visibleRows; row++)
         {
             Move(scrollbarCol, scrollbarTop + row);
-            Driver.AddStr(row == thumbPos ? "▓" : "░");
+            Driver!.AddStr(row == thumbPos ? "▓" : "░");
         }
     }
 

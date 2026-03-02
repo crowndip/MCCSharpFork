@@ -90,19 +90,19 @@ public sealed class ButtonBarView : View
             int btnWidth = i == count - 1 ? baseWidth + remainder : baseWidth;
 
             // Digit part (F-key number) in white on black
-            Driver.SetAttribute(McTheme.ButtonBar.HotNormal);
+            Driver!.SetAttribute(McTheme.ButtonBar.HotNormal);
             int numLen = 0;
             while (numLen < label.Length && char.IsDigit(label[numLen])) numLen++;
 
             Move(x, 0);
-            Driver.AddStr(label[..numLen]);
+            Driver!.AddStr(label[..numLen]);
 
             // Label part in black on cyan
-            Driver.SetAttribute(McTheme.ButtonBar.Normal);
+            Driver!.SetAttribute(McTheme.ButtonBar.Normal);
             var text = label[numLen..];
             int labelRoom = btnWidth - numLen;
             if (text.Length > labelRoom) text = text[..labelRoom];
-            Driver.AddStr(text.PadRight(labelRoom));
+            Driver!.AddStr(text.PadRight(labelRoom));
 
             x += btnWidth;
         }
