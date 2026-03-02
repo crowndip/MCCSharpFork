@@ -214,6 +214,98 @@ public sealed class EditorController
         return (Math.Min(_selectionStart, _selectionEnd), Math.Max(_selectionStart, _selectionEnd));
     }
 
+    // --- Column / rectangular block operations (#24) ---
+
+    /// <summary>
+    /// Copy a rectangular block defined by two (line, col) corners.
+    /// Returns one string per line; lines shorter than the rectangle are padded with spaces.
+    /// </summary>
+    public string[] CopyColumnBlock(int line1, int col1, int line2, int col2)
+    {
+        int top    = Math.Min(line1, line2);
+        int bot    = Math.Max(line1, line2);
+        int left   = Math.Min(col1,  col2);
+        int right  = Math.Max(col1,  col2);
+        var result = new List<string>();
+        for (int ln = top; ln <= bot; ln++)
+        {
+            var lineText = ln < _buffer.GetLineCount() ? _buffer.GetLine(ln) : string.Empty;
+            var seg = lineText.Length <= left
+                ? new string(' ', right - left)
+                : lineText.Length >= right
+                    ? lineText[left..right]
+                    : lineText[left..] + new string(' ', right - lineText.Length);
+            result.Add(seg);
+        }
+        return result.ToArray();
+    }
+
+    /// <summary>
+    /// Delete a rectangular block defined by two (line, col) corners.
+    /// Each affected line has the column range removed.
+    /// </summary>
+    public void DeleteColumnBlock(int line1, int col1, int line2, int col2)
+    {
+        int top   = Math.Min(line1, line2);
+        int bot   = Math.Max(line1, line2);
+        int left  = Math.Min(col1,  col2);
+        int right = Math.Max(col1,  col2);
+        for (int ln = bot; ln >= top; ln--)
+        {
+            if (ln >= _buffer.GetLineCount()) continue;
+            var lineText = _buffer.GetLine(ln);
+            if (lineText.Length <= left) continue; // nothing to delete in this line
+            int delEnd  = Math.Min(right, lineText.Length);
+            int delLen  = delEnd - left;
+            int lineOff = _buffer.LineColToOffset(ln, left);
+            var deleted = _buffer.Extract(lineOff, delLen);
+            RecordUndo(new DeleteOp(lineOff, deleted));
+            _buffer.Delete(lineOff, delLen);
+        }
+        _cursorOffset = _buffer.LineColToOffset(Math.Min(top, _buffer.GetLineCount() - 1), left);
+        Changed?.Invoke(this, EventArgs.Empty);
+    }
+
+    /// <summary>
+    /// Paste a column block (array of row strings) at the given (line, col) position.
+    /// Each row is inserted at the given column of consecutive lines.
+    /// </summary>
+    public void PasteColumnBlock(string[] rows, int atLine, int atCol)
+    {
+        for (int i = rows.Length - 1; i >= 0; i--)
+        {
+            int ln = atLine + i;
+            // Ensure line exists
+            while (_buffer.GetLineCount() <= ln)
+                InsertTextAt(_buffer.Length, "\n");
+
+            var lineText = _buffer.GetLine(ln);
+            int insOff;
+            string insertion;
+            if (lineText.Length <= atCol)
+            {
+                // Pad the line with spaces, then insert
+                insOff    = _buffer.LineColToOffset(ln, lineText.Length) + (atCol - lineText.Length);
+                insertion = new string(' ', atCol - lineText.Length) + rows[i];
+                insOff    = _buffer.LineColToOffset(ln, lineText.Length);
+                insertion = new string(' ', atCol - lineText.Length) + rows[i];
+            }
+            else
+            {
+                insOff    = _buffer.LineColToOffset(ln, atCol);
+                insertion = rows[i];
+            }
+            InsertTextAt(insOff, insertion);
+        }
+        Changed?.Invoke(this, EventArgs.Empty);
+    }
+
+    private void InsertTextAt(int offset, string text)
+    {
+        RecordUndo(new InsertOp(offset, text));
+        _buffer.Insert(offset, text);
+    }
+
     // --- Clipboard ---
 
     public string Copy()

@@ -2324,35 +2324,60 @@ public sealed class McApplication : Toplevel
 
         var d = new Dialog
         {
-            Title        = "Listing Format",
-            Width        = 40,
-            Height       = 10,
-            ColorScheme  = McTheme.Dialog,
+            Title       = "Listing Format",
+            Width       = 52,
+            Height      = 14,
+            ColorScheme = McTheme.Dialog,
         };
 
+        int sel = panel.ListingMode switch
+        {
+            PanelListingMode.Brief => 1,
+            PanelListingMode.Long  => 2,
+            PanelListingMode.User  => 3,
+            _                      => 0,
+        };
         var rg = new RadioGroup
         {
             X            = 2,
             Y            = 1,
-            RadioLabels  = ["Full file list", "Brief file list", "Long (ls -l style)"],
-            SelectedItem = panel.ListingMode == PanelListingMode.Brief ? 1
-                         : panel.ListingMode == PanelListingMode.Long  ? 2 : 0,
+            RadioLabels  = ["Full file list", "Brief file list", "Long (ls -l style)", "User defined"],
+            SelectedItem = sel,
             ColorScheme  = McTheme.Dialog,
         };
         d.Add(rg);
 
-        var ok = new Button { X = Pos.Center() - 8, Y = 7, Text = "OK", IsDefault = true };
+        // Format-string input, enabled only when "User defined" is selected (#28)
+        d.Add(new Label { X = 2, Y = 6, Text = "Format (field[:w],…):", ColorScheme = McTheme.Dialog });
+        var fmtField = new TextField
+        {
+            X           = 2,
+            Y           = 7,
+            Width       = 46,
+            Text        = panel.UserFormatString,
+            ColorScheme = McTheme.Dialog,
+            Enabled     = sel == 3,
+        };
+        d.Add(fmtField);
+
+        rg.SelectedItemChanged += (_, args) =>
+            fmtField.Enabled = args.SelectedItem == 3;
+
+        var ok = new Button { Text = "OK", IsDefault = true };
         ok.Accepting += (_, _) =>
         {
             panel.ListingMode = rg.SelectedItem switch
             {
                 1 => PanelListingMode.Brief,
                 2 => PanelListingMode.Long,
+                3 => PanelListingMode.User,
                 _ => PanelListingMode.Full,
             };
+            if (rg.SelectedItem == 3 && !string.IsNullOrWhiteSpace(fmtField.Text?.ToString()))
+                panel.UserFormatString = fmtField.Text!.ToString()!;
             Application.RequestStop(d);
         };
-        var cancel = new Button { X = Pos.Center() + 2, Y = 6, Text = "Cancel" };
+        var cancel = new Button { Text = "Cancel" };
         cancel.Accepting += (_, _) => Application.RequestStop(d);
         d.AddButton(ok); d.AddButton(cancel);
         Application.Run(d); d.Dispose();

@@ -15,10 +15,16 @@ public sealed class EditorView : View
     private int _leftCol;
     private bool _insertMode = true;
     private string? _clipboardText;
+    private string[]? _clipboardColBlock; // for column-paste (#24)
 
     // Block-selection state (#3)
     private bool _selecting;
     private int  _selectionAnchor = -1;
+
+    // Column / rectangular block mode (#24) — toggle with Alt+B
+    private bool _colBlock;
+    private int  _colBlockAnchorLine;
+    private int  _colBlockAnchorCol;
 
     // Syntax-highlighting toggle (Ctrl+T). (#51)
     private bool _syntaxHighlightingOn = true;
@@ -111,6 +117,7 @@ public sealed class EditorView : View
         var (ln, col) = _editor.CursorPosition;
         var mode = _insertMode ? "INS" : "OVR";
         var status = $" {_editor.FilePath ?? "new"} | Ln {ln + 1}, Col {col + 1} | {mode} | {(_editor.IsModified ? "Modified" : "Saved")}";
+        if (_colBlock) status += " | COL";   // #24
         if (_showLineNumbers) status += " | Nums";
         if (!_syntaxHighlightingOn) status += " | NoHL";
         if (status.Length > viewport.Width) status = status[..viewport.Width];
@@ -129,14 +136,12 @@ public sealed class EditorView : View
 
     private void DrawLineWithSelection(int row, string line, int leftCol, int width, int lineStartOffset)
     {
-        var (selStart, selEnd) = _editor.GetSelectionOffsets();
         var pos = leftCol;
         Move(GutterWidth, row);
         for (int i = 0; i < width; i++, pos++)
         {
-            int charOffset = lineStartOffset + pos;
             char ch = pos < line.Length ? line[pos] : ' ';
-            bool inSel = selStart >= 0 && charOffset >= selStart && charOffset < selEnd;
+            bool inSel = IsInSelection(row + _topLine, pos, lineStartOffset + pos);
             Driver.SetAttribute(inSel
                 ? new Terminal.Gui.Attribute(Color.Black, Color.Cyan)
                 : ColorScheme.Normal);
@@ -144,9 +149,24 @@ public sealed class EditorView : View
         }
     }
 
+    /// <summary>Returns true when (lineNo, col) / charOffset falls inside the current selection (stream or column). (#24)</summary>
+    private bool IsInSelection(int lineNo, int col, int charOffset)
+    {
+        if (_colBlock && _selecting)
+        {
+            var (curLine, curCol) = _editor.CursorPosition;
+            int top   = Math.Min(_colBlockAnchorLine, curLine);
+            int bot   = Math.Max(_colBlockAnchorLine, curLine);
+            int left  = Math.Min(_colBlockAnchorCol,  curCol);
+            int right = Math.Max(_colBlockAnchorCol,  curCol);
+            return lineNo >= top && lineNo <= bot && col >= left && col < right;
+        }
+        var (selStart, selEnd) = _editor.GetSelectionOffsets();
+        return selStart >= 0 && charOffset >= selStart && charOffset < selEnd;
+    }
+
     private void DrawLineWithSyntaxAndSelection(int row, string line, IReadOnlyList<SyntaxToken> tokens, int leftCol, int width, int lineStartOffset)
     {
-        var (selStart, selEnd) = _editor.GetSelectionOffsets();
         var gutter = GutterWidth;
         Move(gutter, row);
         for (int i = 0; i < width; i++)
@@ -154,7 +174,7 @@ public sealed class EditorView : View
             int pos = leftCol + i;
             int charOffset = lineStartOffset + pos;
             char ch = pos < line.Length ? line[pos] : ' ';
-            bool inSel = selStart >= 0 && charOffset >= selStart && charOffset < selEnd;
+            bool inSel = IsInSelection(row + _topLine, pos, charOffset);
             if (inSel)
             {
                 Driver.SetAttribute(new Terminal.Gui.Attribute(Color.Black, Color.Cyan));
@@ -195,7 +215,7 @@ public sealed class EditorView : View
             _macroKeys.Add(keyEvent);
         }
 
-        // Shift+Arrow: extend block selection (#3)
+        // Shift+Arrow: extend block selection (#3) — stream or column mode (#24)
         if (keyEvent.IsShift && keyEvent.KeyCode is
             KeyCode.CursorUp or KeyCode.CursorDown or
             KeyCode.CursorLeft or KeyCode.CursorRight or
@@ -206,9 +226,13 @@ public sealed class EditorView : View
                 _selecting = true;
                 _selectionAnchor = _editor.CursorOffset;
                 _editor.StartSelection();
+                if (_colBlock)
+                {
+                    (_colBlockAnchorLine, _colBlockAnchorCol) = _editor.CursorPosition;
+                }
             }
             MoveWithShift(keyEvent);
-            _editor.ExtendSelection();
+            if (!_colBlock) _editor.ExtendSelection();
             SetNeedsDraw();
             return true;
         }
@@ -257,18 +281,57 @@ public sealed class EditorView : View
                 SetNeedsDraw();
                 return true;
 
-            // F5 = copy block (#3)
+            // Ctrl+F5 = spell check current word (#25)
+            case KeyCode.F5 | KeyCode.CtrlMask:
+                ShowSpellCheck();
+                return true;
+
+            // Alt+B = toggle column (rectangular) block mode (#24)
+            case KeyCode.B | KeyCode.AltMask:
+                _colBlock = !_colBlock;
+                if (!_colBlock && _selecting)
+                {
+                    // leaving column mode: re-sync stream selection
+                    _editor.StartSelection();
+                    _editor.ExtendSelection();
+                }
+                SetNeedsDraw();
+                return true;
+
+            // F5 = copy block (#3/#24)
             case KeyCode.F5:
-                _clipboardText = _editor.Copy();
+                if (_colBlock && _selecting)
+                {
+                    var (curLine, curCol) = _editor.CursorPosition;
+                    _clipboardColBlock = _editor.CopyColumnBlock(
+                        _colBlockAnchorLine, _colBlockAnchorCol, curLine, curCol);
+                    _clipboardText = string.Join('\n', _clipboardColBlock);
+                }
+                else
+                {
+                    _clipboardText = _editor.Copy();
+                }
                 _selecting = false;
                 _editor.ClearSelection();
                 SetNeedsDraw();
                 return true;
 
-            // F6 = move block (#3)
+            // F6 = move block (#3/#24)
             case KeyCode.F6:
-                _clipboardText = _editor.Copy();
-                _editor.Cut();
+                if (_colBlock && _selecting)
+                {
+                    var (curLine, curCol) = _editor.CursorPosition;
+                    _clipboardColBlock = _editor.CopyColumnBlock(
+                        _colBlockAnchorLine, _colBlockAnchorCol, curLine, curCol);
+                    _clipboardText = string.Join('\n', _clipboardColBlock);
+                    _editor.DeleteColumnBlock(
+                        _colBlockAnchorLine, _colBlockAnchorCol, curLine, curCol);
+                }
+                else
+                {
+                    _clipboardText = _editor.Copy();
+                    _editor.Cut();
+                }
                 _selecting = false;
                 _editor.ClearSelection();
                 SetNeedsDraw();
@@ -323,7 +386,7 @@ public sealed class EditorView : View
                 _editor.ClearSelection();
                 return true;
             case KeyCode.Insert | KeyCode.ShiftMask:
-                if (_clipboardText != null) _editor.Paste(_clipboardText);
+                PasteClipboard();
                 return true;
 
             case KeyCode.Insert:
@@ -365,7 +428,7 @@ public sealed class EditorView : View
                 _editor.ClearSelection();
                 return true;
             case KeyCode.V when keyEvent.IsCtrl:
-                if (_clipboardText != null) _editor.Paste(_clipboardText);
+                PasteClipboard();
                 return true;
             case KeyCode.A when keyEvent.IsCtrl:
                 _editor.SelectAll();
@@ -523,6 +586,20 @@ public sealed class EditorView : View
         Application.Run(d); d.Dispose();
         if (chosen != null)
             _editor.InsertText(chosen[prefix.Length..]);
+    }
+
+    /// <summary>Paste clipboard as column block (if available) or normal text. (#24)</summary>
+    private void PasteClipboard()
+    {
+        if (_colBlock && _clipboardColBlock != null)
+        {
+            var (atLine, atCol) = _editor.CursorPosition;
+            _editor.PasteColumnBlock(_clipboardColBlock, atLine, atCol);
+        }
+        else if (_clipboardText != null)
+        {
+            _editor.Paste(_clipboardText);
+        }
     }
 
     private void MoveWithShift(Key key)
@@ -709,6 +786,116 @@ public sealed class EditorView : View
             _editor.ReplaceAll(_editor.LastSearch);
             MessageBox.Query("Replace", "Replacement applied.", "OK");
         }
+        SetNeedsDraw();
+    }
+
+    // --- Spell checking (#25) ---
+
+    /// <summary>
+    /// Invoke aspell to spell-check the current file, navigate to misspellings,
+    /// and offer suggestions. Equivalent to mcedit's aspell integration.
+    /// Activated with Ctrl+F5.
+    /// </summary>
+    private void ShowSpellCheck()
+    {
+        // Find the word under the cursor
+        var text   = _editor.Buffer.ToString();
+        var cursor = _editor.CursorOffset;
+
+        // Expand to word boundaries
+        int ws = cursor;
+        while (ws > 0 && char.IsLetter(text[ws - 1])) ws--;
+        int we = cursor;
+        while (we < text.Length && char.IsLetter(text[we])) we++;
+
+        if (ws >= we)
+        {
+            MessageBox.Query("Spell check", "No word at cursor.", "OK");
+            return;
+        }
+        var word = text[ws..we];
+
+        // Invoke aspell -a (pipe mode) to check one word
+        string[] suggestions;
+        try
+        {
+            using var proc = new System.Diagnostics.Process
+            {
+                StartInfo = new System.Diagnostics.ProcessStartInfo("aspell", "-a")
+                {
+                    RedirectStandardInput  = true,
+                    RedirectStandardOutput = true,
+                    UseShellExecute        = false,
+                    CreateNoWindow         = true,
+                },
+            };
+            proc.Start();
+            proc.StandardInput.WriteLine(word);
+            proc.StandardInput.Close();
+            var lines = proc.StandardOutput.ReadToEnd().Split('\n');
+            proc.WaitForExit(3000);
+
+            // aspell pipe mode: first line is "@(#) Aspell ...", then per-word result
+            // * = correct; & word count offset: suggestions = correct
+            // # word offset = no suggestions; & word n offset: s1, s2, ...
+            suggestions = [];
+            foreach (var ln in lines)
+            {
+                if (ln.StartsWith("*")) return; // word is correct
+                if (ln.StartsWith("&"))
+                {
+                    var colonIdx = ln.IndexOf(':');
+                    if (colonIdx >= 0)
+                        suggestions = ln[(colonIdx + 2)..].Split(", ");
+                    break;
+                }
+                if (ln.StartsWith("#")) break; // no suggestions
+            }
+        }
+        catch
+        {
+            MessageBox.ErrorQuery("Spell check", "aspell is not installed or failed to run.", "OK");
+            return;
+        }
+
+        // Build choice list
+        var items = new List<string> { $"Skip  [{word}]", "Add to dictionary" };
+        items.AddRange(suggestions.Take(10).Select(s => s.Trim()));
+
+        var choice = MessageBox.Query("Spell check", $"Word: {word}", items.ToArray());
+        if (choice <= 0) return; // Skip
+        if (choice == 1)
+        {
+            // Add to aspell personal dictionary
+            try
+            {
+                using var proc = new System.Diagnostics.Process
+                {
+                    StartInfo = new System.Diagnostics.ProcessStartInfo("aspell", "-a")
+                    {
+                        RedirectStandardInput = true,
+                        UseShellExecute       = false,
+                        CreateNoWindow        = true,
+                    },
+                };
+                proc.Start();
+                proc.StandardInput.WriteLine($"*{word}");
+                proc.StandardInput.WriteLine("#");
+                proc.StandardInput.Close();
+                proc.WaitForExit(2000);
+            }
+            catch { }
+            return;
+        }
+        // Replace word with chosen suggestion
+        var replacement = suggestions[choice - 2].Trim();
+        _editor.MoveCursor(ws);
+        _editor.StartSelection();
+        _editor.MoveCursor(we);
+        _editor.ExtendSelection();
+        _editor.InsertText(replacement);
+        _selecting = false;
+        _editor.ClearSelection();
         SetNeedsDraw();
     }
 

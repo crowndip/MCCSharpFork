@@ -19,10 +19,10 @@ CommandLineView.cs, FindDialog.cs, CopyMoveDialog.cs, FileOperations.cs, HelpDia
 | Tier | Total | Fixed | Remaining |
 |------|-------|-------|-----------|
 | 1 — Critical | 5 | 5 | 0 |
-| 2 — High | 12 | 10 | 2 |
-| 3 — Medium | 18 | 13 | 5 |
-| 4 — Low | 11 | 8 | 3 |
-| **Total** | **46** | **36** | **10** |
+| 2 — High | 12 | 12 | 0 |
+| 3 — Medium | 18 | 17 | 1 |
+| 4 — Low | 11 | 9 | 2 |
+| **Total** | **46** | **43** | **3** |
 
 ---
 
@@ -67,17 +67,17 @@ CommandLineView.cs, FindDialog.cs, CopyMoveDialog.cs, FileOperations.cs, HelpDia
 | 21 | `[x]` | **Viewer: F1 inside viewer opens viewer-specific help** | Fixed: F1 handler calls `ShowViewerHelp()` which shows a dialog listing all viewer key bindings. | `ViewerView.cs` |
 | 22 | `[x]` | **Editor: Ctrl+R conflict — macro recording** | Fixed: `Ctrl+R` now toggles macro recording (start/stop). Redo moved to `Ctrl+Shift+Z`. `_macroKeys` list stores keystrokes. `Ctrl+E` plays back. `MessageBox.Query()` shows status. | `EditorView.cs` — `ToggleMacroRecord()`, `PlayMacro()` |
 | 23 | `[x]` | **Editor: word completion (Ctrl+Tab)** | Fixed: `Ctrl+Tab` calls `WordComplete()`. Scans buffer for words starting with the prefix before cursor. Single match completes immediately; multiple matches show a popup ListView. | `EditorView.cs` — `WordComplete()`, `ShowWordCompletePopup()` |
-| 24 | `[ ]` | **Editor: column/rectangular block selection** | `EditorView` implements linear (stream) selection via Shift+Arrow keys. Original mcedit supports column (rectangular) block selection (Alt+B or column mode). | `EditorView.cs:186-202` |
-| 25 | `[ ]` | **Editor: spell checking** | No spell-check integration. Original mcedit can invoke aspell/enchant for spell checking. | `EditorView.cs` |
+| 24 | `[x]` | **Editor: column/rectangular block selection** | Fixed: `_colBlock` mode toggle via Alt+B. When active, `IsInSelection()` highlights a rectangular region instead of a linear stream. F5/F6 copy/move the column block via `EditorController.CopyColumnBlock()` / `DeleteColumnBlock()`. Ctrl+V pastes column-block back via `PasteColumnBlock()`. Status bar shows "COL" indicator. | `EditorView.cs`, `EditorController.cs` |
+| 25 | `[x]` | **Editor: spell checking** | Fixed: `Ctrl+F5` calls `ShowSpellCheck()`. Expands word under cursor, invokes `aspell -a` subprocess in pipe mode, parses suggestions, shows dialog with Skip / Add to dictionary / replacement choices. | `EditorView.cs` — `ShowSpellCheck()` |
 | 26 | `[x]` | **Command line: Ctrl+Q — quote next character** | Fixed: `Ctrl+Q` sets `_quoteNext=true`; the next keypress is inserted literally via `InsertAtCursor()`. | `CommandLineView.cs` |
 | 27 | `[x]` | **Panel: device/socket/FIFO colour coding** | Fixed: `VfsDirEntry` and `FileEntry` now have `IsBlockDevice`, `IsCharDevice`, `IsFifo`, `IsSocket`. `LocalVfsProvider` uses P/Invoke `lstat()` to detect special file types. `GetEntryAttr()` maps them to `PanelDevice` (yellow) and `PanelSpecialFile` (magenta). `McTheme` has new attributes for both. | `VfsDirEntry.cs`, `FileEntry.cs`, `LocalVfsProvider.cs`, `FilePanelView.cs`, `McTheme.cs` |
-| 28 | `[ ]` | **Panel listing: User-defined column format mode** | `ShowListingFormatDialog()` offers Full / Brief / Long. Original MC has a fourth mode ("User defined") with a custom format string specifying columns and widths. | Listing format dialog code |
-| 29 | `[ ]` | **Help: hypertext link navigation** | `HelpDialog` shows sections and has Back/Contents buttons but no clickable or keyboard-navigable links embedded in the help text. Original MC help uses ctrl-char sequences to embed hot-links between topics. | `HelpDialog.cs:372-500` |
+| 28 | `[x]` | **Panel listing: User-defined column format mode** | Fixed: `PanelListingMode.User` added. `FilePanelView.UserFormatString` holds a comma-separated `field[:width]` spec (e.g. `name:30,size:8,mtime:12`). `FormatUserEntry()` and `DrawUserColumnHeader()` render it. `ShowListingFormatDialog()` has a 4th radio + format-string TextField (enabled when "User defined" selected). | `FilePanelView.cs`, `McApplication.cs` |
+| 29 | `[x]` | **Help: hypertext link navigation** | Fixed: Topic bodies embed `{topicid}` cross-references; `RunViewer()` strips them to `[Title]` in displayed text, extracts them via `ExtractLinks()`, and renders them as Tab-navigable `→Title` buttons below the body. Clicking/Enter navigates to that topic with full Back-stack support. | `HelpDialog.cs` — `ExtractLinks()`, `RunViewer()` |
 | 30 | `[x]` | **User menu: missing `%p`, `%P`, `%n`, `%m`, `%a` macro substitutions** | Fixed: Added `%p` (active panel current file name), `%P` (inactive panel current file name), `%n` (name without extension), `%m` (marked file names only, not full paths), `%a` (archive name from VFS path). Wired through the macro expansion block in `ShowUserMenu()`. | `McApplication.cs` — macro expansion |
 | 31 | `[ ]` | **VFS: FISH protocol (files over SSH shell)** | `Left > Shell link…` shows "Not implemented". Original MC implements the FISH protocol for remote file access over an SSH connection using shell commands. | Menu stub |
-| 32 | `[ ]` | **VFS: CPIO / ZIP archives as navigable VFS** | `Mc.Vfs.Archives` project exists but coverage of CPIO and ZIP browsing as VFS directories is incomplete/unverified. | `Mc.Vfs.Archives` |
-| 33 | `[ ]` | **VFS: External filesystem scripts (extfs)** | No extfs handler. Original MC supports scripts in `/usr/lib/mc/extfs.d/` that expose e.g. RPM packages, Debian packages, audio CDs as VFS directories. | (no extfs code) |
-| 34 | `[ ]` | **VFS: SFS (single-file filesystem)** | No SFS provider. Original MC uses `mc.sfs` config to mount single-file containers (e.g. ISO images) via external helpers. | (no SFS code) |
+| 32 | `[x]` | **VFS: CPIO / ZIP archives as navigable VFS** | Fixed: ZIP was already implemented; CPIO newc (SVR4) format now supported by `CpioVfsProvider`. Handles `.cpio` files and RPM payload extraction (scans for gzip magic). `CpioReader` parses 8-char hex header fields, names, and data with 4-byte alignment. Registered in `AppSetup.cs`. | `Mc.Vfs.Archives/CpioVfsProvider.cs`, `AppSetup.cs` |
+| 33 | `[x]` | **VFS: External filesystem scripts (extfs)** | Fixed: `ExtfsVfsProvider` scans `/usr/lib/mc/extfs.d/` at startup, maps file extensions to script paths. `ListDirectory()` invokes `list`, `OpenRead()` invokes `copyout` to a temp file. Parses `ls -l` style output. Registered in `AppSetup.cs`. | `Mc.Vfs.Archives/ExtfsVfsProvider.cs`, `AppSetup.cs` |
+| 34 | `[x]` | **VFS: SFS (single-file filesystem)** | Fixed: `SfsVfsProvider` reads `mc.sfs` config (from `/usr/lib/mc/mc.sfs` etc.), maps extensions to mount/umount commands. `EnsureMounted()` runs the mount helper into a temp directory; `ListDirectory()`/`OpenRead()` delegate to the mounted temp dir. `Dispose()` unmounts all. Registered in `AppSetup.cs`. | `Mc.Vfs.Archives/SfsVfsProvider.cs`, `AppSetup.cs` |
 | 35 | `[x]` | **Copy: preserve ext2 file attributes** | Fixed: "Preserve ext2 attributes" checkbox added to `CopyMoveDialog` (disabled for Move, Linux-only). `CopyMoveOptions.PreserveExt2Attributes` wired through `FileManagerController.CopyMarkedAsync()` → `FileOperations.CopyAsync()` → `CopySingleFileAsync()`. `TryCopyExt2Attributes()` uses `lsattr`/`chattr` subprocess on Linux. | `CopyMoveDialog.cs`, `FileOperations.cs`, `FileManagerController.cs` |
 
 ---

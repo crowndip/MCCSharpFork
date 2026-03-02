@@ -44,6 +44,9 @@ public static class AppSetup
         vfsRegistry.Register(new SftpVfsProvider());
         vfsRegistry.Register(new TarVfsProvider());
         vfsRegistry.Register(new ZipVfsProvider());
+        vfsRegistry.Register(new CpioVfsProvider()); // #32
+        vfsRegistry.Register(new ExtfsVfsProvider()); // #33
+        vfsRegistry.Register(new SfsVfsProvider());   // #34
         services.AddSingleton(vfsRegistry);
 
         // File manager

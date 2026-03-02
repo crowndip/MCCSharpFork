@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using System.Text.RegularExpressions;
 using Terminal.Gui;
 
 namespace Mc.Ui.Dialogs;
@@ -15,6 +16,8 @@ public static class HelpDialog
     // -----------------------------------------------------------------------
     // Topic database — each key is a section id, value is the display text.
     // The FIRST topic in the list is the index / table of contents.
+    // Cross-reference links are embedded as {topicid} in the body text.
+    // Tab / Shift+Tab navigates between links; Enter follows the focused one.
     // -----------------------------------------------------------------------
     private static readonly (string Id, string Title, string Body)[] Topics =
     [
@@ -104,6 +107,8 @@ public static class HelpDialog
   +                 Mark by pattern
   -                 Unmark by pattern
   *                 Invert marking
+
+  See also: {panels} {files} {select} {cmdline}
 """),
 
         ("panels", "Panels — Panel Operations",
@@ -140,6 +145,8 @@ public static class HelpDialog
   Sort Order        Choose how files are sorted.
   Filter            Apply a filename filter to the listing.
   Encoding          Select character encoding for filenames.
+
+  See also: {keys} {files} {select}
 """),
 
         ("files", "Files — File Operations",
@@ -189,6 +196,8 @@ public static class HelpDialog
   ------------------------------
   Ctrl+X S   Create a symbolic link.
   Ctrl+X L   Create a hard link.
+
+  See also: {keys} {select} {panels}
 """),
 
         ("select", "Select — Marking Files",
@@ -211,6 +220,8 @@ public static class HelpDialog
   ----------
   Marked files are shown highlighted (yellow on black by
   default in the MC color scheme).
+
+  See also: {files} {panels}
 """),
 
         ("cmdline", "CmdLine — Command Line",
@@ -240,6 +251,8 @@ public static class HelpDialog
   Commands in the menu run with the TUI suspended so
   interactive programs (pagers, editors) work correctly.
   Edit ~/.config/mc/menu to customise.
+
+  See also: {keys} {menus}
 """),
 
         ("viewer", "Viewer — Internal File Viewer",
@@ -267,6 +280,8 @@ public static class HelpDialog
   F5        Go to a specific byte offset (hex mode).
   F7        Find (search dialog).
   F8        Toggle raw / formatted display.
+
+  See also: {keys} {editor}
 """),
 
         ("editor", "Editor — Internal File Editor",
@@ -293,6 +308,8 @@ public static class HelpDialog
   Ctrl+H            Replace.
   F2                Save file.
   F10 or Esc        Close editor (asks to save if modified).
+
+  See also: {keys} {viewer}
 """),
 
         ("menus", "Menus — Menu Overview",
@@ -329,6 +346,8 @@ public static class HelpDialog
   Viewed/edited history   Recently viewed or edited files.
   Directory hotlist       Bookmark manager.
   Active VFS list         Show currently mounted VFS paths.
+
+  See also: {keys} {config}
 """),
 
         ("config", "Config — Configuration",
@@ -358,6 +377,8 @@ public static class HelpDialog
   MC supports colour skin files stored in
   ~/.local/share/mc/skins/ or /usr/share/mc/skins/.
   Choose via Options → Skins.
+
+  See also: {menus} {panels}
 """),
     ];
 
@@ -378,31 +399,68 @@ public static class HelpDialog
         {
             var topic = FindTopic(currentId) ?? Topics[0];
 
+            // Extract {topicid} cross-reference links from the body (#29)
+            var links = ExtractLinks(topic.Body);
+            // Strip {topicid} markers from displayed text
+            var displayBody = Regex.Replace(topic.Body, @"\{(\w+)\}", m =>
+            {
+                var linked = FindTopic(m.Groups[1].Value);
+                return linked.HasValue ? $"[{linked.Value.Title}]" : m.Value;
+            });
+
             // Dialog dimensions — match original MC: full width-4, 2/3 or 18 rows min
             int dialogW = Math.Max(76, Application.Driver.Cols - 4);
-            int dialogH = Math.Clamp(Application.Driver.Rows * 2 / 3, 18, Application.Driver.Rows - 4);
+            // Extra row for link buttons when there are cross-references
+            int linkRows = links.Count > 0 ? 2 : 0;
+            int dialogH  = Math.Clamp(Application.Driver.Rows * 2 / 3, 18, Application.Driver.Rows - 4);
 
             string? nextId = null;  // set to navigate away
 
             var d = new Dialog
             {
-                Title = topic.Title,
-                Width = dialogW,
-                Height = dialogH,
+                Title       = topic.Title,
+                Width       = dialogW,
+                Height      = dialogH,
                 ColorScheme = McTheme.Dialog,
             };
 
-            // Scrollable body
+            // Scrollable body — leave room for link row + nav buttons
             var tv = new TextView
             {
-                X = 1, Y = 1,
-                Width = Dim.Fill(1),
-                Height = Dim.Fill(4),
-                Text = topic.Body,
-                ReadOnly = true,
+                X           = 1,
+                Y           = 1,
+                Width       = Dim.Fill(1),
+                Height      = Dim.Fill(4 + linkRows),
+                Text        = displayBody,
+                ReadOnly    = true,
                 ColorScheme = McTheme.Dialog,
             };
             d.Add(tv);
+
+            // Cross-reference link buttons (#29): Tab / Shift+Tab navigates, Enter follows
+            if (links.Count > 0)
+            {
+                int lx = 2;
+                foreach (var (linkId, linkLabel) in links)
+                {
+                    var capturedId = linkId;
+                    var lb = new Button
+                    {
+                        X           = lx,
+                        Y           = Pos.Bottom(tv),
+                        Text        = $"→{linkLabel}",
+                        ColorScheme = McTheme.Dialog,
+                    };
+                    lb.Accepting += (_, _) =>
+                    {
+                        history.Push(currentId);
+                        nextId = capturedId;
+                        Application.RequestStop(d);
+                    };
+                    d.Add(lb);
+                    lx += linkLabel.Length + 4;
+                }
+            }
 
             // Navigation buttons matching original MC help button bar:
             // F3=Back, F2=Index, F10/OK=Close
@@ -410,10 +468,10 @@ public static class HelpDialog
 
             var btnBack = new Button
             {
-                X = 2,
-                Y = Pos.Bottom(tv),
-                Text = "[ Back ]",
-                Enabled = history.Count > 0,
+                X           = 2,
+                Y           = Pos.AnchorEnd(2),
+                Text        = "[ Back ]",
+                Enabled     = history.Count > 0,
                 ColorScheme = McTheme.Dialog,
             };
             btnBack.Accepting += (_, _) =>
@@ -425,9 +483,9 @@ public static class HelpDialog
 
             var btnContents = new Button
             {
-                X = Pos.Center() - 5,
-                Y = Pos.Bottom(tv),
-                Text = "[ Contents ]",
+                X           = Pos.Center() - 5,
+                Y           = Pos.AnchorEnd(2),
+                Text        = "[ Contents ]",
                 ColorScheme = McTheme.Dialog,
             };
             btnContents.Accepting += (_, _) =>
@@ -443,10 +501,10 @@ public static class HelpDialog
 
             var btnOk = new Button
             {
-                X = Pos.AnchorEnd(9),
-                Y = Pos.Bottom(tv),
-                Text = "[ Close ]",
-                IsDefault = true,
+                X           = Pos.AnchorEnd(9),
+                Y           = Pos.AnchorEnd(2),
+                Text        = "[ Close ]",
+                IsDefault   = true,
                 ColorScheme = McTheme.Dialog,
             };
             btnOk.Accepting += (_, _) =>
@@ -498,6 +556,24 @@ public static class HelpDialog
             if (closed || nextId == null) break;
             currentId = nextId;
         }
+    }
+
+    /// <summary>
+    /// Extract ordered distinct {topicid} cross-reference links from a topic body. (#29)
+    /// Returns list of (topicId, topicTitle) pairs for links whose target topic exists.
+    /// </summary>
+    private static List<(string Id, string Title)> ExtractLinks(string body)
+    {
+        var result = new List<(string, string)>();
+        var seen   = new HashSet<string>();
+        foreach (Match m in Regex.Matches(body, @"\{(\w+)\}"))
+        {
+            var id = m.Groups[1].Value;
+            if (!seen.Add(id)) continue;
+            var t = FindTopic(id);
+            if (t.HasValue) result.Add((id, t.Value.Title));
+        }
+        return result;
     }
 
     private static (string Id, string Title, string Body)? FindTopic(string id)

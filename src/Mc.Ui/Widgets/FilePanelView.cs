@@ -17,6 +17,8 @@ public enum PanelListingMode
     Brief,
     /// <summary>ls -l style: permissions + owner + group + size + date + name.</summary>
     Long,
+    /// <summary>Custom column format defined by <see cref="FilePanelView.UserFormatString"/>.</summary>
+    User, // #28
 }
 
 /// <summary>
@@ -40,6 +42,9 @@ public sealed class FilePanelView : View
     private static readonly char[] SpinnerChars = ['-', '\\', '|', '/'];
     private int _spinnerIndex;
     private bool _isLoading;
+
+    // User-defined column format (#28): comma-separated "field[:width]" list
+    public string UserFormatString { get; set; } = "name:30,size:8,mtime:12";
 
     // Public options (set from McSettings after construction)
     public bool ShowFreeSpace            { get; set; } = true;
@@ -332,6 +337,12 @@ public sealed class FilePanelView : View
             return;
         }
 
+        if (_listingMode == PanelListingMode.User)
+        {
+            DrawUserColumnHeader(innerWidth);
+            return;
+        }
+
         (int nameWidth, int sizeWidth, int dateWidth) = ColumnWidths(innerWidth);
         var sort = _listing.Sort;
 
@@ -392,9 +403,12 @@ public sealed class FilePanelView : View
             var entry = entries[entryIdx];
             Driver.SetAttribute(GetEntryAttr(entry, entryIdx));
 
-            var text = _listingMode == PanelListingMode.Long
-                ? FormatLongEntry(entry, innerWidth)
-                : FormatEntry(entry, innerWidth);
+            var text = _listingMode switch
+            {
+                PanelListingMode.Long => FormatLongEntry(entry, innerWidth),
+                PanelListingMode.User => FormatUserEntry(entry, innerWidth),  // #28
+                _                    => FormatEntry(entry, innerWidth),
+            };
             Driver.AddStr(text);
         }
     }
@@ -535,6 +549,88 @@ public sealed class FilePanelView : View
         if (name.Length > nameWidth) name = name[..(nameWidth - 1)] + "~";
 
         return (prefix + name).PadRight(innerWidth);
+    }
+
+    // --- User-defined column format (#28) ---
+
+    private static IReadOnlyList<(string Field, int Width)> ParseUserFormat(string fmt)
+    {
+        var cols = new List<(string, int)>();
+        foreach (var part in fmt.Split(','))
+        {
+            var tokens = part.Trim().Split(':');
+            var field  = tokens[0].Trim().ToLowerInvariant();
+            var width  = tokens.Length > 1 && int.TryParse(tokens[1], out var w) ? w : DefaultUserWidth(field);
+            if (width > 0 && field.Length > 0) cols.Add((field, width));
+        }
+        return cols;
+    }
+
+    private static int DefaultUserWidth(string field) => field switch
+    {
+        "name"  => 30, "size"  => 8,  "perm" => 10, "type" => 1,
+        "mtime" => 12, "atime" => 12, "ctime" => 12,
+        "owner" => 8,  "group" => 8,  "inode" => 8,
+        _ => 10,
+    };
+
+    private string FormatUserEntry(FileEntry entry, int innerWidth)
+    {
+        var cols = ParseUserFormat(UserFormatString);
+        var sb   = new System.Text.StringBuilder();
+        sb.Append(entry.IsMarked ? "*" : " ");
+        foreach (var (field, width) in cols)
+        {
+            var val = field switch
+            {
+                "name"  => entry.IsParentDir ? ".." : entry.Name,
+                "size"  => entry.IsParentDir ? "<UP-DIR>"
+                           : FileSizeFormatter.FormatPanelSize(entry.Size, entry.IsDirectory),
+                "perm"  => PermissionsFormatter.Format(entry.Permissions, entry.IsDirectory, entry.IsSymlink),
+                "type"  => entry.IsDirectory ? "d" : entry.IsSymlink ? "l"
+                           : entry.IsExecutable ? "x" : "-",
+                "mtime" => entry.ModificationTime == DateTime.MinValue ? string.Empty
+                           : entry.ModificationTime.ToString("MMM dd HH:mm"),
+                "atime" => entry.DirEntry.AccessTime == DateTime.MinValue ? string.Empty
+                           : entry.DirEntry.AccessTime.ToString("MMM dd HH:mm"),
+                "ctime" => entry.DirEntry.CreationTime == DateTime.MinValue ? string.Empty
+                           : entry.DirEntry.CreationTime.ToString("MMM dd HH:mm"),
+                "owner" => entry.OwnerName ?? entry.DirEntry.OwnerUid.ToString(),
+                "group" => entry.GroupName ?? entry.DirEntry.OwnerGid.ToString(),
+                "inode" => entry.DirEntry.Inode.ToString(),
+                _ => string.Empty,
+            };
+            if (val.Length > width) val = val[..(width - 1)] + "~";
+            sb.Append(val.PadRight(width));
+            sb.Append(' ');
+        }
+        var result = sb.ToString().TrimEnd();
+        if (result.Length > innerWidth) result = result[..innerWidth];
+        return result.PadRight(innerWidth);
+    }
+
+    private void DrawUserColumnHeader(int innerWidth)
+    {
+        var cols   = ParseUserFormat(UserFormatString);
+        var sort   = _listing.Sort;
+        string ind = sort.Descending ? "↓" : "↑";
+        Move(1, 1);
+        Driver.SetAttribute(McTheme.PanelHeader);
+        Driver.AddStr(" "); // marker column
+        foreach (var (field, width) in cols)
+        {
+            bool isSorted = (field == "name"  && sort.Field == SortField.Name)
+                         || (field == "size"  && sort.Field == SortField.Size)
+                         || (field == "mtime" && sort.Field == SortField.ModificationTime)
+                         || (field == "atime" && sort.Field == SortField.AccessTime)
+                         || (field == "owner" && sort.Field == SortField.Owner)
+                         || (field == "group" && sort.Field == SortField.Group)
+                         || (field == "inode" && sort.Field == SortField.Inode);
+            var label = (char.ToUpper(field[0]) + field[1..]) + (isSorted ? ind : string.Empty);
+            if (label.Length > width) label = label[..width];
+            Driver.SetAttribute(isSorted ? McTheme.PanelHeaderSorted : McTheme.PanelHeader);
+            Driver.AddStr(label.PadRight(width + 1)); // +1 for separator space
+        }
     }
 
     // --- Quick search ---
