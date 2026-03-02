@@ -9,7 +9,7 @@ in the original GNU Midnight Commander. Used to verify completeness of the .NET 
 - `❌` Not implemented / stub
 
 **Reference:** https://github.com/MidnightCommander/mc
-**MC version:** 4.8.x (current mainline)
+**MC version:** 4.8.x (current mainline, source file `src/filemanager/filemanager.c`)
 
 ---
 
@@ -19,376 +19,560 @@ in the original GNU Midnight Commander. Used to verify completeness of the .NET 
 |---------|--------|-------|
 | Two-panel side-by-side layout (default) | ✅ | |
 | Horizontal split layout (panels top/bottom) | ✅ | Toggle via Alt+, |
-| Menu bar at top | ✅ | |
-| Two file panels | ✅ | |
-| Single divider `│` between panels | ✅ | |
+| Menu bar at top (Left \| File \| Command \| Options \| Right) | ✅ | |
+| Two file panels with independent navigation | ✅ | |
+| Single `│` divider between panels | ✅ | |
 | Command line at bottom | ✅ | |
-| Function key bar (F1–F10) at bottom | ✅ | |
-| Hints bar (rotating tips strip) | ❌ | |
+| Function key bar (F1–F10 labels) at very bottom | ✅ | |
+| Hints bar (rotating tip strip between panels and cmdline) | ❌ | Uses ~/.config/mc/hints |
 | Panel path in top border, centered, with trailing `/` | ✅ | |
 | Active panel has brighter frame colour | ✅ | |
-| Panel summary line (N files, M dirs, X free) | ✅ | |
-| Free space shown in summary | ✅ | |
-| Mini-status line per panel (file info) | ✅ | |
+| Panel summary line ("N files, M dirs, X bytes free") | ✅ | |
+| Free disk space shown in summary | ✅ | |
+| Mini-status line per panel (file info below listing) | ✅ | |
 | Scrollbar on right inner edge of panel | ✅ | |
 | Scrollbar thumb position indicator | ✅ | |
+| Split ratio adjustable (Alt+Shift+Left/Right, or = for equal) | ✅ | |
+| `update_menu()` sets panel menu title to panel's current path | ✅ | |
 
 ---
 
-## 2. File Panel — Display
+## 2. Left / Right Panel Menu
+*(source: `create_panel_menu()` in `src/filemanager/filemanager.c`)*
 
-| Feature | Status | Notes |
-|---------|--------|-------|
-| Full listing mode (name + size + date) | ✅ | |
-| Brief listing mode (two columns of names) | ✅ | |
-| Long listing mode (permissions + owner + group + size + date + name) | ✅ | |
-| User-defined listing mode (custom column format string) | ❌ | |
-| Column header with sort field + ↑/↓ indicator | ✅ | |
-| Header: `Name  Size  Modify time` spacing | ✅ | |
-| Brief mode: two equal-width columns with `│` separator | ✅ | |
-| Long mode: permissions in `drwxr-xr-x` format | ✅ | |
-| `..` entry shows `<UP-DIR>` in size column | ✅ | |
-| Subdirectory shows `<DIR>` in size column | ✅ | |
-| File entry with marker column (`*` when marked) | ✅ | |
-| Date format: recent = `MMM dd HH:mm`; old = `MMM dd  yyyy` | ✅ | |
-| Symlink target shown in mini-status (`name -> target`) | ✅ | |
-| Panel top-border path left-biased centering (odd extra dash goes left) | ✅ | |
-| Inactive panel cursor shown (muted highlight) | ✅ | |
-| Active panel cursor (black on cyan) | ✅ | |
-| Marked files cursor (bright yellow on cyan) | ✅ | |
-| Marked file count: singular/plural + "tagged" label | ✅ | |
+Accessed via **F9 → Left** / **F9 → Right**, or by clicking the panel title.
+Both Left and Right menus are **identical** — same `create_panel_menu()` function;
+only their titles differ (set dynamically by `update_menu()`).
 
-### File Type Colour Coding
+### 2.1 Panel Mode Items
 
-| Type | Colour | Status |
-|------|--------|--------|
-| Regular file | Gray on Blue | ✅ |
-| Directory | White on Blue | ✅ |
-| Executable | Bright Green on Blue | ✅ |
-| Symlink | Cyan on Blue | ✅ |
-| Archive / compressed | Bright Cyan on Blue | ✅ |
-| Marked file | Bright Yellow on Blue | ✅ |
-| Cursor (active panel) | Black on Cyan | ✅ |
-| Cursor (inactive panel) | White on Blue | ✅ |
-| Block device | Bright Magenta on Blue | ❌ |
-| Character device | Magenta on Blue | ❌ |
-| FIFO / named pipe | Dark Gray on Blue | ❌ |
-| Socket | Bright Magenta on Blue | ❌ |
-| Executable with `*` suffix (like `ls -F`) | ❌ | Optional panel option |
-| Symlink-to-dir shown in directory colour | ❌ | Requires stat() on target |
+| Menu Item | CK_ Command | Shortcut | Status | What it does |
+|-----------|-------------|----------|--------|--------------|
+| **File listing** | `CK_PanelListing` | | ✅ | Switches the inactive panel to a normal file listing (used when it was in Quick View / Info / Tree mode to restore it to normal) |
+| **Quick view** | `CK_PanelQuickView` | Ctrl+X Q | ✅ | Toggles Quick View mode on the **inactive** panel — shows a live auto-refreshed preview of the file under cursor in the active panel. The inactive panel shows file content (text / hex). Uses internal viewer logic. |
+| **Info** | `CK_PanelInfo` | Ctrl+X I | ✅ | Toggles Info mode on inactive panel — shows owner, group, permissions, size, timestamps, hard-link count, inode, device of the file under cursor |
+| **Tree** | `CK_PanelTree` | | ✅ | Toggles Tree mode on inactive panel — shows navigable directory tree; cursor keys navigate, Enter changes the active panel to selected dir; F2 rescans tree |
+| **Panelize** | `CK_Panelize` | Ctrl+X ! | ⚠️ | Runs a shell command (prompted) and loads the output filenames as a virtual static listing in the active panel; operations work on those files; re-runs to refresh |
 
----
+*(separator)*
 
-## 3. File Panel — Navigation & Interaction
+### 2.2 Panel Configuration Items
 
-| Feature | Status | Notes |
-|---------|--------|-------|
-| Arrow keys move cursor | ✅ | |
-| Enter — open file/directory | ✅ | |
-| Backspace — navigate to parent | ✅ | |
-| Left arrow — navigate to parent (Lynx-like motion) | ⚠️ | Setting exists but must be verified |
-| Right arrow — enter directory (Lynx-like motion) | ⚠️ | Setting exists but must be verified |
-| Page Up / Page Down | ✅ | |
-| Home — jump to first entry | ✅ | |
-| End — jump to last entry | ✅ | |
-| Alt+G — jump to first entry | ✅ | |
-| Alt+R — jump to middle entry | ✅ | |
-| Alt+J — jump to last entry | ✅ | |
-| Insert — toggle mark on current file and advance cursor | ✅ | |
-| `*` — invert selection (all marks) | ✅ | |
-| `+` — select group (mark by pattern) | ✅ | Dialog with Files only / Case sensitive / Shell patterns |
-| `\` (backslash) — unselect group | ✅ | |
-| Ctrl+R — refresh/rescan panel | ✅ | |
-| Tab / Shift+Tab — switch active panel | ✅ | |
-| Quick search (type letter to jump to filename) | ✅ | |
-| Alt+S / Ctrl+S — activate quick search | ✅ | |
-| Quick search cursor blink at position | ❌ | Terminal.Gui cursor placement |
-| Ctrl+Space — calculate directory size | ✅ | |
-| Mouse click — move cursor | ✅ | |
-| Mouse double-click — open entry | ✅ | |
-| Mouse click on inactive panel — switch panel | ✅ | |
-| Alt+T — cycle listing mode (Full→Brief→Long→Full) | ✅ | |
+| Menu Item | CK_ Command | Shortcut | Status | What it does |
+|-----------|-------------|----------|--------|--------------|
+| **Listing format...** | `CK_SetupListingFormat` | | ✅ | Opens listing format dialog: choose Full (name+size+date), Brief (two-column names), Long (perm+owner+group+size+date+name), or User-defined (custom column spec string like `name:30,size:8,perm:10,mtime:12`) |
+| **Sort order...** | `CK_Sort` | Ctrl+S | ✅ | Opens sort dialog: fields = Name, Extension, Modified time, Accessed time, Changed time, Size, Inode; checkboxes for Reverse, Dirs first, Case sensitive, Shell patterns |
+| **Filter...** | `CK_Filter` | | ✅ | Opens filter dialog: shell glob pattern (e.g. `*.c`) applied to panel; files not matching are hidden; empty pattern = show all |
+| **Encoding...** | `CK_SelectCodepage` | Alt+E | ✅ | Opens encoding selector; chosen encoding applied to filename display in panel with `#enc:NAME` VFS suffix appended to path |
+
+*(separator)*
+
+### 2.3 VFS Connection Items
+*(conditionally compiled — shown when respective VFS is enabled)*
+
+| Menu Item | CK_ Command | Compile flag | Status | What it does |
+|-----------|-------------|--------------|--------|--------------|
+| **FTP link...** | `CK_ConnectFtp` | `ENABLE_VFS_FTP` | ⚠️ | Opens FTP connection dialog; prompts for `[user[:pass]@]host[:port][/path]`; navigates active panel to that FTP URL via FTP VFS |
+| **Shell link...** | `CK_ConnectShell` | `ENABLE_VFS_SHELL` | ❌ | Opens FISH (FIles over SHell) connection dialog; navigates via SSH + shell commands; not implemented |
+| **SFTP link...** | `CK_ConnectSftp` | `ENABLE_VFS_SFTP` | ⚠️ | Opens SFTP connection dialog; navigates via SFTP VFS |
+
+*(separator)*
+
+### 2.4 Panel Refresh
+
+| Menu Item | CK_ Command | Shortcut | Status | What it does |
+|-----------|-------------|----------|--------|--------------|
+| **Rescan** | `CK_Reread` | Ctrl+R | ✅ | Re-reads the current panel directory from disk; resets the listing; preserves cursor position on the same filename if still present |
 
 ---
 
-## 4. Function Key Bar (F1–F10)
+## 3. File Menu
+*(source: `create_file_menu()` in `src/filemanager/filemanager.c`)*
 
-| Key | Label | Status | Notes |
-|-----|-------|--------|-------|
-| F1 | Help | ⚠️ | Section viewer with Contents/Back. Missing: hyperlink navigation, ctrl-char links, bold/italic rendering |
-| F2 | Menu | ⚠️ | User menu with condition lines evaluated. Missing: "Using shell patterns" scope evaluation for conditions |
-| F3 | View | ✅ | Internal viewer; navigates into directory |
-| F4 | Edit | ✅ | Opens internal editor; prompts for filename if no file under cursor |
-| F5 | Copy | ⚠️ | Copies with source mask, preserve attrs, background. Missing: "Stable symlinks" option, ext2 attrs checkbox |
-| F6 | RenMov | ⚠️ | Rename (single) or move (multiple). Same option gaps as F5 |
-| F7 | Mkdir | ✅ | Creates directory; supports recursive parent creation |
-| F8 | Delete | ✅ | Delete with primary confirm + per-directory recursive confirm |
-| F9 | PullDn | ✅ | Opens menu bar |
-| F10 | Quit | ✅ | Confirms if setting on, saves panel paths |
-| Mouse click on F-key label | ✅ | Fires the same callback |
+Accessed via **F9 → File**.
 
----
+### 3.1 View / Edit
 
-## 5. Left / Right Panel Menu
+| Menu Item | CK_ Command | Shortcut | Status | What it does |
+|-----------|-------------|----------|--------|--------------|
+| **View** | `CK_View` | F3 | ✅ | Opens current file in internal viewer (mcview); if cursor is on a directory, navigates into it |
+| **View file...** | `CK_ViewFile` | | ✅ | Prompts for filename then opens it in internal viewer |
+| **Filtered view** | `CK_ViewFiltered` | Alt+! | ✅ | Prompts for shell command with `%f` = current filename; pipes output to viewer (e.g. `man %f` or `hexdump %f`) |
+| **Edit** | `CK_Edit` | F4 | ✅ | Opens current file in internal editor (mcedit); if no file is under cursor, prompts for filename of new file to create |
 
-Accessed via F9 → Left / Right, or by clicking the panel.
+### 3.2 Copy / Move / Delete
 
-| Menu Item | Shortcut | Status | Notes |
-|-----------|----------|--------|-------|
-| Listing format... | | ✅ | Full / Brief / Long. Missing: User-defined columns |
-| Quick view | Ctrl+X Q | ✅ | Persistent live-preview overlay on inactive panel |
-| Info | Ctrl+X I | ✅ | Persistent info overlay on inactive panel |
-| Tree | | ✅ | Persistent navigable tree overlay on inactive panel |
-| Panelize | | ⚠️ | Runs shell command; injects matching filenames into panel as virtual listing |
-| Listing format... (duplicate) | | ✅ | Same as above (menu consolidation done) |
-| Sort order... | Ctrl+S | ✅ | All sort fields; reverse, dirs first, case sensitive |
-| Filter... | | ✅ | Pattern filter on active panel listing |
-| Encoding... | | ✅ | Full system encoding list with filter field |
-| FTP link... | | ⚠️ | Dialog exists; FTP VFS provider not wired by default |
-| Shell link... | | ❌ | FISH protocol not implemented |
-| SFTP link... | | ⚠️ | Dialog exists; SFTP VFS provider not wired by default |
-| Rescan | Ctrl+R | ✅ | |
+| Menu Item | CK_ Command | Shortcut | Status | What it does |
+|-----------|-------------|----------|--------|--------------|
+| **Copy** | `CK_Copy` | F5 | ⚠️ | Opens Copy dialog: destination (defaults to other panel path), source mask, using shell patterns toggle, preserve attributes, follow symlinks, dive into subdirs, stable symlinks, ext2 attrs; copies marked files (or current if none marked) recursively |
+| **Rename/Move** | `CK_Move` | F6 | ⚠️ | Opens Move/Rename dialog: same options as Copy; for single file = rename in-place; for multiple = move to destination directory; uses rename() syscall (falls back to copy+delete on cross-device) |
+| **Mkdir** | `CK_MakeDir` | F7 | ✅ | Prompts for directory name; creates it including intermediate parents if path contains `/` |
+| **Delete** | `CK_Delete` | F8 | ✅ | Shows confirmation dialog listing count of marked files (or current if none); for directories asks "Delete recursively?"; deletes via remove()/rmdir() |
+| **Quick cd** | `CK_CdQuick` | Alt+C | ✅ | Inline cd dialog with tab-completion; navigates active panel to typed path |
 
----
+### 3.3 Permissions / Attributes
 
-## 6. File Menu (F9 → File)
+| Menu Item | CK_ Command | Shortcut | Status | What it does |
+|-----------|-------------|----------|--------|--------------|
+| **Chmod** | `CK_ChangeMode` | Ctrl+X C | ✅ | Opens chmod dialog: checkboxes for owner/group/other read/write/execute, plus set-uid, set-gid, sticky; octal field auto-updates; "Set all" applies same mode to all marked files |
+| **Chown** | `CK_ChangeOwn` | Ctrl+X O | ✅ | Opens chown dialog: owner listbox from /etc/passwd, group listbox from /etc/group; "Set all" applies to all marked |
+| **Advanced chown** | `CK_ChangeOwnAdvanced` | | ✅ | Combined dialog: chmod checkboxes + chown owner/group in one screen |
+| **Chattr** | `CK_ChangeAttributes` | Ctrl+X A / Ctrl+X E | ✅ | Opens ext2 file attributes dialog; shows/toggles: append-only (a), compressed (c), no-dump (d), immutable (i), journal data (j), secure-delete (s), no-tail (t), undeletable (u); uses lsattr/chattr |
 
-| Menu Item | Shortcut | Status | Notes |
-|-----------|----------|--------|-------|
-| View | F3 | ✅ | |
-| View file... | | ✅ | Prompts for filename |
-| Filtered view | | ✅ | Pipes file through command (`%f` substituted) |
-| Edit | F4 | ✅ | |
-| Copy | F5 | ⚠️ | See F5 above |
-| Chmod | Ctrl+X C | ✅ | Full rwx + setuid/setgid/sticky; multi-file Set all |
-| Link | Ctrl+X L | ✅ | Hard link |
-| Symlink | Ctrl+X S | ✅ | Absolute symlink |
-| Relative symlink | Ctrl+X V | ✅ | Relative path symlink |
-| Edit symlink | | ✅ | Reads current target, confirms, re-creates |
-| Chown | Ctrl+X O | ✅ | System user/group listboxes from /etc/passwd, /etc/group |
-| Advanced chown | | ✅ | Combined owner/group + permissions in one dialog |
-| Rename/Move | F6 | ⚠️ | See F6 above |
-| Mkdir | F7 | ✅ | |
-| Delete | F8 | ✅ | |
-| Quick cd | Alt+C | ✅ | |
-| Select group | + | ✅ | Dialog with Files only / Case sensitive / Shell patterns |
-| Unselect group | \ | ✅ | |
-| Invert selection | * | ✅ | |
-| Chattr | Ctrl+X A | ✅ | ext2 file attributes via lsattr/chattr |
-| Exit | F10 | ✅ | |
+### 3.4 Links
+
+| Menu Item | CK_ Command | Shortcut | Status | What it does |
+|-----------|-------------|----------|--------|--------------|
+| **Link** | `CK_Link` | Ctrl+X L | ✅ | Prompts for name of new hard link to create for current file |
+| **Symlink** | `CK_LinkSymbolic` | Ctrl+X S | ✅ | Prompts for absolute symlink target; creates symlink with given name pointing to given target |
+| **Relative symlink** | `CK_LinkSymbolicRelative` | Ctrl+X V | ✅ | Like Symlink but auto-converts absolute path to relative path from link location |
+| **Edit symlink** | `CK_LinkSymbolicEdit` | Ctrl+X Ctrl+S | ✅ | Pre-fills dialog with current symlink target; user edits it; deletes old symlink and creates new one; confirmation dialog shown |
+
+### 3.5 Selection
+
+| Menu Item | CK_ Command | Shortcut | Status | What it does |
+|-----------|-------------|----------|--------|--------------|
+| **Select group** | `CK_Select` | + (numpad) / Alt++ | ✅ | Opens pattern selection dialog: shell glob or regex pattern, "Files only" checkbox, "Case sensitive" checkbox; marks all matching files |
+| **Unselect group** | `CK_Unselect` | - (numpad) / Alt+- | ✅ | Same dialog as Select group; unmarks all matching files |
+| **Invert selection** | `CK_SelectInvert` | * (numpad) / Alt+* | ✅ | Toggles mark on every entry in the panel |
+
+### 3.6 Exit
+
+| Menu Item | CK_ Command | Shortcut | Status | What it does |
+|-----------|-------------|----------|--------|--------------|
+| **Exit** | `CK_Quit` | F10 | ✅ | Quits MC; if "Confirm exit" setting is on, shows Y/N dialog; saves setup if "Auto save" is on |
 
 ---
 
-## 7. Command Menu (F9 → Command)
+## 4. Command Menu
+*(source: `create_command_menu()` in `src/filemanager/filemanager.c`)*
 
-| Menu Item | Shortcut | Status | Notes |
-|-----------|----------|--------|-------|
-| User menu | F2 | ⚠️ | Condition lines evaluated. Missing: full shell-pattern scope |
-| Directory tree | | ✅ | Persistent tree overlay |
-| Find file | Alt+? | ⚠️ | Pattern + content + date/size filters. Missing: date/size filter fields, Panelize button on results |
-| Swap panels | Ctrl+U | ✅ | |
-| Switch panels on/off | Ctrl+O | ✅ | Suspends TUI, opens shell |
-| Compare directories | Ctrl+X D | ✅ | Quick / Size-only / Thorough method selector |
-| Compare files | | ✅ | Opens diff viewer; error if null/directory |
-| External panelize | | ⚠️ | Injects matching filenames from shell command into panel |
-| Show directory sizes | | ✅ | Computes sizes for marked dirs (or current) |
-| Command history | | ✅ | Shows session history; Enter pastes to command line |
-| Viewed/edited files history | | ✅ | MRU list with View / Edit / Panel buttons |
-| Directory hotlist | Ctrl+\ / Ctrl+F | ✅ | Hierarchical groups; new group; breadcrumb navigation |
-| Active VFS list | | ✅ | Shows mounted VFS paths; Browse / Free VFSs |
-| Background jobs | | ✅ | Lists running/finished jobs with Kill button |
-| Screen list | | ❌ | Multiple subshell screens not implemented |
-| Edit extension file | | ✅ | Opens ~/.config/mc/mc.ext |
-| Edit menu file | | ✅ | Opens ~/.config/mc/menu |
-| Edit highlight group file | | ✅ | Opens ~/.config/mc/mc.filecolor |
+Accessed via **F9 → Command**.
+
+### 4.1 User / Utility
+
+| Menu Item | CK_ Command | Shortcut | Status | What it does |
+|-----------|-------------|----------|--------|--------------|
+| **User menu** | `CK_UserMenu` | F2 | ⚠️ | Loads `~/.config/mc/menu` (or system default); shows hotkey-navigable menu; each entry is a shell command with `%f`/`%d`/etc. substitution; condition lines (`+ condition` / `= condition`) filter which entries show; executes selected entry in shell |
+| **Directory tree** | `CK_Tree` | | ✅ | Opens navigable directory tree overlay (same as panel Tree mode but from menu); uses tree built from panel listings |
+| **Find file** | `CK_Find` | Alt+? | ⚠️ | Opens Find File dialog: Filename (shell glob), Content (grep pattern), Start dir, Case-sensitive, Follow symlinks, Skip hidden, Date range, Size range, Ignore dirs list; real-time results list; buttons: View (F3), Edit (F4), Panelize, Again, Stop, Continue, Quit |
+| **Swap panels** | `CK_Swap` | Ctrl+U | ✅ | Exchanges the directories shown in left and right panels; cursor positions preserved |
+| **Switch panels on/off** | `CK_Shell` | Ctrl+O | ✅ | Suspends MC, drops to interactive shell in same directory; MC resumes when shell exits (type `exit` or Ctrl+D); if subshell enabled, shell is persistent PTY |
+| **Compare directories** | `CK_CompareDirs` | Ctrl+X D | ✅ | Marks files in both panels that differ: method dialog offers Quick (names+sizes), Size-only, Thorough (byte-by-byte MD5 comparison) |
+| **Compare files** | `CK_CompareFiles` | Ctrl+X Ctrl+D | ✅ | Opens internal diff viewer (mcdiff) comparing the file under cursor in left vs. right panel |
+| **External panelize** | `CK_ExternalPanelize` | Ctrl+X ! | ⚠️ | Prompts for shell command (e.g. `find . -name "*.c"`); injects each output line as a filename into active panel as virtual listing |
+| **Show directory sizes** | `CK_DirSize` | Ctrl+Space | ✅ | Calculates disk usage for marked directories (or current if none marked); updates the size shown in the panel listing |
+
+### 4.2 History
+
+| Menu Item | CK_ Command | Shortcut | Status | What it does |
+|-----------|-------------|----------|--------|--------------|
+| **Command history** | `CK_History` | Alt+H | ✅ | Shows session command line history in popup list; Up/Down to navigate; Enter pastes selected command to command line; double-click pastes |
+| **Viewed/edited files history** | `CK_EditorViewerHistory` | Alt+Shift+E | ✅ | Shows MRU list of files opened in viewer/editor this session; columns show V/E tag and path; buttons: View (open in viewer), Edit (open in editor), To panel (navigate panel to file's directory) |
+
+### 4.3 Navigation Aids
+
+| Menu Item | CK_ Command | Shortcut | Status | What it does |
+|-----------|-------------|----------|--------|--------------|
+| **Directory hotlist** | `CK_HotList` | Ctrl+\ | ✅ | Shows hierarchical bookmark list; Add (Ctrl+H adds current dir), New group, Up, Remove, Goto; breadcrumb shows current group path; Enter navigates to bookmarked dir |
+| **Active VFS list** | `CK_VfsList` | Ctrl+X A | ✅ | Lists all currently mounted VFS paths (FTP, SFTP, tar, etc.); Browse button changes active panel to selected VFS; Free VFSs button unmounts all; individual Free button per entry |
+| **Background jobs** | `CK_Jobs` | Ctrl+X J | ✅ | Lists running/finished background copy/move operations; shows filename + status; Kill button to terminate a job; dialog auto-refreshes |
+| **Screen list** | `CK_ScreenList` | Alt+\` | ❌ | Lists open editor/viewer screens (MC's internal screen multiplexer); not implemented in .NET port |
+
+### 4.4 Editor Files
+
+| Menu Item | CK_ Command | Shortcut | Status | What it does |
+|-----------|-------------|----------|--------|--------------|
+| **Edit extension file** | `CK_EditExtensionsFile` | | ✅ | Opens `~/.config/mc/mc.ext` (or creates it) in the internal editor; this file maps file extensions/patterns to open/view/edit actions |
+| **Edit menu file** | `CK_EditUserMenu` | | ✅ | Opens `~/.config/mc/menu` (or creates it) in the internal editor; this is the User Menu definition file |
+| **Edit highlighting group file** | `CK_EditFileHighlightFile` | | ✅ | Opens `~/.config/mc/mc.filecolor` (or creates it) in the internal editor; this file defines per-extension or per-type colour rules |
 
 ---
 
-## 8. Options Menu (F9 → Options)
+## 5. Options Menu
+*(source: `create_options_menu()` in `src/filemanager/filemanager.c`)*
 
-| Menu Item | Shortcut | Status | Notes |
-|-----------|----------|--------|-------|
-| Configuration... | | ✅ | Verbose, Compute totals, Auto save, Show output, Subshell, Ask before run, Pause after run |
-| Layout... | | ✅ | Menubar/cmdline/keybar toggle, split %, equal split, horizontal/vertical |
-| Panel options... | | ✅ | Hidden files, backup files, mini status, Lynx-like, scrollbar, file highlight, mix files, case-sensitive quick search, free space |
-| Confirmation... | | ✅ | Confirm delete, confirm overwrite, confirm exit |
-| Appearance... | | ✅ | Skin file selector from system + user skins directories |
-| Learn keys... | | ✅ | Scrollable table of all key bindings |
-| Virtual FS... | | ✅ | Cache timeout, FTP proxy, FTP anon password, passive mode |
-| Save setup | | ✅ | Persists to ~/.config/mc/ini |
-| About... | | ✅ | Version, description, copyright |
+Accessed via **F9 → Options**.
+
+| Menu Item | CK_ Command | Status | What it does |
+|-----------|-------------|--------|--------------|
+| **Configuration...** | `CK_Options` | ✅ | General settings: Verbose operation (show filenames during copy/move), Compute totals before starting operation, Auto save setup on exit, Show command output (Verbose), Use subshell (PTY), Ask before running program, Pause after each external command |
+| **Layout...** | `CK_OptionsLayout` | ✅ | Toggle visibility of: menu bar, command line, key bar; split direction (vertical/horizontal); split percentage; "Equal split" toggle |
+| **Panel options...** | `CK_OptionsPanel` | ✅ | Show hidden files (dot-files), Show backup files (`*~`, `.bak`), Show mini-status line, Lynx-like motion (←/→ navigate parent/child), Show scrollbar, File highlight (colour by type), Mix files and dirs, Case-sensitive quick search, Show free space in summary |
+| **Confirmation...** | `CK_OptionsConfirm` | ✅ | Toggle per-operation confirm dialogs: Confirm delete, Confirm overwrite, Confirm execute (for executables), Confirm exit, Confirm directory hotlist delete |
+| **Appearance...** | `CK_OptionsAppearance` | ✅ | Skin selector: lists all `.ini`-format skin files from `/usr/share/mc/skins/` and `~/.local/share/mc/skins/`; applies theme live on selection |
+| **Learn keys...** | `CK_LearnKeys` | ✅ | Interactive key binding table; each row shows action + current binding; press Enter on a row then press a key to rebind it; tests if terminal sends the key correctly |
+| **Virtual FS...** | `CK_OptionsVfs` | ✅ | VFS settings: timeout (minutes before auto-unmount of idle VFS), FTP proxy host, FTP anonymous password, Use passive mode for FTP |
+| **Save setup** | `CK_SaveSetup` | ✅ | Writes all current settings to `~/.config/mc/ini` immediately; also done automatically on exit when "Auto save" is on |
+| **About...** | `CK_About` | ✅ | Shows version string, copyright, website URL, and list of enabled VFS/features |
+
+---
+
+## 6. File Panel — Display Modes
+*(toggled by Alt+T, or via Left/Right → Listing format...)*
+
+| Mode | Function | Status | Column layout |
+|------|----------|--------|---------------|
+| **Full** (default) | `CK_SetupListingFormat` / `CK_PanelListing` | ✅ | Name (fills remaining), Size (right-justified), Modify time |
+| **Brief** | same | ✅ | Two equal-width columns of names with `│` separator |
+| **Long** | same | ✅ | Permissions, nlink, owner, group, size, modify-time, name |
+| **User-defined** | same | ✅ | Custom columns specified as `field:width` pairs separated by commas, e.g. `name:30,size:8,perm:10,mtime:12,owner:8,group:8`; supported fields: `name`, `size`, `perm`/`permissions`, `type`, `mtime`/`modify`, `atime`/`access`, `ctime`/`change`, `owner`, `group`, `inode` |
+
+### Column Header Details (Full mode)
+
+| Column | Sort key | Click behaviour |
+|--------|----------|-----------------|
+| Name | `SortField.Name` | Clicking header toggles sort by name / reverse |
+| Size | `SortField.Size` | Clicking header toggles sort by size / reverse |
+| Modify time | `SortField.ModificationTime` | Clicking header toggles sort by mtime / reverse |
+| ↑/↓ indicator | | Shows on active sort column; ↑ = ascending, ↓ = descending |
+
+---
+
+## 7. File Panel — Navigation & Interaction
+
+| Feature | Key | Status | Notes |
+|---------|-----|--------|-------|
+| Move cursor up/down | ↑ / ↓, Ctrl+P / Ctrl+N | ✅ | |
+| Move cursor left/right (Brief: column switch) | ← / → | ✅ | In Brief mode switches between the two columns |
+| Enter — open file/enter directory | Enter | ✅ | Runs file with extension handler from mc.ext; directories enter; executables run |
+| Backspace / Ctrl+PgUp — navigate to parent | Backspace / Ctrl+PgUp | ✅ | |
+| Ctrl+PgDn — enter directory under cursor | Ctrl+PgDn | ✅ | |
+| Left arrow — navigate to parent (Lynx mode) | ← | ⚠️ | Only when "Lynx-like motion" is on in Panel options |
+| Right arrow — enter directory (Lynx mode) | → | ⚠️ | Only when "Lynx-like motion" is on |
+| Page Up / Page Down | PgUp / PgDn, Ctrl+V / Alt+V | ✅ | |
+| Home — jump to first entry | Home / Alt+< | ✅ | |
+| End — jump to last entry | End / Alt+> | ✅ | |
+| Alt+G — jump to first visible entry | Alt+G | ✅ | |
+| Alt+R — jump to middle visible entry | Alt+R | ✅ | |
+| Alt+J — jump to last visible entry | Alt+J | ✅ | |
+| Insert / Ctrl+T — toggle mark and advance | Insert | ✅ | Marks current file, moves cursor down |
+| Shift+Down — mark and move down | Shift+↓ | ✅ | |
+| Shift+Up — mark and move up | Shift+↑ | ✅ | |
+| * (numpad) / Alt+* — invert selection | * / Alt+* | ✅ | |
+| + (numpad) / Alt++ — select group | + / Alt++ | ✅ | Pattern dialog |
+| - (numpad) / Alt+- — unselect group | - / Alt+- | ✅ | Pattern dialog |
+| Ctrl+R — refresh/rescan panel | Ctrl+R | ✅ | |
+| Tab / Ctrl+I — switch active panel | Tab | ✅ | |
+| Shift+Tab — switch panel (reverse) | Shift+Tab | ✅ | |
+| Quick search (type letter) | Any printable char when panel focused | ✅ | Types into incremental search; highlights matching entry |
+| Ctrl+S / Alt+S — activate quick search | Ctrl+S / Alt+S | ✅ | |
+| Ctrl+Space — calculate directory size | Ctrl+Space | ✅ | Shows subdirectory disk usage in size column |
+| Mouse click — move cursor | click | ✅ | |
+| Mouse double-click — open entry | double-click | ✅ | |
+| Mouse click on inactive panel — switch panel | click | ✅ | |
+| Alt+T — cycle listing mode | Alt+T | ✅ | Full → Brief → Long → User → Full |
+| Alt+O — navigate other panel to cursor dir | Alt+O | ✅ | Other panel goes to directory under cursor |
+| Alt+L — navigate other panel to symlink target | Alt+L | ✅ | If cursor is on a symlink to directory |
+| Alt+I — synchronise other panel to current | Alt+I | ✅ | Other panel navigates to same directory as active |
+
+---
+
+## 8. Function Key Bar (F1–F10)
+
+| Key | Label | CK_ Command | Status | What it does |
+|-----|-------|-------------|--------|--------------|
+| F1 | Help | `CK_Help` | ⚠️ | Opens built-in help viewer with table of contents; hypertext cross-references; topic navigation history |
+| F2 | Menu | `CK_UserMenu` | ⚠️ | Shows User Menu (loaded from `~/.config/mc/menu`); supports condition lines |
+| F3 | View | `CK_View` | ✅ | Opens file in internal viewer; if on directory, navigates into it |
+| F4 | Edit | `CK_Edit` | ✅ | Opens file in internal editor; prompts for filename if on empty space |
+| F5 | Copy | `CK_Copy` | ⚠️ | Copy dialog; copies marked files (or current) to other panel or specified path |
+| F6 | RenMov | `CK_Move` | ⚠️ | Rename/Move dialog |
+| F7 | Mkdir | `CK_MakeDir` | ✅ | Create directory dialog |
+| F8 | Delete | `CK_Delete` | ✅ | Delete with confirmation |
+| F9 | PullDn | `CK_Menu` | ✅ | Opens/activates menu bar |
+| F10 | Quit | `CK_Quit` | ✅ | Exits MC |
+| F13 (Shift+F3) | | `CK_ViewRaw` | ✅ | View file in raw mode (no encoding interpretation) |
+| F14 (Shift+F4) | | `CK_EditNew` | ✅ | Create new (empty) file in editor, prompting for filename |
+| F15 (Shift+F5) | | `CK_CopySingle` | ✅ | Copy current file only (ignores marks) |
+| F16 (Shift+F6) | | `CK_MoveSingle` | ✅ | Move/rename current file only |
+| F18 (Shift+F8) | | `CK_DeleteSingle` | ✅ | Delete current file only (ignores marks) |
+| F19 | | `CK_MenuLastSelected` | ✅ | Re-opens last-used menu with last selection highlighted |
+| Mouse click on F-key label | | | ✅ | Fires the same callback as pressing the key |
 
 ---
 
 ## 9. Command Line
 
-| Feature | Status | Notes |
-|---------|--------|-------|
-| Text input field | ✅ | |
-| Directory prompt (`~/path> `) | ✅ | Truncated to last 2 path components |
-| Execute command on Enter | ✅ | |
-| History stored per session | ✅ | |
-| Up / Down arrows — navigate history | ✅ | |
-| Alt+P — previous history entry | ✅ | |
-| Alt+N — next history entry | ✅ | |
-| Ctrl+H / Alt+H — show inline history popup | ✅ | Window with ListView above command line |
-| Inline history popup: Enter selects, Esc closes | ✅ | |
-| Inline history popup: double-click selects | ✅ | |
-| Ctrl+Enter — paste filename from active panel | ✅ | |
-| Ctrl+Shift+Enter — paste filename from inactive panel | ✅ | |
-| Alt+Tab — filename / command completion | ❌ | |
-| Tab — completion when command line is focused | ❌ | |
-| Ctrl+A — jump to beginning of line (Emacs) | ⚠️ | Depends on TextField behaviour |
-| Ctrl+E — jump to end of line (Emacs) | ⚠️ | |
-| Ctrl+K — kill to end of line (Emacs) | ⚠️ | |
-| Ctrl+W — kill word backwards (Emacs) | ⚠️ | |
-| Ctrl+Y — yank killed text (Emacs) | ⚠️ | |
-| Alt+B — word left (Emacs) | ⚠️ | |
-| Alt+F — word right (Emacs) | ⚠️ | |
-| Ctrl+Q — quote next character (insert control char) | ❌ | |
-| Ctrl+X T — paste tagged filenames from active panel | ✅ | |
-| Ctrl+X Ctrl+P — paste other panel's path | ✅ | |
+| Feature | Key | Status | Notes |
+|---------|-----|--------|-------|
+| Text input field | | ✅ | |
+| Directory prompt (`~/path> `) | | ✅ | Truncated to last 2 path components |
+| Execute command on Enter | Enter | ✅ | |
+| History stored per session | | ✅ | |
+| Navigate history up/down | ↑ / ↓ | ✅ | |
+| Alt+P — previous history entry | Alt+P | ✅ | |
+| Alt+N — next history entry | Alt+N | ✅ | |
+| Alt+H / Ctrl+H — show inline history popup | Alt+H / Ctrl+H | ✅ | Popup ListView above cmdline; Enter selects; Esc closes |
+| Ctrl+Enter — paste filename from active panel | Ctrl+Enter | ✅ | |
+| Ctrl+Shift+Enter — paste filename from inactive panel | Ctrl+Shift+Enter | ✅ | |
+| Alt+Enter / Ctrl+A (PutCurrentSelected) | Alt+Enter | ✅ | Pastes current filename to command line cursor position |
+| Alt+A — put current panel path | Alt+A | ✅ | Pastes active panel's current directory path |
+| Alt+Shift+A — put other panel path | Alt+Shift+A | ✅ | Pastes inactive panel's current directory path |
+| Ctrl+X T — paste tagged filenames from active panel | Ctrl+X T | ✅ | Appends all marked filenames (space-separated) |
+| Ctrl+X Ctrl+T — paste tagged from other panel | Ctrl+X Ctrl+T | ✅ | |
+| Ctrl+X P — put active panel path | Ctrl+X P | ✅ | |
+| Ctrl+X Ctrl+P — put other panel path | Ctrl+X Ctrl+P | ✅ | |
+| Alt+Tab — filename / command completion | Alt+Tab | ❌ | Completes against directory listing and commands in PATH |
+| Tab — completion when cmdline focused | Tab | ❌ | |
+| Ctrl+A — beginning of line (Emacs) | Ctrl+A | ⚠️ | Depends on TextField widget |
+| Ctrl+E — end of line | Ctrl+E | ⚠️ | |
+| Ctrl+K — kill to end of line | Ctrl+K | ⚠️ | |
+| Ctrl+W — kill word backwards | Ctrl+W | ⚠️ | |
+| Ctrl+Y — yank killed text | Ctrl+Y | ⚠️ | |
+| Alt+B — word left | Alt+B | ⚠️ | |
+| Alt+F — word right | Alt+F | ⚠️ | |
+| Ctrl+Q — quote next character | Ctrl+Q | ❌ | Inserts next keystroke as literal character (e.g. inserts Ctrl+C as text) |
 
 ---
 
-## 10. Built-in Viewer (mcview / F3)
+## 10. Global Key Bindings
+*(source: `default_filemanager_keymap[]` and `default_filemanager_x_keymap[]` in `src/keymap.c`)*
 
-### Navigation
+### Main Bindings
 
-| Feature | Status | Notes |
-|---------|--------|-------|
-| Scroll up/down (arrow keys, PgUp/PgDn) | ✅ | |
-| Go to beginning (Home / Ctrl+Home) | ✅ | |
-| Go to end (End / Ctrl+End) | ✅ | |
-| Go to byte offset (F5) | ✅ | |
-| Go to line number (F5 in text mode) | ⚠️ | Port uses byte offset for all modes |
-| Next file in directory (Ctrl+F) | ❌ | |
-| Previous file in directory (Ctrl+B) | ❌ | |
-| Ctrl+F — search forward | ✅ | |
-| Ctrl+B / F17 — search backward | ✅ | |
-| n — repeat search | ✅ | |
-| Shift+F7 — search backward | ✅ | |
+| Key | CK_ Action | Status | Notes |
+|-----|-----------|--------|-------|
+| Tab / Ctrl+I | `CK_ChangePanel` | ✅ | Switch active panel |
+| F1 | `CK_Help` | ⚠️ | Help |
+| F2 | `CK_UserMenu` | ⚠️ | User menu |
+| F3 | `CK_View` | ✅ | Viewer |
+| F4 | `CK_Edit` | ✅ | Editor |
+| F5 | `CK_Copy` | ⚠️ | Copy |
+| F6 | `CK_Move` | ⚠️ | Move/Rename |
+| F7 | `CK_MakeDir` | ✅ | Mkdir |
+| F8 | `CK_Delete` | ✅ | Delete |
+| F9 | `CK_Menu` | ✅ | Open menu bar |
+| F10 | `CK_Quit` | ✅ | Quit |
+| F20 | `CK_QuitQuiet` | ✅ | Quit without confirmation |
+| Alt+H | `CK_History` | ✅ | Command history popup |
+| Alt+Shift+E | `CK_EditorViewerHistory` | ✅ | View/edit file history |
+| Ctrl+Space | `CK_DirSize` | ✅ | Calculate directory sizes |
+| Alt+A | `CK_PutCurrentPath` | ✅ | Paste current panel path to cmdline |
+| Alt+Shift+A | `CK_PutOtherPath` | ✅ | Paste other panel path |
+| Alt+Enter / Ctrl+Enter | `CK_PutCurrentSelected` | ✅ | Paste current filename |
+| Ctrl+Shift+Enter | `CK_PutCurrentFullSelected` | ✅ | Paste full path of current file |
+| Alt+C | `CK_CdQuick` | ✅ | Quick cd |
+| Ctrl+\ | `CK_HotList` | ✅ | Directory hotlist |
+| Ctrl+Z | `CK_Suspend` | ✅ | Suspend MC to background (SIGTSTP) |
+| Alt+! | `CK_ViewFiltered` | ✅ | Filtered view |
+| Alt+? | `CK_Find` | ✅ | Find file |
+| Ctrl+R | `CK_Reread` | ✅ | Rescan active panel |
+| Ctrl+U | `CK_Swap` | ✅ | Swap panels |
+| Alt+= | `CK_SplitEqual` | ✅ | Equal split (50/50) |
+| Alt+Shift+→ | `CK_SplitMore` | ✅ | Increase active panel size |
+| Alt+Shift+← | `CK_SplitLess` | ✅ | Decrease active panel size |
+| Ctrl+O | `CK_Shell` | ✅ | Shell (suspend to subshell) |
+| Alt+. | `CK_ShowHidden` | ✅ | Toggle hidden files |
+| Alt+, | `CK_SplitVertHoriz` | ✅ | Toggle vertical/horizontal split |
+| Ctrl+X | `CK_ExtendedKeyMap` | ✅ | Prefix for Ctrl+X extended bindings |
+| + (numpad) | `CK_Select` | ✅ | Select group |
+| - (numpad) | `CK_Unselect` | ✅ | Unselect group |
+| * (numpad) | `CK_SelectInvert` | ✅ | Invert selection |
+| Alt+\` | `CK_ScreenList` | ❌ | Screen list |
 
-### Display Modes
+### Ctrl+X Extended Bindings
 
-| Feature | Status | Notes |
-|---------|--------|-------|
-| ASCII text mode | ✅ | |
-| Hex view mode (F4) | ✅ | |
-| Toggle wrap (F2) | ✅ | |
-| Toggle hex/text (F3) | ✅ | |
-| Toggle nroff/formatted output (F9) | ❌ | |
-| Ruler line toggle (Alt+R) | ❌ | |
-| Change charset encoding (Alt+E) | ❌ | |
+| Key | CK_ Action | Status | Notes |
+|-----|-----------|--------|-------|
+| Ctrl+X D | `CK_CompareDirs` | ✅ | Compare directories |
+| Ctrl+X Ctrl+D | `CK_CompareFiles` | ✅ | Compare files (diff viewer) |
+| Ctrl+X A | `CK_VfsList` | ✅ | Active VFS list |
+| Ctrl+X P | `CK_PutCurrentPath` | ✅ | Put current path |
+| Ctrl+X Ctrl+P | `CK_PutOtherPath` | ✅ | Put other panel path |
+| Ctrl+X T | `CK_PutCurrentTagged` | ✅ | Put tagged filenames |
+| Ctrl+X Ctrl+T | `CK_PutOtherTagged` | ✅ | Put other panel tagged |
+| Ctrl+X C | `CK_ChangeMode` | ✅ | Chmod |
+| Ctrl+X O | `CK_ChangeOwn` | ✅ | Chown |
+| Ctrl+X E / Ctrl+X A | `CK_ChangeAttributes` | ✅ | Chattr |
+| Ctrl+X R | `CK_PutCurrentLink` | ✅ | Put current panel path as relative |
+| Ctrl+X Ctrl+R | `CK_PutOtherLink` | ✅ | Put other panel path as relative |
+| Ctrl+X L | `CK_Link` | ✅ | Create hard link |
+| Ctrl+X S | `CK_LinkSymbolic` | ✅ | Create absolute symlink |
+| Ctrl+X V | `CK_LinkSymbolicRelative` | ✅ | Create relative symlink |
+| Ctrl+X Ctrl+S | `CK_LinkSymbolicEdit` | ✅ | Edit symlink |
+| Ctrl+X I | `CK_PanelInfo` | ✅ | Toggle Info panel |
+| Ctrl+X Q | `CK_PanelQuickView` | ✅ | Toggle Quick View |
+| Ctrl+X H | `CK_HotListAdd` | ✅ | Add current dir to hotlist |
+| Ctrl+X J | `CK_Jobs` | ✅ | Background jobs |
+| Ctrl+X ! | `CK_ExternalPanelize` | ⚠️ | External panelize |
 
-### Search
+### Panel-Specific Bindings
+*(source: `default_panel_keymap[]`)*
 
-| Feature | Status | Notes |
-|---------|--------|-------|
-| Search dialog (F7) | ✅ | |
-| Case-sensitive toggle in search | ✅ | |
-| Regular expression search | ✅ | |
-| Hex pattern search | ✅ | |
-| `/` key — start regex search | ❌ | |
-
-### Bookmarks
-
-| Feature | Status | Notes |
-|---------|--------|-------|
-| Set bookmark (Ctrl+B) | ✅ | One bookmark |
-| Go to bookmark (Ctrl+P) | ✅ | |
-| Numeric bookmarks 0–9 (`[n]m` set, `[n]r` jump) | ❌ | Port only has one bookmark |
-
-### Other
-
-| Feature | Status | Notes |
-|---------|--------|-------|
-| View exit (F10 / Esc / Q) | ✅ | |
-| F1 in viewer — viewer-specific help | ❌ | Opens main help instead |
-| Display file size and offset in status | ✅ | |
+| Key | CK_ Action | Status | Notes |
+|-----|-----------|--------|-------|
+| Alt+T | `CK_CycleListingFormat` | ✅ | Cycle Full/Brief/Long/User modes |
+| Alt+O | `CK_PanelOtherCd` | ✅ | Other panel → dir under cursor |
+| Alt+L | `CK_PanelOtherCdLink` | ✅ | Other panel → symlink target dir |
+| F13/Shift+F3 | `CK_ViewRaw` | ✅ | View file raw (no encoding) |
+| F14/Shift+F4 | `CK_EditNew` | ✅ | Create new file in editor |
+| F15/Shift+F5 | `CK_CopySingle` | ✅ | Copy only cursor file |
+| F16/Shift+F6 | `CK_MoveSingle` | ✅ | Move only cursor file |
+| F18/Shift+F8 | `CK_DeleteSingle` | ✅ | Delete only cursor file |
+| Insert / Ctrl+T | `CK_Mark` | ✅ | Mark/unmark current file |
+| Shift+↓ | `CK_MarkDown` | ✅ | Mark and move down |
+| Shift+↑ | `CK_MarkUp` | ✅ | Mark and move up |
+| Alt+Shift+H | `CK_History` | ✅ | Panel directory history dialog |
+| Alt+U | `CK_HistoryNext` | ✅ | Navigate history forward |
+| Alt+Y | `CK_HistoryPrev` | ✅ | Navigate history back |
+| Alt+J | `CK_BottomOnScreen` | ✅ | Jump cursor to bottom of visible area |
+| Alt+R | `CK_MiddleOnScreen` | ✅ | Jump cursor to middle of visible area |
+| Alt+G | `CK_TopOnScreen` | ✅ | Jump cursor to top of visible area |
+| Ctrl+S / Alt+S | `CK_Search` | ✅ | Start/continue quick search |
+| Alt+I | `CK_PanelOtherSync` | ✅ | Sync other panel to active panel dir |
+| Alt+E | `CK_SelectCodepage` | ✅ | Change panel encoding |
 
 ---
 
-## 11. Built-in Editor (mcedit / F4)
+## 11. Built-in Viewer (mcview / F3)
+*(source: `src/viewer/`)*
 
-### File Operations
+### 11.1 Navigation
 
-| Feature | Status | Notes |
-|---------|--------|-------|
-| Open existing file | ✅ | |
-| Create new file (F4 on empty / Ctrl+N) | ✅ | Prompts for filename |
-| Open file dialog (Ctrl+O) | ❌ | |
-| Save (F2 / Ctrl+S) | ✅ | |
-| Save As (Shift+F2) | ✅ | |
-| Close / quit (F10 / Esc) | ✅ | Prompts if modified |
-| "Modified" indicator in status bar | ✅ | |
-| Auto-detect line endings (LF / CRLF) | ✅ | |
+| Feature | Key | Status | Notes |
+|---------|-----|--------|-------|
+| Scroll down one line | ↓ / J / Enter | ✅ | |
+| Scroll up one line | ↑ / K / Y | ✅ | |
+| Scroll down one page | Space / PgDn / Ctrl+V / F | ✅ | |
+| Scroll up one page | PgUp / B / Alt+V | ✅ | |
+| Go to beginning | G (lowercase) / Home / Ctrl+Home | ✅ | |
+| Go to end | G (uppercase) / End / Ctrl+End | ✅ | |
+| Scroll right | → / L | ✅ | Horizontal scroll in no-wrap mode |
+| Scroll left | ← / H | ✅ | |
+| Go to byte offset / line number | F5 | ✅ | In hex mode: byte offset; in text mode: line number |
+| Next file in directory | Ctrl+F | ✅ | Cycles through files in same directory |
+| Previous file in directory | Ctrl+B | ✅ | |
+| Close viewer | F10 / Esc / Q | ✅ | |
 
-### Cursor Movement
+### 11.2 Display Modes
 
-| Feature | Status | Notes |
-|---------|--------|-------|
-| Arrow keys | ✅ | |
-| Ctrl+Left / Ctrl+Right — word left/right | ✅ | |
-| Home / End | ✅ | |
-| Ctrl+Home / Ctrl+End | ✅ | |
-| Page Up / Page Down | ✅ | |
-| Go to line (Ctrl+G / Alt+L) | ✅ | |
+| Feature | Key | Status | Notes |
+|---------|-----|--------|-------|
+| Toggle text word-wrap | F2 | ✅ | Wraps long lines at screen width |
+| Toggle hex/text mode | F4 | ✅ | Hex shows offset + hex bytes + ASCII repr |
+| Toggle raw mode | F8 | ✅ | Shows control chars as `.` instead of interpreting them |
+| Toggle nroff formatting | F9 | ✅ | Strips `char\bchar` bold/underline sequences used by man pages |
+| Toggle column ruler | Alt+R | ✅ | Shows ruler line with column numbers below content |
+| Change encoding | Alt+E | ✅ | Opens encoding selection dialog; reloads file in chosen charset |
+| F1 — viewer-specific help | F1 | ✅ | Shows viewer key bindings help dialog |
 
-### Editing
+### 11.3 Search
 
-| Feature | Status | Notes |
-|---------|--------|-------|
-| Insert / overwrite mode toggle (Insert key) | ✅ | INS/OVR in status bar |
-| Backspace / Delete | ✅ | |
-| Enter — new line with auto-indent | ✅ | |
-| Shift+Enter — new line without auto-indent | ✅ | |
-| Tab — insert tab | ✅ | |
-| Ctrl+D — insert current date/time | ✅ | |
+| Feature | Key | Status | Notes |
+|---------|-----|--------|-------|
+| Search forward | F7 / / | ✅ | Dialog: pattern, case-sensitive, regex checkboxes |
+| Search backward | Shift+F7 | ✅ | Same dialog with Backward flag |
+| Repeat last search forward | N | ✅ | |
+| Repeat last search backward | Shift+N | ✅ | |
+| Regex search | | ✅ | `^`, `$`, `.`, `*`, `[...]` etc. |
+| Hex pattern search | | ✅ | Enter hex bytes as `\xNN` or raw hex string |
+| Highlight matched text | | ✅ | First match highlighted in cyan |
 
-### Selection & Clipboard
+### 11.4 Bookmarks (0–9)
 
-| Feature | Status | Notes |
-|---------|--------|-------|
-| Shift+Arrow — select text | ✅ | |
-| Ctrl+C — copy selection | ✅ | |
-| Ctrl+X — cut selection | ✅ | |
-| Ctrl+V — paste | ✅ | |
-| Ctrl+Insert — copy (alternate) | ✅ | |
-| Shift+Insert — paste (alternate) | ✅ | |
-| Shift+Delete — cut (alternate) | ✅ | |
-| Ctrl+A — select all | ✅ | |
-| Select column block (Alt+I) | ⚠️ | May vary |
+| Feature | Key | Status | Notes |
+|---------|-----|--------|-------|
+| Set bookmark 0 | Ctrl+B | ✅ | |
+| Go to bookmark 0 | Ctrl+P | ✅ | |
+| Set bookmark n (0–9) | [n]m (digit then m) | ✅ | Digit prefix selects bookmark slot |
+| Go to bookmark n (0–9) | [n]r (digit then r) | ✅ | |
+| Per-file settings remembered within session | | ✅ | mode, wrap, nroff remembered per filepath |
 
-### Search & Replace
+---
 
-| Feature | Status | Notes |
-|---------|--------|-------|
-| Find (F7) | ✅ | Dialog with case-sensitive + regex; pre-fills last search |
-| Find again / Shift+F7 | ✅ | Repeats last search without dialog |
-| Replace (F4 in search context / Ctrl+H in some builds) | ✅ | |
-| Replace again (Shift+F4) | ❌ | |
+## 12. Built-in Editor (mcedit / F4)
+*(source: `src/editor/`)*
 
-### Undo / Redo
+### 12.1 File Operations
 
-| Feature | Status | Notes |
-|---------|--------|-------|
-| Undo (Ctrl+Z / Ctrl+U) | ✅ | |
-| Redo (Ctrl+Y / Ctrl+R) | ✅ | Note: original uses Ctrl+R for macro record |
+| Feature | Key | Status | Notes |
+|---------|-----|--------|-------|
+| Open existing file | | ✅ | Pass on command line or from panel |
+| Create new file | F4 on empty slot / Ctrl+N / F14 | ✅ | Prompts for filename |
+| Open file dialog | Ctrl+O | ❌ | Not implemented |
+| Save | F2 / Ctrl+S | ✅ | Saves in-place; shows confirmation if file changed on disk |
+| Save As | Shift+F2 | ✅ | Prompts for new filename |
+| Close / quit | F10 / Esc | ✅ | Prompts "save?" if modified |
+| "Modified" indicator `*` in status bar | | ✅ | |
+| Auto-detect line endings (LF / CRLF) | | ✅ | Preserves original line endings |
 
-### Display
+### 12.2 Cursor Movement
 
-| Feature | Status | Notes |
-|---------|--------|-------|
-| Syntax highlighting (language auto-detected) | ✅ | |
-| Toggle syntax highlighting (Ctrl+T) | ✅ | Status bar shows "NoHL" when off |
-| Toggle line numbers (via F9 menu) | ✅ | |
-| Status bar with filename, line/col, INS/OVR, modified | ✅ | |
+| Feature | Key | Status | Notes |
+|---------|-----|--------|-------|
+| Move cursor | ↑ ↓ ← → | ✅ | |
+| Word left / word right | Ctrl+← / Ctrl+→ | ✅ | Skips over word characters |
+| Beginning / end of line | Home / End | ✅ | |
+| Beginning / end of file | Ctrl+Home / Ctrl+End | ✅ | |
+| Page up / page down | PgUp / PgDn | ✅ | |
+| Go to line number | Ctrl+G / Alt+L | ✅ | Prompts for line number; scrolls to it |
+| Go to matching bracket | Alt+B in some configs | ❌ | |
 
-### Editor Menu (F9)
+### 12.3 Editing
 
-| Feature | Status | Notes |
-|---------|--------|-------|
+| Feature | Key | Status | Notes |
+|---------|-----|--------|-------|
+| Insert / overwrite mode toggle | Insert | ✅ | Status bar shows INS / OVR |
+| Backspace / Delete | Backspace / Del | ✅ | |
+| Delete line | Ctrl+Y | ✅ | Cuts entire line to clipboard |
+| Delete to end of line | Alt+Y / Shift+F5? | ⚠️ | |
+| Delete word right | Alt+D | ✅ | |
+| Delete word left | Alt+BackSpace | ✅ | |
+| Enter — new line with auto-indent | Enter | ✅ | Matches indent of previous line |
+| Shift+Enter — new line without indent | Shift+Enter | ✅ | |
+| Tab — insert tab or spaces | Tab | ✅ | Uses "tab expansion" setting |
+| Ctrl+D — insert current date/time | Ctrl+D | ✅ | Inserts formatted timestamp |
+| Ctrl+Q — insert literal character | Ctrl+Q | ❌ | |
+| Transpose characters | Ctrl+T in some builds | ❌ | |
+
+### 12.4 Selection & Clipboard
+
+| Feature | Key | Status | Notes |
+|---------|-----|--------|-------|
+| Start/extend stream selection | Shift+Arrow | ✅ | Highlight arbitrary text region |
+| Toggle column/rectangular selection | Alt+B / F19? | ✅ | Selects a rectangular block across lines |
+| Copy selection to clipboard | Ctrl+C / Ctrl+Insert | ✅ | |
+| Cut selection | Ctrl+X / Shift+Del | ✅ | |
+| Paste clipboard | Ctrl+V / Shift+Insert | ✅ | |
+| Select all | Ctrl+A | ✅ | |
+| Copy column block | F5 (in column mode) | ✅ | |
+| Cut column block | F6 (in column mode) | ✅ | |
+| Paste column block | Ctrl+V (in column mode) | ✅ | Inserts each row at appropriate column |
+
+### 12.5 Search & Replace
+
+| Feature | Key | Status | Notes |
+|---------|-----|--------|-------|
+| Find dialog | F7 | ✅ | Pattern, case-sensitive, whole word, regex, backward; pre-fills last search |
+| Find again (no dialog) | Shift+F7 / Ctrl+L | ✅ | Repeats last search forward |
+| Replace dialog | F4 / Ctrl+H | ✅ | Search + replace pattern; "Replace all" button |
+| Replace again | Shift+F4 | ❌ | Not implemented |
+
+### 12.6 Undo / Redo / Macros
+
+| Feature | Key | Status | Notes |
+|---------|-----|--------|-------|
+| Undo | Ctrl+Z / Ctrl+U | ✅ | Unlimited undo stack |
+| Redo | Ctrl+Y / Ctrl+R | ✅ | Note: original uses Ctrl+R for macro record; port uses it for redo |
+| Start/stop macro recording | Ctrl+R (original) | ❌ | Not implemented; key is used for Redo |
+| Play back last macro | Ctrl+E (original) | ❌ | |
+| Word completion (Ctrl+Tab) | Ctrl+Tab | ❌ | Scans buffer for completions |
+| Spell check | Ctrl+F5 | ✅ | Invokes `aspell -a`; shows suggestion dialog |
+
+### 12.7 Display
+
+| Feature | Key | Status | Notes |
+|---------|-----|--------|-------|
+| Toggle syntax highlighting | Ctrl+T | ✅ | Status bar shows "NoHL" when off |
+| Toggle line number gutter | Via F9 menu | ✅ | Status bar shows "Nums" when on |
+| Status bar: filename, line/col, INS/OVR, modified | | ✅ | `file | Ln N, Col N | INS | Modified` |
+| Status bar: COL when column mode active | | ✅ | |
+
+### 12.8 Editor F9 Menu
+
+| Item | Status | Notes |
+|------|--------|-------|
 | Save | ✅ | |
 | Save As | ✅ | |
 | Find | ✅ | |
@@ -396,96 +580,102 @@ Accessed via F9 → Left / Right, or by clicking the panel.
 | Go to line | ✅ | |
 | Toggle line numbers | ✅ | |
 | Toggle syntax highlighting | ✅ | |
+| Spell check | ✅ | |
 | Close | ✅ | |
 
-### Advanced
+---
 
-| Feature | Status | Notes |
-|---------|--------|-------|
-| Macro recording (Ctrl+R start/stop in original) | ❌ | Ctrl+R is Redo in port |
-| Word completion (Ctrl+Tab) | ❌ | |
-| Spell checking | ❌ | |
-| Bookmarks (Ctrl+B set, Ctrl+P go to) | ✅ | |
-| Column/block selection | ⚠️ | |
+## 13. Built-in Diff Viewer (mcdiff)
+*(source: `src/diffviewer/`)*
+
+| Feature | Key | Status | Notes |
+|---------|-----|--------|-------|
+| Open two files side-by-side | | ✅ | Left panel file vs. right panel file |
+| Scroll down one line | ↓ | ✅ | |
+| Scroll up one line | ↑ | ✅ | |
+| Page down | PgDn | ✅ | |
+| Page up | PgUp | ✅ | |
+| Next change hunk | N / F7 | ✅ | |
+| Previous change hunk | P / F8 | ✅ | |
+| Close diff viewer | Q / F10 / Esc | ✅ | |
+| Edit left file | F4 | ✅ | Opens in internal editor |
+| Edit right file | F14/Shift+F4 | ✅ | |
+| Save merged result | F2 | ⚠️ | |
+| Syntax highlighting of diff hunks | | ✅ | Added/removed/changed lines in different colours |
+| Status bar: change count + navigation info | | ✅ | |
 
 ---
 
-## 12. Built-in Diff Viewer (mcdiff)
-
-| Feature | Status | Notes |
-|---------|--------|-------|
-| Side-by-side diff of two files | ✅ | |
-| Navigate diff hunks (next/previous) | ✅ | |
-| Syntax highlighting | ✅ | |
-| Search in diff | ✅ | |
-| Edit file from diff viewer | ✅ | |
-| Merge hunk (apply change) | ⚠️ | Basic; may not cover all cases |
-
----
-
-## 13. Virtual File System (VFS)
+## 14. Virtual File System (VFS)
 
 ### Architecture
 
 | Feature | Status | Notes |
 |---------|--------|-------|
-| Pluggable VFS provider interface | ✅ | IVfsProvider |
-| VFS path with scheme (local://, ftp://, sftp://, tar://) | ✅ | |
-| VFS path with `#enc:` encoding suffix | ✅ | |
-| Navigate into archives as directories | ⚠️ | Tar/zip providers exist |
-| VFS cache with configurable timeout | ✅ | |
+| Pluggable `IVfsProvider` interface | ✅ | `src/Mc.Core/Vfs/IVfsProvider.cs` |
+| VFS path with scheme (`local://`, `ftp://`, `sftp://`, `tar://`, `zip://`, `cpio://`, `extfs://`, `sfs://`) | ✅ | |
+| Path format: `scheme:///archive|inner/path` for archive VFSs | ✅ | Uses `|` as separator between archive path and inner path |
+| `#enc:NAME` encoding suffix in paths | ✅ | Applied to local paths via panel encoding dialog |
+| Navigate into archives as virtual directories | ✅ | Panel calls `ListDirectory()` on VFS provider |
+| VFS cache with configurable timeout | ✅ | `VfsCache` class |
+| VFS registry (`VfsRegistry`) routes calls to correct provider | ✅ | |
 
 ### VFS Providers
 
-| Provider | Status | Notes |
-|----------|--------|-------|
-| Local filesystem | ✅ | |
-| FTP | ⚠️ | Provider code exists; not registered by default |
-| SFTP | ⚠️ | Provider code exists; not registered by default |
-| TAR archives (.tar, .tar.gz, .tar.bz2, .tar.xz) | ⚠️ | Archive VFS exists |
-| ZIP archives | ⚠️ | |
-| CPIO archives | ⚠️ | |
-| FISH (FIles over SHell) | ❌ | |
-| External filesystem (extfs scripts) | ❌ | |
-| SFS (single-file filesystem) | ❌ | |
+| Provider | Scheme | Status | Notes |
+|----------|--------|--------|-------|
+| Local filesystem | `local://`, `file://` | ✅ | `LocalVfsProvider`; handles all native filesystem operations |
+| FTP | `ftp://` | ⚠️ | `FtpVfsProvider` using `FtpWebRequest`; not registered by default |
+| SFTP | `sftp://` | ⚠️ | `SftpVfsProvider` using SSH.NET; not registered by default |
+| TAR archives (`.tar`, `.tar.gz`, `.tar.bz2`, `.tar.xz`) | `tar://` | ⚠️ | `TarVfsProvider`; uses `System.Formats.Tar` + decompression streams |
+| ZIP archives (`.zip`) | `zip://` | ⚠️ | `ZipVfsProvider`; uses `System.IO.Compression.ZipFile`; read-only |
+| CPIO archives (`.cpio`, `.rpm`) | `cpio://` | ⚠️ | `CpioVfsProvider`; parses SVR4 newc format (magic `070701`/`070702`); RPM payload extraction via gzip scan |
+| External scripts (`extfs.d/`) | `extfs://` | ⚠️ | `ExtfsVfsProvider`; scans `/usr/lib/mc/extfs.d/`; invokes scripts with `list`/`copyout` commands; parses `ls -l` output |
+| SFS (single-file filesystem) | `sfs://` | ⚠️ | `SfsVfsProvider`; reads `mc.sfs` config; mounts archives to temp dirs via external helpers |
+| FISH (FIles over SHell) | `fish://` | ❌ | Not implemented; would use SSH + shell commands |
 
 ---
 
-## 14. File Operations
+## 15. File Operations (F5 / F6 / F8)
 
-### Copy (F5)
+### 15.1 Copy (F5) — `FileOperations.CopyAsync()`
 
 | Feature | Status | Notes |
 |---------|--------|-------|
 | Copy single file (cursor entry when nothing marked) | ✅ | |
 | Copy multiple marked files | ✅ | |
-| Copy directory recursively | ✅ | |
+| Copy directory recursively | ✅ | `CopyDirectoryAsync()` recurses into all subdirs |
 | Destination defaults to other panel path | ✅ | |
 | User-editable destination field | ✅ | |
-| Source mask / From: pattern field | ✅ | |
+| Source mask / From: pattern field | ✅ | Filters which marked files to copy |
 | Using shell patterns toggle | ✅ | |
-| Preserve attributes (timestamps, permissions) | ✅ | |
-| Overwrite confirmation | ✅ | |
+| Preserve attributes (timestamps, permissions) | ✅ | `PreserveAttrs()` copies mtime/atime/mode |
+| Overwrite confirmation dialog per-file | ✅ | |
 | Overwrite all / Skip all per-session | ✅ | |
-| Dive into subdirectory if exists | ⚠️ | Checkbox shown; not yet applied |
-| Stable symlinks option | ⚠️ | Checkbox shown; not yet applied |
-| Preserve ext2 attributes | ❌ | |
-| Background copy operation | ✅ | |
-| Progress dialog with file/byte counts | ✅ | |
-| Cancel operation | ✅ | |
+| Follow symlinks (copy target, not link) | ✅ | |
+| Dive into subdirectory if destination exists | ✅ | |
+| Stable symlinks (convert absolute to relative) | ✅ | `MakeRelativeSymlinkTarget()` |
+| Preserve ext2 attributes (lsattr/chattr) | ✅ | `TryCopyExt2Attributes()` via lsattr+chattr; Linux only |
+| Background copy operation | ✅ | Runs as `Task`; progress reported via `IProgress<>` |
+| Progress dialog with file/byte counts + percentage | ✅ | |
+| Cancel operation | ✅ | `CancellationToken` |
+| Truncate destination file on overwrite | ✅ | `LocalVfsProvider.OpenWrite` uses `FileMode.Create` |
 
-### Move / Rename (F6)
+### 15.2 Move / Rename (F6) — `FileOperations.MoveAsync()`
 
 | Feature | Status | Notes |
 |---------|--------|-------|
 | Rename single file (pre-fills current name) | ✅ | |
 | Move multiple marked files | ✅ | |
 | Source mask field | ✅ | |
-| Cross-device move (copy + delete) | ✅ | |
+| Same-device move via `rename()` / `File.Move()` | ✅ | |
+| Same-device directory move via `Directory.Move()` | ✅ | Fixed — was using `File.Move()` which fails for dirs |
+| Cross-device move fallback (copy+delete) for files | ✅ | |
+| Cross-device move fallback (copy+delete) for directories | ✅ | Fixed — now uses `CopyDirectoryAsync` + `DeleteDirectory` |
 | Background move | ✅ | |
 | Progress dialog | ✅ | |
 
-### Delete (F8)
+### 15.3 Delete (F8) — `FileOperations.DeleteAsync()`
 
 | Feature | Status | Notes |
 |---------|--------|-------|
@@ -493,230 +683,184 @@ Accessed via F9 → Left / Right, or by clicking the panel.
 | Delete multiple marked files | ✅ | |
 | Primary confirmation dialog | ✅ | |
 | Secondary per-directory "Delete recursively?" confirmation | ✅ | |
+| Recursive directory deletion | ✅ | `Directory.Delete(path, recursive: true)` |
 | Progress dialog | ✅ | |
 | Cancel operation | ✅ | |
 
-### Mkdir (F7)
+### 15.4 Mkdir (F7)
 
 | Feature | Status | Notes |
 |---------|--------|-------|
 | Create single directory | ✅ | |
-| Recursive parent creation | ✅ | |
-
-### Links
-
-| Feature | Status | Notes |
-|---------|--------|-------|
-| Hard link (Ctrl+X L) | ✅ | |
-| Absolute symlink (Ctrl+X S) | ✅ | |
-| Relative symlink (Ctrl+X V) | ✅ | |
-| Edit symlink target | ✅ | With confirmation |
-
-### Permissions / Ownership
-
-| Feature | Status | Notes |
-|---------|--------|-------|
-| Chmod — rwx checkboxes per user/group/other | ✅ | |
-| Chmod — special bits (setuid, setgid, sticky) | ✅ | |
-| Chmod — octal input field | ✅ | |
-| Chmod — Set all (apply to all marked files) | ✅ | |
-| Chown — owner listbox from /etc/passwd | ✅ | |
-| Chown — group listbox from /etc/group | ✅ | |
-| Chown — Set all | ✅ | |
-| Advanced chown (combined chmod + chown dialog) | ✅ | |
-| Chattr — ext2 file attributes (append-only, immutable, etc.) | ✅ | Via lsattr/chattr |
+| Recursive parent creation (mkdir -p) | ✅ | `Directory.CreateDirectory()` creates all parents |
 
 ---
 
-## 15. Search / Find
-
-### Find File Dialog (Alt+?)
+## 16. Find File Dialog (Alt+?)
 
 | Feature | Status | Notes |
 |---------|--------|-------|
-| Filename pattern (shell glob) | ✅ | |
-| Content search (grep-like) | ✅ | |
-| Case sensitive toggle | ✅ | |
-| Start directory field | ✅ | |
+| Filename pattern (shell glob, `*` and `?`) | ✅ | |
+| Content search (grep-like text pattern) | ✅ | |
+| Case-sensitive toggle (for both filename and content) | ✅ | |
+| Use regular expressions toggle | ✅ | |
+| Start directory field | ✅ | Defaults to active panel directory |
 | Follow symlinks toggle | ✅ | |
-| Skip hidden directories toggle | ✅ | |
-| Date/time filter (modified before/after) | ❌ | |
-| File size filter (larger/smaller than) | ❌ | |
-| Ignore directories list | ❌ | |
-| Real-time incremental results | ✅ | |
-| Suspend / Continue search | ✅ | |
+| Skip hidden directories (dot-dirs) | ✅ | |
+| Date/time filter (modified before/after) | ❌ | Not implemented |
+| File size filter (larger/smaller than N bytes) | ❌ | Not implemented |
+| Ignore directories list | ❌ | Not implemented |
+| Real-time incremental results list | ✅ | Results shown as search progresses |
+| Suspend / Continue search | ✅ | Stop button pauses; Continue resumes |
 | View found file (F3) | ✅ | |
 | Edit found file (F4) | ✅ | |
 | Navigate panel to found file's directory | ✅ | |
-| Panelize results into panel | ⚠️ | Injects matching files into panel |
+| Panelize results into active panel | ⚠️ | Injects matching files into panel as virtual listing |
 | Again button — reopen search dialog | ✅ | |
 
 ---
 
-## 16. Directory Features
+## 17. Directory & Navigation Features
 
-| Feature | Status | Notes |
-|---------|--------|-------|
-| Directory hotlist (Ctrl+\ / Ctrl+F) | ✅ | Hierarchical groups |
-| Add current dir to hotlist (Ctrl+X H) | ✅ | |
-| Per-panel directory history (Alt+Y back, Alt+U forward) | ✅ | |
-| Directory history dialog (Alt+H) | ✅ | |
-| Swap panels (Ctrl+U) | ✅ | |
-| Synchronise panels — inactive = active path (Alt+I) | ✅ | |
-| Compare directories (Ctrl+X D) | ✅ | Quick / Size-only / Thorough |
-| Show directory sizes | ✅ | |
-| Quick CD (Alt+C) | ✅ | |
-| Directory tree (persistent panel mode) | ✅ | |
-| Tree with F2 rescan / F8 delete-dir | ✅ | |
-
----
-
-## 17. Subshell Integration
-
-| Feature | Status | Notes |
-|---------|--------|-------|
-| Ctrl+O — suspend MC, run interactive shell | ✅ | |
-| Shell inherits panel's current directory | ✅ | |
-| Return to MC from shell (type `exit` or Ctrl+D) | ✅ | |
-| Subshell with typed command (type command then Ctrl+O) | ⚠️ | |
-| Shell prompt shown in command line | ⚠️ | Simplified prompt |
-| Shell command output displayed | ⚠️ | Via "Show output" setting |
-| Multiple subshell screens (screen list) | ❌ | |
+| Feature | Key | Status | Notes |
+|---------|-----|--------|-------|
+| Directory hotlist (bookmarks) | Ctrl+\ | ✅ | Hierarchical groups; Add/Remove/New group/Goto |
+| Add current dir to hotlist | Ctrl+X H | ✅ | Adds active panel path to hotlist |
+| Per-panel directory history | Alt+Y / Alt+U | ✅ | Each panel has independent history stack |
+| Directory history dialog | Alt+H | ✅ | Shows full history; Enter navigates there |
+| Swap panels | Ctrl+U | ✅ | Exchange left↔right panel directories |
+| Synchronise panels (active → inactive) | Alt+I | ✅ | Inactive panel navigates to active panel's dir |
+| Compare directories | Ctrl+X D | ✅ | Quick / Size-only / Thorough |
+| Show directory sizes | Ctrl+Space | ✅ | Calculates and shows sizes for marked dirs |
+| Quick CD | Alt+C | ✅ | Prompts for directory path with completion |
+| Directory tree panel mode | | ✅ | F9 → Left/Right → Tree |
+| Tree: F2 rescan | F2 (in tree) | ✅ | |
+| Tree: F8 delete dir | F8 (in tree) | ✅ | |
+| Navigate other panel to dir under cursor | Alt+O | ✅ | |
+| Navigate other panel to symlink target | Alt+L | ✅ | |
 
 ---
 
-## 18. User Menu (F2)
+## 18. Subshell Integration
 
-| Feature | Status | Notes |
-|---------|--------|-------|
-| Load from ~/.config/mc/menu or system default | ✅ | |
-| Display menu entries with hotkey letters | ✅ | |
-| Execute entry by pressing hotkey letter | ✅ | |
-| Condition lines (`+` / `=`) filter entries | ✅ | `f`/`d` pattern conditions + `!` negation |
-| `%f` substitution (current filename) | ✅ | |
-| `%d` substitution (current directory) | ✅ | |
-| `%p` / `%P` substitutions | ⚠️ | |
-| Other `%` macro substitutions | ⚠️ | |
-| Edit user menu file | ✅ | |
+| Feature | Key | Status | Notes |
+|---------|-----|--------|-------|
+| Suspend MC, open interactive shell | Ctrl+O | ✅ | Uses `System.Diagnostics.Process` to launch `$SHELL` |
+| Shell inherits panel's current directory | | ✅ | `WorkingDirectory` set to active panel path |
+| Return to MC when shell exits | | ✅ | MC resumes after process exits |
+| Subshell typed command piped (type cmd then Ctrl+O) | | ⚠️ | |
+| Shell prompt shown in command line | | ⚠️ | Simplified `path> ` prompt (not real shell prompt) |
+| Multiple subshell screens / screen list | Alt+\` | ❌ | Not implemented |
 
 ---
 
-## 19. Configuration System
+## 19. User Menu (F2)
+*(source: `src/usermenu.c`)*
 
 | Feature | Status | Notes |
 |---------|--------|-------|
-| Config file: `~/.config/mc/ini` | ✅ | |
-| INI format sections: `[Midnight-Commander]`, `[Panels]`, `[Layout]` | ✅ | |
-| Auto-save on exit | ✅ | When "Auto save setup" is on |
+| Load from `~/.config/mc/menu` (user) or `/etc/mc/mc.menu` (system) | ✅ | |
+| Display menu entries with hotkey letters | ✅ | First char of each entry is hotkey |
+| Execute entry by pressing hotkey letter | ✅ | Runs associated shell command |
+| Condition lines (`+` / `=` prefix) filter entries | ✅ | `f pattern` = current file matches; `d` = directory; `!` = negate |
+| `%f` macro — current filename | ✅ | |
+| `%d` macro — current directory | ✅ | |
+| `%p` macro — current filename (full path) | ⚠️ | |
+| `%s` macro — selected/tagged files | ⚠️ | |
+| `%t` macro — tagged filenames | ⚠️ | |
+| `%b` macro — filename without extension | ⚠️ | |
+| `%n` macro — filename stripped of leading dot | ⚠️ | |
+| `%e` macro — file extension | ⚠️ | |
+| `%l` macro — symlink target | ⚠️ | |
+| `%x` macro — filename stripped of extension | ⚠️ | |
+| Edit user menu file | | ✅ | Opens in internal editor |
+
+---
+
+## 20. Configuration System
+
+| Feature | Status | Notes |
+|---------|--------|-------|
+| Config file: `~/.config/mc/ini` | ✅ | INI format with `[Section]` headers |
+| Sections: `[Midnight-Commander]`, `[Panels]`, `[Layout]`, `[Colors]` | ✅ | |
+| Auto-save on exit (when "Auto save setup" on) | ✅ | |
 | Save setup explicitly (Options → Save setup) | ✅ | |
 | Save/restore panel paths | ✅ | |
 | Save/restore sort order per panel | ✅ | |
 | Save/restore active skin | ✅ | |
-| Skin/theme system (INI-format skin files) | ✅ | |
-| System skin files from /usr/share/mc/skins/ | ✅ | |
-| User skin files from ~/.local/share/mc/skins/ | ✅ | |
-| Extension file (`mc.ext`) — file open rules | ✅ | |
-| File highlight/colour file (`mc.filecolor`) | ✅ | |
-| Key bindings configurable (keybind file) | ⚠️ | Basic table shown; runtime rebinding not supported |
+| Skin/theme system (INI-format `.ini` skin files) | ✅ | |
+| System skins from `/usr/share/mc/skins/` | ✅ | |
+| User skins from `~/.local/share/mc/skins/` | ✅ | |
+| Extension file (`mc.ext`) — file open/view/edit rules | ✅ | Pattern matching by file extension |
+| File highlight/colour file (`mc.filecolor`) | ✅ | Per-extension colour overrides |
+| Key bindings configurable (key binding file) | ⚠️ | Display table shown; runtime rebinding via Learn keys dialog |
+| Hints file (`~/.config/mc/hints`) | ❌ | Rotating tip bar not implemented |
 
 ---
 
-## 20. Global Key Bindings
+## 21. File Type Colour Coding
 
-| Key | Action | Status |
-|-----|--------|--------|
-| F1 | Help | ✅ |
-| F2 | User menu | ✅ |
-| F3 | View | ✅ |
-| F4 | Edit | ✅ |
-| F5 | Copy | ✅ |
-| F6 | Rename/Move | ✅ |
-| F7 | Mkdir | ✅ |
-| F8 | Delete | ✅ |
-| F9 | Menu bar | ✅ |
-| F10 | Quit | ✅ |
-| Tab | Switch panel | ✅ |
-| Shift+Tab | Switch panel (reverse) | ✅ |
-| Ctrl+R | Redraw screen | ✅ |
-| Ctrl+L | Redraw screen (alias) | ✅ |
-| Ctrl+U | Swap panels | ✅ |
-| Ctrl+O | Shell | ✅ |
-| Ctrl+F | Hotlist | ✅ |
-| Ctrl+\ | Hotlist (alt) | ✅ |
-| Ctrl+H / Alt+. | Toggle hidden files | ✅ |
-| Ctrl+S | Sort dialog | ✅ |
-| Ctrl+Space | Calculate dir size | ✅ |
-| Alt+C | Quick CD | ✅ |
-| Alt+? | Find file | ✅ |
-| Alt+I | Synchronise panels | ✅ |
-| Alt+H | Directory history | ✅ |
-| Alt+Y | Dir history back | ✅ |
-| Alt+U | Dir history forward | ✅ |
-| Alt+T | Cycle listing mode | ✅ |
-| Alt+, | Toggle split direction | ✅ |
-| Alt+G | Jump to first entry | ✅ |
-| Alt+R | Jump to middle entry | ✅ |
-| Alt+J | Jump to last entry | ✅ |
-| Ctrl+I | Show file info | ✅ |
-| Ctrl+X C | Chmod | ✅ |
-| Ctrl+X O | Chown | ✅ |
-| Ctrl+X A | Chattr | ✅ |
-| Ctrl+X D | Compare directories | ✅ |
-| Ctrl+X H | Add to hotlist | ✅ |
-| Ctrl+X L | Create link | ✅ |
-| Ctrl+X S | Create symlink | ✅ |
-| Ctrl+X V | Create relative symlink | ✅ |
-| Ctrl+X T | Paste tagged filenames | ✅ |
-| Ctrl+X Ctrl+P | Paste other panel path | ✅ |
-| Ctrl+X Q | Toggle quick view | ✅ |
-| Ctrl+X I | Toggle info panel | ✅ |
-| Ctrl+Enter | Paste filename to cmdline | ✅ |
-| Ctrl+Shift+Enter | Paste other panel filename | ✅ |
-| Insert | Toggle mark | ✅ |
-| + | Select group | ✅ |
-| \ | Unselect group | ✅ |
-| * | Invert selection | ✅ |
-| Backspace | Navigate to parent | ✅ |
+| Type | Colour (default Blue skin) | Status |
+|------|---------------------------|--------|
+| Regular file | Gray on Blue | ✅ |
+| Directory | White on Blue | ✅ |
+| Executable | Bright Green on Blue | ✅ |
+| Symlink | Cyan on Blue | ✅ |
+| Archive / compressed (`.tar`, `.gz`, `.zip`, etc.) | Bright Cyan on Blue | ✅ |
+| Marked file | Bright Yellow on Blue | ✅ |
+| Cursor / selected (active panel) | Black on Cyan | ✅ |
+| Cursor (inactive panel) | White on Blue | ✅ |
+| Marked + cursor (active) | Bright Yellow on Cyan | ✅ |
+| Block device | Bright Magenta on Blue | ✅ |
+| Character device | Magenta on Blue | ✅ |
+| FIFO / named pipe | Dark Gray on Blue | ✅ |
+| Unix socket | Bright Magenta on Blue | ✅ |
+| Symlink-to-directory | Directory colour (White) | ✅ |
+| Status bar | Black on Cyan | ✅ |
+| Panel header | Bright Yellow on Blue | ✅ |
+| Active sort column header | Bold/highlighted | ✅ |
 
 ---
 
-## 21. Miscellaneous Features
+## 22. Miscellaneous / Port-specific Features
 
 | Feature | Status | Notes |
 |---------|--------|-------|
-| Viewed/edited file history | ✅ | |
+| Viewed/edited file history (MRU) | ✅ | |
 | External panelize (inject shell output into panel) | ✅ | |
-| External VFS list with Browse / Free VFSs | ✅ | |
+| Active VFS list with Browse / Free VFSs | ✅ | |
 | Background file operations with job manager | ✅ | |
 | Confirmation settings (delete, overwrite, exit) | ✅ | |
-| "Verbose operation" (show file names during ops) | ✅ | |
+| "Verbose operation" (show filenames during ops) | ✅ | |
 | "Compute totals" before starting operation | ✅ | |
 | Quick view panel (live file preview) | ✅ | |
 | Info panel (live file attributes) | ✅ | |
-| Panelize (inject filenames into panel) | ⚠️ | |
-| Batch rename (mc does not have; port has extra Tools menu) | ✅ | Port-specific feature |
+| Batch rename dialog | ✅ | Port-specific extra feature; `Tools` menu |
+| "About..." dialog with version/copyright | ✅ | |
 
 ---
 
-## 22. Not Implemented / Out of Scope
+## 23. Not Implemented / Out of Scope
 
 | Feature | Reason |
 |---------|--------|
-| GPM mouse (Linux GPM daemon) | Obsolete; xterm protocol used instead |
-| Console saver (cons.saver.c) | Linux VT-specific, obsolete |
-| Ext2/3/4 native attribute edit beyond chattr | Very niche; chattr covers it |
-| FISH protocol (FIles over SHell) | Complex; SSH is preferred |
-| Multiple subshell screens | Complex TUI multiplexing |
-| Macro recording in editor | Ctrl+R conflict; not yet resolved |
+| GPM mouse (Linux GPM daemon) | Obsolete; xterm mouse protocol used instead |
+| Console saver (`cons.saver.c`) | Linux VT-specific, obsolete |
+| FISH protocol (FIles over SHell) | Complex; SSH/SFTP is preferred |
+| Multiple subshell screens | Complex TUI multiplexing not in scope |
+| Macro recording in editor (Ctrl+R) | Ctrl+R is bound to Redo in port |
 | Word completion in editor (Ctrl+Tab) | Not yet implemented |
-| Hyperlink navigation in help | Terminal.Gui constraint |
+| Hints bar (rotating tips) | Not yet implemented |
 | Date/size filters in Find dialog | Not yet implemented |
-| Viewer: next/previous file (Ctrl+F / Ctrl+B) | Not yet implemented |
-| Viewer: nroff mode (F9) | Not yet implemented |
-| Viewer: numeric bookmarks (0–9) | Not yet implemented |
-| Command line Tab completion | Not yet implemented |
+| Ext2/3/4 native attribute ioctl (beyond chattr) | `chattr` covers it |
+| Command line Tab/Alt+Tab completion | Not yet implemented |
+| Ctrl+Q quote-char in cmdline | Not yet implemented |
+| Replace again (Shift+F4) in editor | Not yet implemented |
+| Go to matching bracket in editor | Not yet implemented |
+| Listmode editor (LISTMODE_EDITOR compile flag feature) | Niche; not enabled in standard builds |
 
 ---
 
-*Last updated: 2026-03-01*
+*Last updated: 2026-03-02*
 *Based on GNU MC 4.8.x source: https://github.com/MidnightCommander/mc*
+*Source files: `src/filemanager/filemanager.c`, `src/keymap.c`, `src/viewer/`, `src/editor/`*
