@@ -186,8 +186,16 @@ public sealed class FileOperations
             catch
             {
                 // Cross-device: copy then delete
-                await CopySingleFileAsync(src, destPath, stat.Size, false, false, prog, progress, ct);
-                _vfs.DeleteFile(src);
+                if (stat.IsDirectory)
+                {
+                    await CopyDirectoryAsync(src, destPath, onConflict, null, false, false, false, false, prog, progress, ct);
+                    _vfs.DeleteDirectory(src, recursive: true);
+                }
+                else
+                {
+                    await CopySingleFileAsync(src, destPath, stat.Size, false, false, prog, progress, ct);
+                    _vfs.DeleteFile(src);
+                }
             }
             prog.BytesDone += stat.Size;
         }

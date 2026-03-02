@@ -69,7 +69,7 @@ public sealed class LocalVfsProvider : IVfsProvider
     public Stream OpenWrite(VfsPath path)
     {
         Directory.CreateDirectory(System.IO.Path.GetDirectoryName(path.Path)!);
-        return File.OpenWrite(path.Path);
+        return new FileStream(path.Path, FileMode.Create, FileAccess.Write);
     }
 
     public Stream OpenAppend(VfsPath path) => File.Open(path.Path, FileMode.Append, FileAccess.Write);
@@ -80,7 +80,12 @@ public sealed class LocalVfsProvider : IVfsProvider
         => File.Copy(source.Path, destination.Path, overwrite: true);
 
     public void MoveFile(VfsPath source, VfsPath destination)
-        => File.Move(source.Path, destination.Path, overwrite: true);
+    {
+        if (Directory.Exists(source.Path))
+            Directory.Move(source.Path, destination.Path);
+        else
+            File.Move(source.Path, destination.Path, overwrite: true);
+    }
 
     public void CreateSymlink(VfsPath target, VfsPath link)
         => File.CreateSymbolicLink(link.Path, target.Path);
