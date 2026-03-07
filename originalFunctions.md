@@ -24,7 +24,7 @@ in the original GNU Midnight Commander. Used to verify completeness of the .NET 
 | Single `│` divider between panels | ✅ | |
 | Command line at bottom | ✅ | |
 | Function key bar (F1–F10 labels) at very bottom | ✅ | |
-| Hints bar (rotating tip strip between panels and cmdline) | ❌ | Uses ~/.config/mc/hints |
+| Hints bar (rotating tip strip between panels and cmdline) | ✅ | `HintsBarView.cs` — 20 built-in tips, `NextTip()` on navigation |
 | Panel path in top border, centered, with trailing `/` | ✅ | |
 | Active panel has brighter frame colour | ✅ | |
 | Panel summary line ("N files, M dirs, X bytes free") | ✅ | |
@@ -52,7 +52,7 @@ only their titles differ (set dynamically by `update_menu()`).
 | **Quick view** | `CK_PanelQuickView` | Ctrl+X Q | ✅ | Toggles Quick View mode on the **inactive** panel — shows a live auto-refreshed preview of the file under cursor in the active panel. The inactive panel shows file content (text / hex). Uses internal viewer logic. |
 | **Info** | `CK_PanelInfo` | Ctrl+X I | ✅ | Toggles Info mode on inactive panel — shows owner, group, permissions, size, timestamps, hard-link count, inode, device of the file under cursor |
 | **Tree** | `CK_PanelTree` | | ✅ | Toggles Tree mode on inactive panel — shows navigable directory tree; cursor keys navigate, Enter changes the active panel to selected dir; F2 rescans tree |
-| **Panelize** | `CK_Panelize` | Ctrl+X ! | ⚠️ | Runs a shell command (prompted) and loads the output filenames as a virtual static listing in the active panel; operations work on those files; re-runs to refresh |
+| **Panelize** | `CK_Panelize` | Ctrl+X ! | ✅ | Runs a shell command (prompted) and loads the output filenames as a virtual static listing in the active panel; wired to `ExternalPanelize()` |
 
 *(separator)*
 
@@ -104,8 +104,8 @@ Accessed via **F9 → File**.
 
 | Menu Item | CK_ Command | Shortcut | Status | What it does |
 |-----------|-------------|----------|--------|--------------|
-| **Copy** | `CK_Copy` | F5 | ⚠️ | Opens Copy dialog: destination (defaults to other panel path), source mask, using shell patterns toggle, preserve attributes, follow symlinks, dive into subdirs, stable symlinks, ext2 attrs; copies marked files (or current if none marked) recursively |
-| **Rename/Move** | `CK_Move` | F6 | ⚠️ | Opens Move/Rename dialog: same options as Copy; for single file = rename in-place; for multiple = move to destination directory; uses rename() syscall (falls back to copy+delete on cross-device) |
+| **Copy** | `CK_Copy` | F5 | ✅ | Opens Copy dialog: destination (defaults to other panel path), source mask, using shell patterns toggle, preserve attributes, follow symlinks, dive into subdirs, stable symlinks, ext2 attrs; copies marked files (or current if none marked) recursively |
+| **Rename/Move** | `CK_Move` | F6 | ✅ | Opens Move/Rename dialog: same options as Copy; for single file = rename in-place; for multiple = move to destination directory; uses rename() syscall (falls back to copy+delete on cross-device) |
 | **Mkdir** | `CK_MakeDir` | F7 | ✅ | Prompts for directory name; creates it including intermediate parents if path contains `/` |
 | **Delete** | `CK_Delete` | F8 | ✅ | Shows confirmation dialog listing count of marked files (or current if none); for directories asks "Delete recursively?"; deletes via remove()/rmdir() |
 | **Quick cd** | `CK_CdQuick` | Alt+C | ✅ | Inline cd dialog with tab-completion; navigates active panel to typed path |
@@ -160,7 +160,7 @@ Accessed via **F9 → Command**.
 | **Switch panels on/off** | `CK_Shell` | Ctrl+O | ✅ | Suspends MC, drops to interactive shell in same directory; MC resumes when shell exits (type `exit` or Ctrl+D); if subshell enabled, shell is persistent PTY |
 | **Compare directories** | `CK_CompareDirs` | Ctrl+X D | ✅ | Marks files in both panels that differ: method dialog offers Quick (names+sizes), Size-only, Thorough (byte-by-byte MD5 comparison) |
 | **Compare files** | `CK_CompareFiles` | Ctrl+X Ctrl+D | ✅ | Opens internal diff viewer (mcdiff) comparing the file under cursor in left vs. right panel |
-| **External panelize** | `CK_ExternalPanelize` | Ctrl+X ! | ⚠️ | Prompts for shell command (e.g. `find . -name "*.c"`); injects each output line as a filename into active panel as virtual listing |
+| **External panelize** | `CK_ExternalPanelize` | Ctrl+X ! | ✅ | Prompts for shell command (e.g. `find . -name "*.c"`); injects each output line as a filename into active panel as virtual listing |
 | **Show directory sizes** | `CK_DirSize` | Ctrl+Space | ✅ | Calculates disk usage for marked directories (or current if none marked); updates the size shown in the panel listing |
 
 ### 4.2 History
@@ -177,7 +177,7 @@ Accessed via **F9 → Command**.
 | **Directory hotlist** | `CK_HotList` | Ctrl+\ | ✅ | Shows hierarchical bookmark list; Add (Ctrl+H adds current dir), New group, Up, Remove, Goto; breadcrumb shows current group path; Enter navigates to bookmarked dir |
 | **Active VFS list** | `CK_VfsList` | Ctrl+X A | ✅ | Lists all currently mounted VFS paths (FTP, SFTP, tar, etc.); Browse button changes active panel to selected VFS; Free VFSs button unmounts all; individual Free button per entry |
 | **Background jobs** | `CK_Jobs` | Ctrl+X J | ✅ | Lists running/finished background copy/move operations; shows filename + status; Kill button to terminate a job; dialog auto-refreshes |
-| **Screen list** | `CK_ScreenList` | Alt+\` | ❌ | Lists open editor/viewer screens (MC's internal screen multiplexer); not implemented in .NET port |
+| **Screen list** | `CK_ScreenList` | Alt+\` | ✅ | Lists open editor/viewer screens; `ShowScreenList()` in `McApplication.cs` — lists MC + all editor/viewer entries |
 
 ### 4.4 Editor Files
 
@@ -272,12 +272,12 @@ Accessed via **F9 → Options**.
 
 | Key | Label | CK_ Command | Status | What it does |
 |-----|-------|-------------|--------|--------------|
-| F1 | Help | `CK_Help` | ⚠️ | Opens built-in help viewer with table of contents; hypertext cross-references; topic navigation history |
-| F2 | Menu | `CK_UserMenu` | ⚠️ | Shows User Menu (loaded from `~/.config/mc/menu`); supports condition lines |
+| F1 | Help | `CK_Help` | ✅ | Opens built-in help viewer with table of contents; hypertext cross-references; topic navigation history |
+| F2 | Menu | `CK_UserMenu` | ✅ | Shows User Menu (loaded from `~/.config/mc/menu`); supports condition lines |
 | F3 | View | `CK_View` | ✅ | Opens file in internal viewer; if on directory, navigates into it |
 | F4 | Edit | `CK_Edit` | ✅ | Opens file in internal editor; prompts for filename if on empty space |
-| F5 | Copy | `CK_Copy` | ⚠️ | Copy dialog; copies marked files (or current) to other panel or specified path |
-| F6 | RenMov | `CK_Move` | ⚠️ | Rename/Move dialog |
+| F5 | Copy | `CK_Copy` | ✅ | Copy dialog; copies marked files (or current) to other panel or specified path |
+| F6 | RenMov | `CK_Move` | ✅ | Rename/Move dialog |
 | F7 | Mkdir | `CK_MakeDir` | ✅ | Create directory dialog |
 | F8 | Delete | `CK_Delete` | ✅ | Delete with confirmation |
 | F9 | PullDn | `CK_Menu` | ✅ | Opens/activates menu bar |
@@ -313,16 +313,16 @@ Accessed via **F9 → Options**.
 | Ctrl+X Ctrl+T — paste tagged from other panel | Ctrl+X Ctrl+T | ✅ | |
 | Ctrl+X P — put active panel path | Ctrl+X P | ✅ | |
 | Ctrl+X Ctrl+P — put other panel path | Ctrl+X Ctrl+P | ✅ | |
-| Alt+Tab — filename / command completion | Alt+Tab | ❌ | Completes against directory listing and commands in PATH |
-| Tab — completion when cmdline focused | Tab | ❌ | |
-| Ctrl+A — beginning of line (Emacs) | Ctrl+A | ⚠️ | Depends on TextField widget |
-| Ctrl+E — end of line | Ctrl+E | ⚠️ | |
-| Ctrl+K — kill to end of line | Ctrl+K | ⚠️ | |
-| Ctrl+W — kill word backwards | Ctrl+W | ⚠️ | |
-| Ctrl+Y — yank killed text | Ctrl+Y | ⚠️ | |
-| Alt+B — word left | Alt+B | ⚠️ | |
-| Alt+F — word right | Alt+F | ⚠️ | |
-| Ctrl+Q — quote next character | Ctrl+Q | ❌ | Inserts next keystroke as literal character (e.g. inserts Ctrl+C as text) |
+| Alt+Tab — filename / command completion | Alt+Tab | ✅ | Same as Tab — `CommandLineView.cs` wires both triggers to `TabComplete()` |
+| Tab — completion when cmdline focused | Tab | ✅ | `CommandLineView.cs` — directory/file completion with longest-prefix auto-fill and popup list |
+| Ctrl+A — beginning of line (Emacs) | Ctrl+A | ✅ | Implemented in `CommandLineView.cs` |
+| Ctrl+E — end of line | Ctrl+E | ✅ | |
+| Ctrl+K — kill to end of line | Ctrl+K | ✅ | Kill ring stored; Ctrl+Y yanks it back |
+| Ctrl+W — kill word backwards | Ctrl+W | ✅ | |
+| Ctrl+Y — yank killed text | Ctrl+Y | ✅ | |
+| Alt+B — word left | Alt+B | ✅ | |
+| Alt+F — word right | Alt+F | ✅ | |
+| Ctrl+Q — quote next character | Ctrl+Q | ✅ | `_quoteNext` state in `CommandLineView.cs` |
 
 ---
 
@@ -334,12 +334,12 @@ Accessed via **F9 → Options**.
 | Key | CK_ Action | Status | Notes |
 |-----|-----------|--------|-------|
 | Tab / Ctrl+I | `CK_ChangePanel` | ✅ | Switch active panel |
-| F1 | `CK_Help` | ⚠️ | Help |
-| F2 | `CK_UserMenu` | ⚠️ | User menu |
+| F1 | `CK_Help` | ✅ | Help |
+| F2 | `CK_UserMenu` | ✅ | User menu |
 | F3 | `CK_View` | ✅ | Viewer |
 | F4 | `CK_Edit` | ✅ | Editor |
-| F5 | `CK_Copy` | ⚠️ | Copy |
-| F6 | `CK_Move` | ⚠️ | Move/Rename |
+| F5 | `CK_Copy` | ✅ | Copy |
+| F6 | `CK_Move` | ✅ | Move/Rename |
 | F7 | `CK_MakeDir` | ✅ | Mkdir |
 | F8 | `CK_Delete` | ✅ | Delete |
 | F9 | `CK_Menu` | ✅ | Open menu bar |
@@ -369,7 +369,7 @@ Accessed via **F9 → Options**.
 | + (numpad) | `CK_Select` | ✅ | Select group |
 | - (numpad) | `CK_Unselect` | ✅ | Unselect group |
 | * (numpad) | `CK_SelectInvert` | ✅ | Invert selection |
-| Alt+\` | `CK_ScreenList` | ❌ | Screen list |
+| Alt+\` | `CK_ScreenList` | ✅ | Screen list |
 
 ### Ctrl+X Extended Bindings
 
@@ -395,7 +395,7 @@ Accessed via **F9 → Options**.
 | Ctrl+X Q | `CK_PanelQuickView` | ✅ | Toggle Quick View |
 | Ctrl+X H | `CK_HotListAdd` | ✅ | Add current dir to hotlist |
 | Ctrl+X J | `CK_Jobs` | ✅ | Background jobs |
-| Ctrl+X ! | `CK_ExternalPanelize` | ⚠️ | External panelize |
+| Ctrl+X ! | `CK_ExternalPanelize` | ✅ | External panelize |
 
 ### Panel-Specific Bindings
 *(source: `default_panel_keymap[]`)*
@@ -490,7 +490,7 @@ Accessed via **F9 → Options**.
 |---------|-----|--------|-------|
 | Open existing file | | ✅ | Pass on command line or from panel |
 | Create new file | F4 on empty slot / Ctrl+N / F14 | ✅ | Prompts for filename |
-| Open file dialog | Ctrl+O | ❌ | Not implemented |
+| Open file dialog | Ctrl+O | ✅ | `EditorView.OpenFileDialog()` — checks unsaved changes, prompts for path |
 | Save | F2 / Ctrl+S | ✅ | Saves in-place; shows confirmation if file changed on disk |
 | Save As | Shift+F2 | ✅ | Prompts for new filename |
 | Close / quit | F10 / Esc | ✅ | Prompts "save?" if modified |
@@ -507,7 +507,7 @@ Accessed via **F9 → Options**.
 | Beginning / end of file | Ctrl+Home / Ctrl+End | ✅ | |
 | Page up / page down | PgUp / PgDn | ✅ | |
 | Go to line number | Ctrl+G / Alt+L | ✅ | Prompts for line number; scrolls to it |
-| Go to matching bracket | Alt+B in some configs | ❌ | |
+| Go to matching bracket | Alt+[ / F9 menu | ✅ | `EditorView.GoToMatchingBracket()` — scans for matching `()[]{}⟨⟩` pair; also accessible via F9 menu |
 
 ### 12.3 Editing
 
@@ -516,14 +516,14 @@ Accessed via **F9 → Options**.
 | Insert / overwrite mode toggle | Insert | ✅ | Status bar shows INS / OVR |
 | Backspace / Delete | Backspace / Del | ✅ | |
 | Delete line | Ctrl+Y | ✅ | Cuts entire line to clipboard |
-| Delete to end of line | Alt+Y / Shift+F5? | ⚠️ | |
+| Delete to end of line | Ctrl+K | ✅ | `EditorController.DeleteToEndOfLine()` — deletes cursor to end of line; at EOL deletes newline to join next line |
 | Delete word right | Alt+D | ✅ | |
 | Delete word left | Alt+BackSpace | ✅ | |
 | Enter — new line with auto-indent | Enter | ✅ | Matches indent of previous line |
 | Shift+Enter — new line without indent | Shift+Enter | ✅ | |
 | Tab — insert tab or spaces | Tab | ✅ | Uses "tab expansion" setting |
 | Ctrl+D — insert current date/time | Ctrl+D | ✅ | Inserts formatted timestamp |
-| Ctrl+Q — insert literal character | Ctrl+Q | ❌ | |
+| Ctrl+Q — insert literal character | Ctrl+Q | ✅ | `_quoteNext` state in `EditorView`; status bar shows `QUOT`; next keystroke inserted literally |
 | Transpose characters | Ctrl+T in some builds | ❌ | |
 
 ### 12.4 Selection & Clipboard
@@ -547,7 +547,7 @@ Accessed via **F9 → Options**.
 | Find dialog | F7 | ✅ | Pattern, case-sensitive, whole word, regex, backward; pre-fills last search |
 | Find again (no dialog) | Shift+F7 / Ctrl+L | ✅ | Repeats last search forward |
 | Replace dialog | F4 / Ctrl+H | ✅ | Search + replace pattern; "Replace all" button |
-| Replace again | Shift+F4 | ❌ | Not implemented |
+| Replace again | Shift+F4 | ✅ | `EditorView.RepeatLastReplace()` — repeats last find+replace without dialog |
 
 ### 12.6 Undo / Redo / Macros
 
@@ -555,9 +555,9 @@ Accessed via **F9 → Options**.
 |---------|-----|--------|-------|
 | Undo | Ctrl+Z / Ctrl+U | ✅ | Unlimited undo stack |
 | Redo | Ctrl+Y / Ctrl+R | ✅ | Note: original uses Ctrl+R for macro record; port uses it for redo |
-| Start/stop macro recording | Ctrl+R (original) | ❌ | Not implemented; key is used for Redo |
-| Play back last macro | Ctrl+E (original) | ❌ | |
-| Word completion (Ctrl+Tab) | Ctrl+Tab | ❌ | Scans buffer for completions |
+| Start/stop macro recording | Ctrl+R | ✅ | `EditorView.ToggleMacroRecord()` — Ctrl+R starts/stops; keys collected in `_macroKeys` list |
+| Play back last macro | Ctrl+E | ✅ | `EditorView.PlayMacro()` — replays recorded keystrokes |
+| Word completion (Ctrl+Tab) | Ctrl+Tab | ✅ | `EditorView.WordComplete()` — scans buffer for prefix matches; single=auto-complete; multi=popup |
 | Spell check | Ctrl+F5 | ✅ | Invokes `aspell -a`; shows suggestion dialog |
 
 ### 12.7 Display
@@ -600,7 +600,7 @@ Accessed via **F9 → Options**.
 | Close diff viewer | Q / F10 / Esc | ✅ | |
 | Edit left file | F4 | ✅ | Opens in internal editor |
 | Edit right file | F14/Shift+F4 | ✅ | |
-| Save merged result | F2 | ⚠️ | |
+| Save diff to file | F2 | ✅ | `DiffView.SaveDiffToFile()` prompts for filename and writes unified-diff format via `DiffController.SaveDiff()` |
 | Syntax highlighting of diff hunks | | ✅ | Added/removed/changed lines in different colours |
 | Status bar: change count + navigation info | | ✅ | |
 
@@ -707,15 +707,15 @@ Accessed via **F9 → Options**.
 | Start directory field | ✅ | Defaults to active panel directory |
 | Follow symlinks toggle | ✅ | |
 | Skip hidden directories (dot-dirs) | ✅ | |
-| Date/time filter (modified before/after) | ❌ | Not implemented |
-| File size filter (larger/smaller than N bytes) | ❌ | Not implemented |
-| Ignore directories list | ❌ | Not implemented |
+| Date/time filter (modified before/after) | ✅ | `FindDialog.cs` — `NewerThanDays` / `OlderThanDays` fields |
+| File size filter (larger/smaller than N bytes) | ✅ | `FindDialog.cs` — `MinSizeKB` / `MaxSizeKB` fields |
+| Ignore directories list | ✅ | `FindDialog.cs` — `IgnoreDirs` colon-separated field |
 | Real-time incremental results list | ✅ | Results shown as search progresses |
 | Suspend / Continue search | ✅ | Stop button pauses; Continue resumes |
 | View found file (F3) | ✅ | |
 | Edit found file (F4) | ✅ | |
 | Navigate panel to found file's directory | ✅ | |
-| Panelize results into active panel | ⚠️ | Injects matching files into panel as virtual listing |
+| Panelize results into active panel | ✅ | Panelize button in find-results window; calls `PanelizeFoundFiles()` |
 | Again button — reopen search dialog | ✅ | |
 
 ---
@@ -765,14 +765,14 @@ Accessed via **F9 → Options**.
 | Condition lines (`+` / `=` prefix) filter entries | ✅ | `f pattern` = current file matches; `d` = directory; `!` = negate |
 | `%f` macro — current filename | ✅ | |
 | `%d` macro — current directory | ✅ | |
-| `%p` macro — current filename (full path) | ⚠️ | |
-| `%s` macro — selected/tagged files | ⚠️ | |
-| `%t` macro — tagged filenames | ⚠️ | |
-| `%b` macro — filename without extension | ⚠️ | |
-| `%n` macro — filename stripped of leading dot | ⚠️ | |
-| `%e` macro — file extension | ⚠️ | |
-| `%l` macro — symlink target | ⚠️ | |
-| `%x` macro — filename stripped of extension | ⚠️ | |
+| `%p` macro — current filename (basename) | ✅ | `McApplication.cs ExecuteUserMenuCommand()` |
+| `%s` macro — selected/tagged files (full paths) | ✅ | Space-separated quoted list |
+| `%t` macro — tagged filenames (alias for %s) | ✅ | |
+| `%b` macro — filename without extension | ✅ | `Path.GetFileNameWithoutExtension()` |
+| `%n` macro — filename stripped of leading dot | ✅ | `fileName.TrimStart('.')` |
+| `%e` macro — file extension without dot | ✅ | `Path.GetExtension().TrimStart('.')` |
+| `%l` macro — symlink target path | ✅ | `fileEntry.SymlinkTarget`; empty if not a symlink |
+| `%x` macro — file extension with dot (e.g. `.c`) | ✅ | `Path.GetExtension()` |
 | Edit user menu file | | ✅ | Opens in internal editor |
 
 ---
@@ -793,8 +793,8 @@ Accessed via **F9 → Options**.
 | User skins from `~/.local/share/mc/skins/` | ✅ | |
 | Extension file (`mc.ext`) — file open/view/edit rules | ✅ | Pattern matching by file extension |
 | File highlight/colour file (`mc.filecolor`) | ✅ | Per-extension colour overrides |
-| Key bindings configurable (key binding file) | ⚠️ | Display table shown; runtime rebinding via Learn keys dialog |
-| Hints file (`~/.config/mc/hints`) | ❌ | Rotating tip bar not implemented |
+| Key bindings configurable (key binding file) | ⚠️ | Learn keys dialog shows reference table; full runtime rebinding to config not yet wired |
+| Hints bar (built-in tips) | ✅ | `HintsBarView.cs` — 20 rotating tips; `~/.config/mc/hints` file format not read, built-in tips used instead |
 
 ---
 
@@ -848,19 +848,13 @@ Accessed via **F9 → Options**.
 | Console saver (`cons.saver.c`) | Linux VT-specific, obsolete |
 | FISH protocol (FIles over SHell) | Complex; SSH/SFTP is preferred |
 | Multiple subshell screens | Complex TUI multiplexing not in scope |
-| Macro recording in editor (Ctrl+R) | Ctrl+R is bound to Redo in port |
-| Word completion in editor (Ctrl+Tab) | Not yet implemented |
-| Hints bar (rotating tips) | Not yet implemented |
-| Date/size filters in Find dialog | Not yet implemented |
+| Transpose characters in editor | Key (`Ctrl+T`) bound to syntax highlight toggle in port |
 | Ext2/3/4 native attribute ioctl (beyond chattr) | `chattr` covers it |
-| Command line Tab/Alt+Tab completion | Not yet implemented |
-| Ctrl+Q quote-char in cmdline | Not yet implemented |
-| Replace again (Shift+F4) in editor | Not yet implemented |
-| Go to matching bracket in editor | Not yet implemented |
+| Learn keys: write custom bindings to config file | Display-only table shown; full runtime rebinding deferred |
 | Listmode editor (LISTMODE_EDITOR compile flag feature) | Niche; not enabled in standard builds |
 
 ---
 
-*Last updated: 2026-03-02*
+*Last updated: 2026-03-02 (revised 2026-03-02 — status corrections after implementation audit)*
 *Based on GNU MC 4.8.x source: https://github.com/MidnightCommander/mc*
 *Source files: `src/filemanager/filemanager.c`, `src/keymap.c`, `src/viewer/`, `src/editor/`*

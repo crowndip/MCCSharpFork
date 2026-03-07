@@ -195,6 +195,34 @@ public sealed class EditorController
         Changed?.Invoke(this, EventArgs.Empty);
     }
 
+    /// <summary>
+    /// Delete from the cursor to the end of the current line (Emacs Ctrl+K).
+    /// If the cursor is already at the end of the line, delete the newline instead
+    /// (joining with the next line), matching original MC editor behaviour.
+    /// </summary>
+    public void DeleteToEndOfLine()
+    {
+        int start = _cursorOffset;
+        MoveToLineEnd();
+        if (start == _cursorOffset)
+        {
+            // Already at end — delete the newline (join with next line)
+            if (_cursorOffset < _buffer.Length)
+            {
+                var nl = _buffer[_cursorOffset].ToString();
+                RecordUndo(new DeleteOp(_cursorOffset, nl));
+                _buffer.Delete(_cursorOffset);
+                Changed?.Invoke(this, EventArgs.Empty);
+            }
+            return;
+        }
+        var deleted = _buffer.Extract(start, _cursorOffset - start);
+        RecordUndo(new DeleteOp(start, deleted));
+        _buffer.Delete(start, _cursorOffset - start);
+        _cursorOffset = start;
+        Changed?.Invoke(this, EventArgs.Empty);
+    }
+
     // --- Selection ---
 
     public void SelectAll()

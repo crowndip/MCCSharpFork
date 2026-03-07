@@ -2863,13 +2863,25 @@ public sealed class McApplication : Toplevel
         var activePathStr = _controller.ActivePanel.CurrentPath.Path;
         var archiveName   = activePathStr.Contains('#') ? activePathStr[..(activePathStr.IndexOf('#') + 1)] : string.Empty;
 
+        // %n — filename stripped of leading dot (e.g. ".bashrc" → "bashrc"); for non-hidden files same as name
+        var fileName = fileEntry?.Name ?? string.Empty;
+        var nameNoLeadingDot = fileName.TrimStart('.');
+
+        // %l — symlink target path of the current file (empty if not a symlink)
+        var symlinkTarget = (fileEntry?.IsSymlink == true) ? (fileEntry.SymlinkTarget ?? string.Empty) : string.Empty;
+
+        // %x — extension including the dot (e.g. ".c", ".txt"); empty if no extension
+        var extWithDot = Path.GetExtension(fileName);
+
         cmd = cmd
             .Replace("%f",  fileEntry?.FullPath.Path ?? string.Empty)
-            .Replace("%p",  fileEntry?.Name ?? string.Empty)                                               // #30 basename of current file in active panel
-            .Replace("%P",  otherFileEntry?.Name ?? string.Empty)                                          // #30 basename of current file in other panel
-            .Replace("%b",  Path.GetFileNameWithoutExtension(fileEntry?.Name ?? string.Empty))
-            .Replace("%n",  Path.GetFileNameWithoutExtension(fileEntry?.Name ?? string.Empty))             // #30 same as %b (name without extension)
-            .Replace("%e",  Path.GetExtension(fileEntry?.Name ?? string.Empty).TrimStart('.'))
+            .Replace("%p",  fileName)                                                                      // basename of current file in active panel
+            .Replace("%P",  otherFileEntry?.Name ?? string.Empty)                                          // basename of current file in other panel
+            .Replace("%b",  Path.GetFileNameWithoutExtension(fileName))                                    // basename without extension
+            .Replace("%n",  nameNoLeadingDot)                                                              // filename stripped of leading dot
+            .Replace("%e",  Path.GetExtension(fileName).TrimStart('.'))                                    // extension without dot
+            .Replace("%x",  extWithDot)                                                                    // extension with dot (e.g. ".c")
+            .Replace("%l",  symlinkTarget)                                                                 // symlink target path
             .Replace("%d",  _controller.ActivePanel.CurrentPath.Path)
             .Replace("%D",  _controller.InactivePanel.CurrentPath.Path)
             .Replace("%s",  taggedList)   // #18

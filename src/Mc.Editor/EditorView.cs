@@ -29,6 +29,9 @@ public sealed class EditorView : View
     // Syntax-highlighting toggle (Ctrl+T). (#51)
     private bool _syntaxHighlightingOn = true;
 
+    // Quote-next: insert next keystroke as a literal character (Ctrl+Q)
+    private bool _quoteNext = false;
+
     // Macro recording / playback (#22)
     private bool _isRecordingMacro = false;
     private bool _isPlayingMacro   = false;
@@ -120,6 +123,7 @@ public sealed class EditorView : View
         if (_colBlock) status += " | COL";   // #24
         if (_showLineNumbers) status += " | Nums";
         if (!_syntaxHighlightingOn) status += " | NoHL";
+        if (_quoteNext) status += " | QUOT";
         if (status.Length > viewport.Width) status = status[..viewport.Width];
         Driver!.AddStr(status.PadRight(viewport.Width));
 
@@ -208,11 +212,32 @@ public sealed class EditorView : View
 
     protected override bool OnKeyDown(Key keyEvent)
     {
+        // Quote-next: if active, insert any next keystroke literally
+        if (_quoteNext)
+        {
+            _quoteNext = false;
+            var rune = keyEvent.AsRune;
+            var ch = rune.Value >= 1 && rune.Value <= 31
+                ? (char)rune.Value        // insert raw control character
+                : rune.Value >= 32
+                    ? (char)rune.Value
+                    : '\0';
+            if (ch != '\0') { _editor.InsertChar(ch); SetNeedsDraw(); }
+            return true;
+        }
+
         // Macro recording: record every keystroke except the toggle key itself (#22)
         if (_isRecordingMacro && !_isPlayingMacro
             && keyEvent.KeyCode != (KeyCode.R | KeyCode.CtrlMask))
         {
             _macroKeys.Add(keyEvent);
+        }
+
+        // Alt+[ = go to matching bracket (Ctrl+] also sent as this on some terminals)
+        if (keyEvent.IsAlt && (char)((int)keyEvent.KeyCode & 0xFFFF) == '[')
+        {
+            GoToMatchingBracket();
+            return true;
         }
 
         // Shift+Arrow: extend block selection (#3) — stream or column mode (#24)
@@ -409,6 +434,17 @@ public sealed class EditorView : View
 
             // Ctrl+D = insert date/time (#50)
             case KeyCode.D when keyEvent.IsCtrl: InsertDateTime(); return true;
+
+            // Ctrl+K = delete to end of line (Emacs kill-line)
+            case KeyCode.K when keyEvent.IsCtrl:
+                _editor.DeleteToEndOfLine();
+                return true;
+
+            // Ctrl+Q = quote-next: insert next keystroke literally
+            case KeyCode.Q when keyEvent.IsCtrl:
+                _quoteNext = true;
+                SetNeedsDraw();
+                return true;
 
             // Ctrl+T = toggle syntax highlighting (#51)
             case KeyCode.T when keyEvent.IsCtrl:
@@ -690,7 +726,8 @@ public sealed class EditorView : View
         var items = new[]
         {
             "Save (F2)", "Save As (Shift+F2)", "Find (F7)", "Find+Replace (F4)",
-            "Go to line (Ctrl+G)", "Toggle line numbers", "Toggle syntax highlighting", "Close (F10)",
+            "Go to line (Ctrl+G)", "Go to matching bracket (Alt+[)", "Toggle line numbers",
+            "Toggle syntax highlighting", "Close (F10)",
         };
         var choice = MessageBox.Query("Editor", "Select action:", items);
         switch (choice)
@@ -700,9 +737,10 @@ public sealed class EditorView : View
             case 2: ShowFind(); break;
             case 3: ShowFindReplace(); break;
             case 4: ShowGotoLine(); break;
-            case 5: _showLineNumbers = !_showLineNumbers; SetNeedsDraw(); break;
-            case 6: _syntaxHighlightingOn = !_syntaxHighlightingOn; SetNeedsDraw(); break;
-            case 7: OnRequestClose(); break;
+            case 5: GoToMatchingBracket(); break;
+            case 6: _showLineNumbers = !_showLineNumbers; SetNeedsDraw(); break;
+            case 7: _syntaxHighlightingOn = !_syntaxHighlightingOn; SetNeedsDraw(); break;
+            case 8: OnRequestClose(); break;
         }
     }
 
@@ -897,6 +935,57 @@ public sealed class EditorView : View
         _selecting = false;
         _editor.ClearSelection();
         SetNeedsDraw();
+    }
+
+    /// <summary>
+    /// Go to the bracket that matches the one under the cursor (Alt+[).
+    /// Supports (), [], {}, &lt;&gt; pairs.  Scans forward for opening brackets,
+    /// backward for closing brackets.  Equivalent to match_bracket() in the
+    /// original MC editor.
+    /// </summary>
+    private void GoToMatchingBracket()
+    {
+        var text = _editor.Buffer.ToString();
+        var pos  = _editor.CursorOffset;
+        if (pos >= text.Length) return;
+
+        var ch = text[pos];
+        char open, close;
+        bool forward;
+        switch (ch)
+        {
+            case '(': open = '('; close = ')'; forward = true;  break;
+            case '[': open = '['; close = ']'; forward = true;  break;
+            case '{': open = '{'; close = '}'; forward = true;  break;
+            case '<': open = '<'; close = '>'; forward = true;  break;
+            case ')': open = '('; close = ')'; forward = false; break;
+            case ']': open = '['; close = ']'; forward = false; break;
+            case '}': open = '{'; close = '}'; forward = false; break;
+            case '>': open = '<'; close = '>'; forward = false; break;
+            default:
+                MessageBox.Query("Bracket match", "No bracket at cursor.", "OK");
+                return;
+        }
+
+        int depth = 0;
+        if (forward)
+        {
+            for (int i = pos; i < text.Length; i++)
+            {
+                if (text[i] == open)  depth++;
+                else if (text[i] == close) { depth--; if (depth == 0) { _editor.MoveCursor(i); SetNeedsDraw(); return; } }
+            }
+        }
+        else
+        {
+            for (int i = pos; i >= 0; i--)
+            {
+                if (text[i] == close) depth++;
+                else if (text[i] == open)  { depth--; if (depth == 0) { _editor.MoveCursor(i); SetNeedsDraw(); return; } }
+            }
+        }
+
+        MessageBox.Query("Bracket match", "No matching bracket found.", "OK");
     }
 
     /// <summary>Open file dialog (Ctrl+O). (#10)</summary>

@@ -93,7 +93,7 @@ public sealed class CommandLineView : View
                 CommandEntered?.Invoke(this, text);
             }
         }
-        else if (key == Key.Tab)
+        else if (key == Key.Tab || key.KeyCode == (KeyCode.Tab | KeyCode.AltMask))
         {
             TabComplete();
             key.Handled = true;
