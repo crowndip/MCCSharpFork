@@ -78,15 +78,14 @@ public static class ChownDialog
         d.Add(groupInput);
 
         // Selecting from listbox updates the text field
+        // a.Value is the item itself (string), a.Item is the index
         ownerLv.SelectedItemChanged += (_, a) =>
         {
-            var idx = (int)a.Value;
-            if (idx >= 0 && idx < users.Count) ownerInput.Text = users[idx];
+            if (a.Value?.ToString() is { } s) ownerInput.Text = s;
         };
         groupLv.SelectedItemChanged += (_, a) =>
         {
-            var idx = (int)a.Value;
-            if (idx >= 0 && idx < groups.Count) groupInput.Text = groups[idx];
+            if (a.Value?.ToString() is { } s) groupInput.Text = s;
         };
 
         if (markedCount > 1)

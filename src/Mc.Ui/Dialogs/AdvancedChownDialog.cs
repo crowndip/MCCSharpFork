@@ -50,8 +50,7 @@ public static class AdvancedChownDialog
 
         ownerLv.SelectedItemChanged += (_, a) =>
         {
-            var idx = (int)a.Value;
-            if (idx >= 0 && idx < users.Count) ownerInput.Text = users[idx];
+            if (a.Value?.ToString() is { } s) ownerInput.Text = s;
         };
 
         // ── Middle column: Group ────────────────────────────────────────
@@ -75,8 +74,7 @@ public static class AdvancedChownDialog
 
         groupLv.SelectedItemChanged += (_, a) =>
         {
-            var idx = (int)a.Value;
-            if (idx >= 0 && idx < groups.Count) groupInput.Text = groups[idx];
+            if (a.Value?.ToString() is { } s) groupInput.Text = s;
         };
 
         // ── Right column: Permissions ────────────────────────────────────

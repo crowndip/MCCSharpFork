@@ -83,10 +83,11 @@ public sealed class McApplication : Toplevel
         // Panel menu matches original MC Left/Right menus — no duplicate items. (#24)
         MenuItem[] PanelMenuItems(bool left) =>
         [
+            new MenuItem("_File listing",      string.Empty, () => ToggleOverlayModeForPanel(left, PanelDisplayMode.Normal)),
             new MenuItem("_Listing format...", string.Empty, () => ShowListingFormatDialog(left)),
-            new MenuItem("_Quick view",        "Ctrl+X Q",   () => ToggleOverlayMode(PanelDisplayMode.QuickView)),
-            new MenuItem("_Info",              "Ctrl+X I",   () => ToggleOverlayMode(PanelDisplayMode.Info)),
-            new MenuItem("_Tree",              "Ctrl+X T",   () => ToggleOverlayMode(PanelDisplayMode.Tree)),
+            new MenuItem("_Quick view",        "Ctrl+X Q",   () => ToggleOverlayModeForPanel(left, PanelDisplayMode.QuickView)),
+            new MenuItem("_Info",              "Ctrl+X I",   () => ToggleOverlayModeForPanel(left, PanelDisplayMode.Info)),
+            new MenuItem("_Tree",              "Ctrl+X T",   () => ToggleOverlayModeForPanel(left, PanelDisplayMode.Tree)),
             new MenuItem("_Panelize",          string.Empty, ExternalPanelize),
             null!,
             new MenuItem("_Sort order...",     string.Empty, ShowSortDialog),
@@ -161,21 +162,28 @@ public sealed class McApplication : Toplevel
                     new("Edit hi_ghlighting group file",string.Empty, () => EditConfigFile(ConfigPaths.FileHighlightFile)),
                 }),
 
-                // ── Tools (custom addition for this .NET port) ────────────
+                // ── Tools ─────────────────────────────────────────────────
                 new MenuBarItem("_Tools", new MenuItem[]
                 {
-                    new("Copy _path to clipboard",  string.Empty, CopyPathToClipboard),
-                    new("Copy file _name",          string.Empty, CopyNameToClipboard),
-                    new("Copy _directory path",     string.Empty, CopyDirToClipboard),
+                    new("Copy _directory to clipboard",  string.Empty, CopyDirToClipboard),
+                    new("Copy full _path to clipboard",  string.Empty, CopyPathToClipboard),
+                    new("Copy file _name to clipboard",  string.Empty, CopyNameToClipboard),
+                    new("Copy tagged _paths",            string.Empty, CopyTaggedPathsToClipboard),
+                    new("Copy tagged name_s",            string.Empty, CopyTaggedNamesToClipboard),
                     null!,
-                    new("_Checksum...",             string.Empty, ShowChecksum),
-                    new("Directory _size...",       string.Empty, ShowDirSize),
-                    new("_Touch (timestamps)...",   string.Empty, ShowTouch),
+                    new("Open in file _manager",         string.Empty, ShowContextMenu),
+                    new("_Open with...",                 string.Empty, ShowOpenWith),
+                    new("F_ile properties",              string.Empty, ShowProperties),
+                    new("_Attributes (chmod)...",        string.Empty, Chmod),
                     null!,
-                    new("_Batch rename...",         string.Empty, ShowBatchRename),
+                    new("_Touch (timestamps)...",        string.Empty, ShowTouch),
+                    new("C_hecksum...",                  string.Empty, ShowChecksum),
+                    new("Directory _size...",            string.Empty, ShowDirSize),
+                    new("Folder size anal_yzer...",     string.Empty, ShowFolderAnalyzer),
+                    new("_Batch rename...",              string.Empty, ShowBatchRename),
                     null!,
-                    new("Open _terminal here",      "Ctrl+T",     OpenTerminalHere),
-                    new("_Compare with diff tool",  string.Empty, CompareWithDiffTool),
+                    new("Op_en terminal here",           "Ctrl+T",     OpenTerminalHere),
+                    new("_Compare with diff tool",       string.Empty, CompareWithDiffTool),
                 }),
 
                 // ── Options ───────────────────────────────────────────────
@@ -233,10 +241,7 @@ public sealed class McApplication : Toplevel
         ApplyPanelSettings(_rightPanelView);
 
         // Apply filter settings now that both panels are constructed (#4)
-        _controller.LeftPanel.Filter.ShowHidden  = _settings.ShowHiddenFiles;
-        _controller.LeftPanel.Filter.ShowBackups = _settings.ShowBackupFiles;
-        _controller.RightPanel.Filter.ShowHidden  = _settings.ShowHiddenFiles;
-        _controller.RightPanel.Filter.ShowBackups = _settings.ShowBackupFiles;
+        ApplyFilterSettings();
 
         // Cursor-change hooks: update overlay when active-panel cursor moves; also advance hints tip (#14)
         _leftPanelView.CursorChanged  += (_, _) =>
@@ -729,6 +734,7 @@ public sealed class McApplication : Toplevel
     private static VfsPath? TryGetArchiveVfsPath(string filePath, string ext) => ext switch
     {
         ".zip"                 => new VfsPath("zip",  null, null, null, null, filePath + "|"),
+        ".7z"                  => new VfsPath("7z",   null, null, null, null, filePath + "|"),
         ".tar"                 => new VfsPath("tar",  null, null, null, null, filePath + "|"),
         ".tgz" or ".tar.gz"   => new VfsPath("tar",  null, null, null, null, filePath + "|"),
         ".tar.bz2" or ".tbz2" => new VfsPath("tar",  null, null, null, null, filePath + "|"),
@@ -751,7 +757,10 @@ public sealed class McApplication : Toplevel
             RefreshPanels();
             return;
         }
-        ViewFile(entry.FullPath.Path);
+        if (_settings.UseInternalViewer)
+            ViewFile(entry.FullPath.Path);
+        else
+            LaunchExternalProgram(_settings.ExternalViewer, entry.FullPath.Path);
     }
 
     /// <summary>
@@ -795,6 +804,14 @@ public sealed class McApplication : Toplevel
         Application.Run(viewerWin);
     }
 
+    /// <summary>Launch an external viewer or editor with the given file path.</summary>
+    private static void LaunchExternalProgram(string program, string filePath)
+    {
+        // Single-quote the path to safely handle spaces and special chars in shell
+        var quotedPath = "'" + filePath.Replace("'", "'\\''") + "'";
+        ProcessHelper.RunDetached($"{program} {quotedPath}");
+    }
+
     private void EditCurrent()
     {
         var entry = GetCurrentEntry();
@@ -813,6 +830,12 @@ public sealed class McApplication : Toplevel
         {
             path = entry.FullPath.Path;
             _editedFiles.Remove(path); _editedFiles.Insert(0, path);
+        }
+
+        if (!_settings.UseInternalEditor)
+        {
+            LaunchExternalProgram(_settings.ExternalEditor, path);
+            return;
         }
 
         var editorWin = new Window
@@ -834,9 +857,13 @@ public sealed class McApplication : Toplevel
 
     private void CopyFiles()
     {
-        var dest = _controller.InactivePanel.CurrentPath.Path;
         var entry  = GetCurrentEntry();
         var marked = _controller.ActivePanel.GetMarkedEntries();
+        // For single-file copy, pre-fill dest with dir+filename so user can rename inline (matches original MC)
+        var inactiveDir = _controller.InactivePanel.CurrentPath.Path;
+        var dest = marked.Count > 0 || entry == null
+            ? inactiveDir
+            : Path.Combine(inactiveDir, entry.Name);
         var sourceName    = marked.Count > 0 ? $"{marked.Count} files" : (entry?.Name ?? "marked files");
         var defaultSource = marked.Count > 0 ? "*" : (entry?.Name ?? "*");
         var opts = CopyMoveDialog.Show(false, sourceName, dest, defaultSource);
@@ -847,8 +874,12 @@ public sealed class McApplication : Toplevel
         {
             var sources = _controller.ActivePanel.GetMarkedEntries();
             if (sources.Count == 0 && entry != null) sources = new List<FileEntry> { entry };
+            var resolvedDest = ResolveDestinationPath(opts.DestinationPath).Path;
+            var destIsDir    = Directory.Exists(resolvedDest);
             var conflicts = sources
-                .Where(e => !e.IsDirectory && File.Exists(Path.Combine(opts.DestinationPath, e.Name)))
+                .Where(e => !e.IsDirectory && (destIsDir
+                    ? File.Exists(Path.Combine(resolvedDest, e.Name))
+                    : sources.Count == 1 && File.Exists(resolvedDest)))
                 .Select(e => e.Name)
                 .ToList();
             if (conflicts.Count > 0)
@@ -1031,6 +1062,16 @@ public sealed class McApplication : Toplevel
             _rightMode = _rightMode == mode ? PanelDisplayMode.Normal : mode;
             ApplyOverlay(false, _rightMode);
         }
+    }
+
+    /// <summary>Toggles overlay mode for a specific panel (used by Left/Right menu items).</summary>
+    private void ToggleOverlayModeForPanel(bool isLeft, PanelDisplayMode mode)
+    {
+        ref var storedMode = ref isLeft ? ref _leftMode : ref _rightMode;
+        storedMode = (mode == PanelDisplayMode.Normal || storedMode == mode)
+            ? PanelDisplayMode.Normal
+            : mode;
+        ApplyOverlay(isLeft, storedMode);
     }
 
     private void ApplyOverlay(bool isLeft, PanelDisplayMode mode)
@@ -1669,6 +1710,92 @@ public sealed class McApplication : Toplevel
             MessageDialog.Error("Clipboard not available.");
     }
 
+    private void CopyTaggedPathsToClipboard()
+    {
+        var dir     = _controller.ActivePanel.CurrentPath.Path;
+        var marked  = _controller.ActivePanel.GetMarkedEntries();
+        string text;
+        if (marked.Count > 0)
+            text = string.Join("\n", marked.Select(e => e.FullPath.Path));
+        else
+        {
+            var entry = GetCurrentEntry();
+            if (entry == null) return;
+            text = entry.FullPath.Path;
+        }
+        if (!ClipboardHelper.TrySet(text))
+            MessageDialog.Error("Clipboard not available.");
+    }
+
+    private void CopyTaggedNamesToClipboard()
+    {
+        var marked = _controller.ActivePanel.GetMarkedEntries();
+        string text;
+        if (marked.Count > 0)
+            text = string.Join("\n", marked.Select(e => e.Name));
+        else
+        {
+            var entry = GetCurrentEntry();
+            if (entry == null) return;
+            text = entry.Name;
+        }
+        if (!ClipboardHelper.TrySet(text))
+            MessageDialog.Error("Clipboard not available.");
+    }
+
+    // --- Tools: File manager / Open with / Properties / Attributes ---
+
+    private void ShowContextMenu()
+    {
+        var entry = GetCurrentEntry();
+        string path = entry != null ? entry.FullPath.Path : _controller.ActivePanel.CurrentPath.Path;
+        string parent = Path.GetDirectoryName(path) ?? path;
+        if (!ProcessHelper.OpenFileManager(path))
+            MessageDialog.Error($"Could not open file manager.\nTried: nautilus, dolphin, nemo, xdg-open.\nPath: {parent}");
+    }
+
+    private void ShowOpenWith()
+    {
+        var entry = GetCurrentEntry();
+        if (entry == null || entry.IsDirectory)
+        {
+            MessageDialog.Show("Open with", "Select a file first.");
+            return;
+        }
+        var app = InputDialog.Show("Open with", "Application:", string.Empty);
+        if (string.IsNullOrWhiteSpace(app)) return;
+        try
+        {
+            var psi = new System.Diagnostics.ProcessStartInfo
+            {
+                FileName        = OperatingSystem.IsLinux() ? "xdg-open" : app,
+                UseShellExecute = false,
+            };
+            if (OperatingSystem.IsLinux())
+            {
+                // xdg-open can't take an app; launch app directly with path arg
+                psi.FileName = app;
+            }
+            psi.ArgumentList.Add(entry.FullPath.Path);
+            System.Diagnostics.Process.Start(psi);
+        }
+        catch (Exception ex)
+        {
+            MessageDialog.Error($"Could not launch '{app}':\n{ex.Message}");
+        }
+    }
+
+    private void ShowProperties()
+    {
+        var entry = GetCurrentEntry();
+        if (entry == null)
+        {
+            MessageDialog.Show("Properties", "No file selected.");
+            return;
+        }
+        InfoDialog.Show(entry);
+    }
+
     // --- Tools: File info ---
 
     private void ShowChecksum()
@@ -1691,6 +1818,26 @@ public sealed class McApplication : Toplevel
         else
             targetPath = _controller.ActivePanel.CurrentPath.Path;
         DirSizeDialog.Show(targetPath);
+    }
+
+    private void ShowFolderAnalyzer()
+    {
+        // Use all marked directories; fall back to current directory entry or active panel path.
+        var marked = _controller.ActivePanel.GetMarkedEntries()
+            .Where(e => e.IsDirectory && !e.IsParentDir)
+            .Select(e => e.FullPath.Path)
+            .ToList();
+
+        if (marked.Count == 0)
+        {
+            var entry = GetCurrentEntry();
+            marked.Add(entry is { IsDirectory: true, IsParentDir: false }
+                ? entry.FullPath.Path
+                : _controller.ActivePanel.CurrentPath.Path);
+        }
+
+        FolderAnalyzerDialog.Show([.. marked]);
+        RefreshPanels();
     }
 
     private void ShowTouch()
@@ -3724,8 +3871,9 @@ public sealed class McApplication : Toplevel
     private void ShowAppearanceDialog()
     {
         var skins = McTheme.FindSkinFiles();
-        var skinNames = skins.Select(f => Path.GetFileNameWithoutExtension(f)).ToList();
-        skinNames.Insert(0, "default");
+        // Built-in themes first, then "default" (MC blue), then file-based skins
+        var skinNames = new List<string> { "WhiteOnBlack", "ColorOnWhite", "default" };
+        skinNames.AddRange(skins.Select(f => Path.GetFileNameWithoutExtension(f)));
 
         var currentSkin = _settings.ActiveSkin;
         var selectedIdx = skinNames.IndexOf(currentSkin);
@@ -3759,17 +3907,11 @@ public sealed class McApplication : Toplevel
         var okBtn = new Button { Text = "OK", IsDefault = true };
         okBtn.Accepting += (_, _) =>
         {
-            var idx      = lv.SelectedItem;
-            var chosen   = idx >= 0 && idx < skinNames.Count ? skinNames[idx] : "default";
+            var idx    = lv.SelectedItem;
+            var chosen = idx >= 0 && idx < skinNames.Count ? skinNames[idx] : "WhiteOnBlack";
             _settings.ActiveSkin = chosen;
-            if (chosen == "default")
-                McTheme.ApplyDefault();
-            else
-            {
-                var path = idx > 0 ? skins[idx - 1] : string.Empty;
-                if (!string.IsNullOrEmpty(path))
-                    McTheme.ApplySkin(path);
-            }
+            _settings.Save();
+            McTheme.Apply(chosen);
             Application.LayoutAndDraw(true);
             Application.RequestStop(d);
         };

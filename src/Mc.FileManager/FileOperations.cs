@@ -47,7 +47,7 @@ public sealed class FileOperations
         // Build filtered source list from mask
         var filteredSources = string.IsNullOrEmpty(sourceMask) || sourceMask == "*"
             ? sources
-            : sources.Where(s => MatchesGlob(Path.GetFileName(s.Path), sourceMask)).ToList();
+            : sources.Where(s => MatchesGlob(ArchiveAwareName(s), sourceMask)).ToList();
 
         var prog = new OperationProgress { TotalFiles = filteredSources.Count };
         long totalBytes = 0;
@@ -301,6 +301,21 @@ public sealed class FileOperations
 
         if (preserveAttributes) PreserveAttrs(src, dest);
         if (preserveExt2Attributes && OperatingSystem.IsLinux()) TryCopyExt2Attributes(src.Path, dest.Path); // #35
+    }
+
+    /// <summary>
+    /// Returns the effective filename of a VfsPath, handling archive paths where
+    /// the inner entry is separated from the archive file by a '|' character.
+    /// Example: "/dir/archive.zip|subdir/file.txt" → "file.txt"
+    ///          "/dir/archive.zip|file.txt"         → "file.txt"  (not "archive.zip|file.txt")
+    ///          "/home/user/file.txt"               → "file.txt"
+    /// </summary>
+    private static string ArchiveAwareName(VfsPath path)
+    {
+        var p = path.Path;
+        var pipe = p.IndexOf('|');
+        var inner = pipe >= 0 ? p[(pipe + 1)..].TrimStart('/') : p;
+        return Path.GetFileName(inner.TrimEnd('/'));
     }
 
     /// <summary>Glob pattern match: supports * (any chars) and ? (single char).</summary>

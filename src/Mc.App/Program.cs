@@ -34,13 +34,13 @@ internal sealed class Program
             // Build DI container
             var services = AppSetup.BuildServiceProvider(args);
 
-            // Initialize Terminal.Gui
-            Application.Init();
-            McTheme.ApplyDefault();
-
             // Get required services
             var controller = services.GetRequiredService<FileManagerController>();
             var settings   = services.GetRequiredService<McSettings>();
+
+            // Initialize Terminal.Gui then apply the saved (or default) color theme
+            Application.Init();
+            McTheme.Apply(settings.ActiveSkin);
 
             // Create and run the main application
             var app = new McApplication(controller, settings);

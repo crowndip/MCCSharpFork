@@ -32,6 +32,184 @@ public static class McTheme
     public static Terminal.Gui.Attribute PanelSpecialFile    { get; private set; }  // #27 FIFO / socket
     public static Terminal.Gui.Attribute PanelHeaderSorted   { get; private set; }  // #39 active sort column (brighter)
 
+    /// <summary>Apply the named built-in or file-based skin. Falls back to WhiteOnBlack.</summary>
+    public static void Apply(string name)
+    {
+        switch (name)
+        {
+            case "WhiteOnBlack": ApplyWhiteOnBlack(); return;
+            case "ColorOnWhite": ApplyColorOnWhite(); return;
+            case "default":      ApplyDefault(); return;
+            default:
+                // Try as a file path from the skins directories
+                var skinFiles = FindSkinFiles();
+                var path = skinFiles.FirstOrDefault(f =>
+                    string.Equals(Path.GetFileNameWithoutExtension(f), name,
+                                  StringComparison.OrdinalIgnoreCase));
+                if (path != null && ApplySkin(path)) return;
+                ApplyWhiteOnBlack(); // fallback
+                return;
+        }
+    }
+
+    public static void ApplyWhiteOnBlack()
+    {
+        Panel = new ColorScheme
+        {
+            Normal    = new Terminal.Gui.Attribute(Color.White,        Color.Black),
+            Focus     = new Terminal.Gui.Attribute(Color.Black,        Color.White),
+            HotNormal = new Terminal.Gui.Attribute(Color.BrightYellow, Color.Black),
+            HotFocus  = new Terminal.Gui.Attribute(Color.BrightYellow, Color.White),
+            Disabled  = new Terminal.Gui.Attribute(Color.DarkGray,     Color.Black),
+        };
+        PanelSelected = new ColorScheme
+        {
+            Normal    = new Terminal.Gui.Attribute(Color.Black,        Color.White),
+            Focus     = new Terminal.Gui.Attribute(Color.Black,        Color.White),
+            HotNormal = new Terminal.Gui.Attribute(Color.BrightYellow, Color.White),
+            HotFocus  = new Terminal.Gui.Attribute(Color.BrightYellow, Color.White),
+            Disabled  = new Terminal.Gui.Attribute(Color.DarkGray,     Color.White),
+        };
+        Dialog = new ColorScheme
+        {
+            Normal    = new Terminal.Gui.Attribute(Color.White,     Color.Black),
+            Focus     = new Terminal.Gui.Attribute(Color.Black,     Color.White),
+            HotNormal = new Terminal.Gui.Attribute(Color.BrightRed, Color.Black),
+            HotFocus  = new Terminal.Gui.Attribute(Color.BrightRed, Color.White),
+            Disabled  = new Terminal.Gui.Attribute(Color.DarkGray,  Color.Black),
+        };
+        Menu = new ColorScheme
+        {
+            Normal    = new Terminal.Gui.Attribute(Color.White,      Color.Black),
+            Focus     = new Terminal.Gui.Attribute(Color.Black,      Color.White),
+            HotNormal = new Terminal.Gui.Attribute(Color.BrightRed,  Color.Black),
+            HotFocus  = new Terminal.Gui.Attribute(Color.BrightRed,  Color.White),
+            Disabled  = new Terminal.Gui.Attribute(Color.DarkGray,   Color.Black),
+        };
+        StatusBar = new ColorScheme
+        {
+            Normal    = new Terminal.Gui.Attribute(Color.White,    Color.Black),
+            Focus     = new Terminal.Gui.Attribute(Color.White,    Color.Black),
+            HotNormal = new Terminal.Gui.Attribute(Color.White,    Color.Black),
+            HotFocus  = new Terminal.Gui.Attribute(Color.White,    Color.Black),
+            Disabled  = new Terminal.Gui.Attribute(Color.DarkGray, Color.Black),
+        };
+        ButtonBar = new ColorScheme
+        {
+            Normal    = new Terminal.Gui.Attribute(Color.White,    Color.Black),
+            Focus     = new Terminal.Gui.Attribute(Color.White,    Color.Black),
+            HotNormal = new Terminal.Gui.Attribute(Color.Black,    Color.White),
+            HotFocus  = new Terminal.Gui.Attribute(Color.Black,    Color.White),
+            Disabled  = new Terminal.Gui.Attribute(Color.DarkGray, Color.Black),
+        };
+        Error = new ColorScheme
+        {
+            Normal    = new Terminal.Gui.Attribute(Color.White,        Color.Red),
+            Focus     = new Terminal.Gui.Attribute(Color.BrightYellow, Color.Red),
+            HotNormal = new Terminal.Gui.Attribute(Color.BrightYellow, Color.Red),
+            HotFocus  = new Terminal.Gui.Attribute(Color.BrightYellow, Color.Red),
+            Disabled  = new Terminal.Gui.Attribute(Color.DarkGray,     Color.Red),
+        };
+        PanelFrame        = new Terminal.Gui.Attribute(Color.Gray,         Color.Black);
+        PanelHeader       = new Terminal.Gui.Attribute(Color.White,        Color.Black);
+        PanelFile         = new Terminal.Gui.Attribute(Color.Gray,         Color.Black);
+        PanelDirectory    = new Terminal.Gui.Attribute(Color.BrightCyan,   Color.Black);
+        PanelExecutable   = new Terminal.Gui.Attribute(Color.BrightGreen,  Color.Black);
+        PanelSymlink      = new Terminal.Gui.Attribute(Color.Cyan,         Color.Black);
+        PanelMarked       = new Terminal.Gui.Attribute(Color.BrightYellow, Color.Black);
+        PanelCursor         = new Terminal.Gui.Attribute(Color.Black,        Color.White);
+        PanelMarkedCursor   = new Terminal.Gui.Attribute(Color.BrightYellow, Color.White);
+        PanelInactiveCursor = new Terminal.Gui.Attribute(Color.White,        Color.DarkGray);
+        PanelStatus         = new Terminal.Gui.Attribute(Color.White,        Color.Black);
+        PanelArchive        = new Terminal.Gui.Attribute(Color.BrightMagenta,Color.Black);
+        PanelDevice         = new Terminal.Gui.Attribute(Color.Yellow,       Color.Black);
+        PanelSpecialFile    = new Terminal.Gui.Attribute(Color.BrightRed,    Color.Black);
+        PanelHeaderSorted   = new Terminal.Gui.Attribute(Color.BrightYellow, Color.Black);
+        Colors.ColorSchemes["Base"]   = Panel;
+        Colors.ColorSchemes["Dialog"] = Dialog;
+        Colors.ColorSchemes["Menu"]   = Menu;
+        Colors.ColorSchemes["Error"]  = Error;
+    }
+
+    public static void ApplyColorOnWhite()
+    {
+        Panel = new ColorScheme
+        {
+            Normal    = new Terminal.Gui.Attribute(Color.Black,    Color.White),
+            Focus     = new Terminal.Gui.Attribute(Color.White,    Color.Blue),
+            HotNormal = new Terminal.Gui.Attribute(Color.Red,      Color.White),
+            HotFocus  = new Terminal.Gui.Attribute(Color.Red,      Color.Blue),
+            Disabled  = new Terminal.Gui.Attribute(Color.DarkGray, Color.White),
+        };
+        PanelSelected = new ColorScheme
+        {
+            Normal    = new Terminal.Gui.Attribute(Color.White,    Color.Blue),
+            Focus     = new Terminal.Gui.Attribute(Color.White,    Color.Blue),
+            HotNormal = new Terminal.Gui.Attribute(Color.Yellow,   Color.Blue),
+            HotFocus  = new Terminal.Gui.Attribute(Color.Yellow,   Color.Blue),
+            Disabled  = new Terminal.Gui.Attribute(Color.DarkGray, Color.Blue),
+        };
+        Dialog = new ColorScheme
+        {
+            Normal    = new Terminal.Gui.Attribute(Color.Black,    Color.White),
+            Focus     = new Terminal.Gui.Attribute(Color.White,    Color.Blue),
+            HotNormal = new Terminal.Gui.Attribute(Color.Red,      Color.White),
+            HotFocus  = new Terminal.Gui.Attribute(Color.Red,      Color.Blue),
+            Disabled  = new Terminal.Gui.Attribute(Color.DarkGray, Color.White),
+        };
+        Menu = new ColorScheme
+        {
+            Normal    = new Terminal.Gui.Attribute(Color.Black,    Color.White),
+            Focus     = new Terminal.Gui.Attribute(Color.White,    Color.Blue),
+            HotNormal = new Terminal.Gui.Attribute(Color.Red,      Color.White),
+            HotFocus  = new Terminal.Gui.Attribute(Color.Red,      Color.Blue),
+            Disabled  = new Terminal.Gui.Attribute(Color.DarkGray, Color.White),
+        };
+        StatusBar = new ColorScheme
+        {
+            Normal    = new Terminal.Gui.Attribute(Color.Black,    Color.Gray),
+            Focus     = new Terminal.Gui.Attribute(Color.Black,    Color.Gray),
+            HotNormal = new Terminal.Gui.Attribute(Color.Black,    Color.Gray),
+            HotFocus  = new Terminal.Gui.Attribute(Color.Black,    Color.Gray),
+            Disabled  = new Terminal.Gui.Attribute(Color.DarkGray, Color.Gray),
+        };
+        ButtonBar = new ColorScheme
+        {
+            Normal    = new Terminal.Gui.Attribute(Color.Black,    Color.White),
+            Focus     = new Terminal.Gui.Attribute(Color.Black,    Color.White),
+            HotNormal = new Terminal.Gui.Attribute(Color.White,    Color.Blue),
+            HotFocus  = new Terminal.Gui.Attribute(Color.White,    Color.Blue),
+            Disabled  = new Terminal.Gui.Attribute(Color.DarkGray, Color.White),
+        };
+        Error = new ColorScheme
+        {
+            Normal    = new Terminal.Gui.Attribute(Color.White,        Color.Red),
+            Focus     = new Terminal.Gui.Attribute(Color.BrightYellow, Color.Red),
+            HotNormal = new Terminal.Gui.Attribute(Color.BrightYellow, Color.Red),
+            HotFocus  = new Terminal.Gui.Attribute(Color.BrightYellow, Color.Red),
+            Disabled  = new Terminal.Gui.Attribute(Color.DarkGray,     Color.Red),
+        };
+        PanelFrame        = new Terminal.Gui.Attribute(Color.DarkGray, Color.White);
+        PanelHeader       = new Terminal.Gui.Attribute(Color.Black,    Color.White);
+        PanelFile         = new Terminal.Gui.Attribute(Color.Black,    Color.White);
+        PanelDirectory    = new Terminal.Gui.Attribute(Color.Blue,     Color.White);
+        PanelExecutable   = new Terminal.Gui.Attribute(Color.Green,    Color.White);
+        PanelSymlink      = new Terminal.Gui.Attribute(Color.Magenta,  Color.White);
+        PanelMarked       = new Terminal.Gui.Attribute(Color.Red,      Color.White);
+        PanelCursor         = new Terminal.Gui.Attribute(Color.White,    Color.Blue);
+        PanelMarkedCursor   = new Terminal.Gui.Attribute(Color.Yellow,   Color.Blue);
+        PanelInactiveCursor = new Terminal.Gui.Attribute(Color.Black,    Color.Gray);
+        PanelStatus         = new Terminal.Gui.Attribute(Color.Black,    Color.Gray);
+        PanelArchive        = new Terminal.Gui.Attribute(Color.Magenta,  Color.White);
+        PanelDevice         = new Terminal.Gui.Attribute(Color.DarkGray, Color.White);
+        PanelSpecialFile    = new Terminal.Gui.Attribute(Color.Red,      Color.White);
+        PanelHeaderSorted   = new Terminal.Gui.Attribute(Color.Blue,     Color.White);
+        Colors.ColorSchemes["Base"]   = Panel;
+        Colors.ColorSchemes["Dialog"] = Dialog;
+        Colors.ColorSchemes["Menu"]   = Menu;
+        Colors.ColorSchemes["Error"]  = Error;
+    }
+
     public static void ApplyDefault()
     {
         // Classic MC blue skin

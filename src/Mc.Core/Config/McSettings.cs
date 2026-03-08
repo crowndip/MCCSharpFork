@@ -111,7 +111,7 @@ public sealed class McSettings
 
     public string ActiveSkin
     {
-        get => _config.GetString("Midnight-Commander", "skin", "default");
+        get => _config.GetString("Midnight-Commander", "skin", "WhiteOnBlack");
         set => _config.Set("Midnight-Commander", "skin", value);
     }
 

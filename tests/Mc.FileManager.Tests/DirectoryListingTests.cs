@@ -149,6 +149,124 @@ public sealed class DirectoryListingTests
         Assert.Equal(0, listing.MarkedCount);
     }
 
+    // --- Selection: GetMarkedEntries ---
+
+    /// <summary>
+    /// User marks several files using the Insert key.
+    /// GetMarkedEntries must return only the marked subset.
+    /// </summary>
+    [Fact]
+    public void GetMarkedEntries_ReturnsOnlyMarkedFiles()
+    {
+        var mock = new Mock<IVfsProvider>();
+        mock.Setup(p => p.CanHandle(It.IsAny<VfsPath>())).Returns(true);
+        mock.Setup(p => p.ListDirectory(It.IsAny<VfsPath>())).Returns([
+            MakeEntry("keep.txt"),
+            MakeEntry("skip.txt"),
+            MakeEntry("keep2.txt"),
+        ]);
+        mock.Setup(p => p.Initialize());
+        mock.Setup(p => p.Dispose());
+
+        var registry = new VfsRegistry();
+        registry.Register(mock.Object);
+
+        var listing = new DirectoryListing(registry);
+        listing.Load(VfsPath.FromLocal("/test"));
+
+        // Sorted alphabetically: keep.txt(0), keep2.txt(1), skip.txt(2)
+        listing.MarkFile(0); // keep.txt
+        listing.MarkFile(1); // keep2.txt
+
+        var marked = listing.GetMarkedEntries();
+        Assert.Equal(2, marked.Count);
+        Assert.Contains(marked, e => e.Name == "keep.txt");
+        Assert.Contains(marked, e => e.Name == "keep2.txt");
+        Assert.DoesNotContain(marked, e => e.Name == "skip.txt");
+    }
+
+    // --- Selection: InvertMarking ---
+
+    /// <summary>
+    /// User presses the invert-selection shortcut. All unmarked files become marked
+    /// and all marked files become unmarked.
+    /// </summary>
+    [Fact]
+    public void InvertMarking_MarksAllWhenNoneAreMarked()
+    {
+        var mock = new Mock<IVfsProvider>();
+        mock.Setup(p => p.CanHandle(It.IsAny<VfsPath>())).Returns(true);
+        mock.Setup(p => p.ListDirectory(It.IsAny<VfsPath>())).Returns([
+            MakeEntry("a.txt"),
+            MakeEntry("b.txt"),
+            MakeEntry("c.txt"),
+        ]);
+        mock.Setup(p => p.Initialize());
+        mock.Setup(p => p.Dispose());
+
+        var registry = new VfsRegistry();
+        registry.Register(mock.Object);
+
+        var listing = new DirectoryListing(registry);
+        listing.Load(VfsPath.FromLocal("/test"));
+        listing.InvertMarking();
+
+        Assert.Equal(3, listing.MarkedCount);
+        Assert.True(listing.Entries.All(e => e.IsMarked));
+    }
+
+    [Fact]
+    public void InvertMarking_UnmarksAllWhenAllAreMarked()
+    {
+        var mock = new Mock<IVfsProvider>();
+        mock.Setup(p => p.CanHandle(It.IsAny<VfsPath>())).Returns(true);
+        mock.Setup(p => p.ListDirectory(It.IsAny<VfsPath>())).Returns([
+            MakeEntry("a.txt"),
+            MakeEntry("b.txt"),
+        ]);
+        mock.Setup(p => p.Initialize());
+        mock.Setup(p => p.Dispose());
+
+        var registry = new VfsRegistry();
+        registry.Register(mock.Object);
+
+        var listing = new DirectoryListing(registry);
+        listing.Load(VfsPath.FromLocal("/test"));
+        listing.MarkAll(true);
+        listing.InvertMarking();
+
+        Assert.Equal(0, listing.MarkedCount);
+        Assert.True(listing.Entries.All(e => !e.IsMarked));
+    }
+
+    // --- Selection: MarkAll clear ---
+
+    [Fact]
+    public void MarkAll_False_ClearsAllMarksAfterMarkAll_True()
+    {
+        var mock = new Mock<IVfsProvider>();
+        mock.Setup(p => p.CanHandle(It.IsAny<VfsPath>())).Returns(true);
+        mock.Setup(p => p.ListDirectory(It.IsAny<VfsPath>())).Returns([
+            MakeEntry("a.txt"),
+            MakeEntry("b.txt"),
+            MakeEntry("c.txt"),
+        ]);
+        mock.Setup(p => p.Initialize());
+        mock.Setup(p => p.Dispose());
+
+        var registry = new VfsRegistry();
+        registry.Register(mock.Object);
+
+        var listing = new DirectoryListing(registry);
+        listing.Load(VfsPath.FromLocal("/test"));
+        listing.MarkAll(true);
+        Assert.Equal(3, listing.MarkedCount);
+
+        listing.MarkAll(false);
+        Assert.Equal(0, listing.MarkedCount);
+        Assert.True(listing.GetMarkedEntries().Count == 0);
+    }
+
     [Fact]
     public void MarkAll_MarksEveryNonParentEntry()
     {

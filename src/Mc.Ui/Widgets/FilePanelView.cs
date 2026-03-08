@@ -134,6 +134,17 @@ public sealed class FilePanelView : View
         var idx = HitTestEntry(e);
         if (idx < 0) return;
 
+        // Right-click toggles the mark on the clicked entry (like Insert key). (#rclick)
+        if (e.Flags.HasFlag(MouseFlags.Button3Clicked))
+        {
+            _cursorIndex = idx;
+            _listing.MarkFile(idx);
+            UpdateStatus();
+            CursorChanged?.Invoke(this, _cursorIndex);
+            SetNeedsDraw();
+            return;
+        }
+
         // Double-click activates the entry; single-click just moves cursor. (#35)
         if (e.Flags.HasFlag(MouseFlags.Button1DoubleClicked))
         {

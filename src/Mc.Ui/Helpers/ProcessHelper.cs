@@ -71,6 +71,25 @@ internal static class ProcessHelper
     }
 
     /// <summary>
+    /// Open the parent folder of <paramref name="path"/> in the native file manager,
+    /// selecting the item where supported.
+    /// Tries: nautilus --select, dolphin --select, nemo, xdg-open (parent dir).
+    /// </summary>
+    public static bool OpenFileManager(string path)
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return TryLaunchArgs("explorer", "/select,", path);
+        }
+
+        string parent = System.IO.Path.GetDirectoryName(path) ?? path;
+        return TryLaunchArgs("nautilus", "--select", path)
+            || TryLaunchArgs("dolphin",  "--select", path)
+            || TryLaunchArgs("nemo",     path)
+            || TryLaunchArgs("xdg-open", parent);
+    }
+
+    /// <summary>
     /// Open an external diff viewer for two files.
     /// Tries: meld, kdiff3, code (VSCode --diff), vimdiff.
     /// </summary>

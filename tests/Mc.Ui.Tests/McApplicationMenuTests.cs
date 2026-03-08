@@ -231,9 +231,9 @@ public sealed class McApplicationMenuTests
     // ==================================================================
 
     [Theory]
-    [InlineData("Copy path to clipboard")]
+    [InlineData("Copy full path")]
     [InlineData("Copy file name")]
-    [InlineData("Copy directory path")]
+    [InlineData("Copy directory")]
     [InlineData("Checksum")]
     [InlineData("Directory size")]
     [InlineData("Touch")]
@@ -247,9 +247,9 @@ public sealed class McApplicationMenuTests
     }
 
     [Theory]
-    [InlineData("Copy path to clipboard")]
+    [InlineData("Copy full path")]
     [InlineData("Copy file name")]
-    [InlineData("Copy directory path")]
+    [InlineData("Copy directory")]
     [InlineData("Checksum")]
     [InlineData("Directory size")]
     [InlineData("Touch")]
