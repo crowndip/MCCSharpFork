@@ -48,6 +48,15 @@ public sealed class SevenZipVfsProvider : IVfsProvider
         var entries = new List<VfsDirEntry>();
         var seen    = new HashSet<string>(StringComparer.Ordinal);
 
+        // Always add ".." so the user can navigate out of the archive
+        entries.Add(new VfsDirEntry
+        {
+            Name             = "..",
+            FullPath         = ParentPath(archive, inner),
+            IsDirectory      = true,
+            ModificationTime = DateTime.MinValue,
+        });
+
         foreach (var e in ReadEntries(archive))
         {
             // Compute path relative to the requested inner directory
@@ -249,4 +258,20 @@ public sealed class SevenZipVfsProvider : IVfsProvider
 
     /// <summary>Shell-quote a path so it is safe to pass as a 7z argument.</summary>
     private static string Q(string s) => "\"" + s.Replace("\"", "\\\"") + "\"";
+
+    /// <summary>
+    /// Returns the VfsPath that ".." should navigate to from the given inner directory.
+    /// At the archive root → exit to the local directory containing the archive file.
+    /// Inside a subdirectory → go up one level within the same archive.
+    /// </summary>
+    private static VfsPath ParentPath(string archive, string inner)
+    {
+        if (string.IsNullOrEmpty(inner))
+            return VfsPath.FromLocal(System.IO.Path.GetDirectoryName(archive) ?? "/");
+
+        var lastSlash = inner.LastIndexOf('/');
+        return lastSlash < 0
+            ? new VfsPath("7z", null, null, null, null, archive + "|")
+            : new VfsPath("7z", null, null, null, null, archive + "|" + inner[..lastSlash]);
+    }
 }

@@ -43,6 +43,15 @@ public sealed class TarVfsProvider : IVfsProvider
         var seen = new HashSet<string>(StringComparer.Ordinal);
         inner = inner.TrimEnd('/');
 
+        // Always add ".." so the user can navigate out of the archive
+        entries.Add(new VfsDirEntry
+        {
+            Name             = "..",
+            FullPath         = TarParentPath(archive, inner),
+            IsDirectory      = true,
+            ModificationTime = DateTime.MinValue,
+        });
+
         using var stream = OpenArchiveStream(archive);
         using var reader = new TarReader(stream, leaveOpen: false);
 
@@ -160,6 +169,23 @@ public sealed class TarVfsProvider : IVfsProvider
     public VfsPath GetParent(VfsPath path) => path.Parent();
     public VfsPath Combine(VfsPath directory, string name) => directory.Combine(name);
     public bool IsAbsolute(VfsPath path) => true;
+
+    /// <summary>
+    /// Returns the VfsPath that ".." should navigate to from the given inner directory.
+    /// Tar inner paths use a leading "/" (e.g. "" for root, "/subdir" for subdirs).
+    /// At the archive root → exit to the local directory containing the archive file.
+    /// Inside a subdirectory → go up one level within the same archive.
+    /// </summary>
+    private static VfsPath TarParentPath(string archive, string inner)
+    {
+        if (string.IsNullOrEmpty(inner) || inner == "/")
+            return VfsPath.FromLocal(System.IO.Path.GetDirectoryName(archive) ?? "/");
+
+        var lastSlash = inner.LastIndexOf('/');
+        return lastSlash <= 0
+            ? new VfsPath("tar", null, null, null, null, archive + "|")
+            : new VfsPath("tar", null, null, null, null, archive + "|" + inner[..lastSlash]);
+    }
 
     private static Stream OpenArchiveStream(string archivePath)
     {

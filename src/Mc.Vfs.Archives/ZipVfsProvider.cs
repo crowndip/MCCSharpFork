@@ -35,6 +35,15 @@ public sealed class ZipVfsProvider : IVfsProvider
         var entries = new List<VfsDirEntry>();
         var seen = new HashSet<string>(StringComparer.Ordinal);
 
+        // Always add ".." so the user can navigate out of the archive
+        entries.Add(new VfsDirEntry
+        {
+            Name             = "..",
+            FullPath         = ParentPath("zip", archive, inner),
+            IsDirectory      = true,
+            ModificationTime = DateTime.MinValue,
+        });
+
         using var zip = ZipFile.OpenRead(archive);
         foreach (var entry in zip.Entries)
         {
@@ -118,4 +127,20 @@ public sealed class ZipVfsProvider : IVfsProvider
     public VfsPath GetParent(VfsPath path) => path.Parent();
     public VfsPath Combine(VfsPath directory, string name) => directory.Combine(name);
     public bool IsAbsolute(VfsPath path) => true;
+
+    /// <summary>
+    /// Returns the VfsPath that ".." should navigate to from the given inner directory.
+    /// At the archive root → exit to the local directory containing the archive file.
+    /// Inside a subdirectory → go up one level within the same archive.
+    /// </summary>
+    private static VfsPath ParentPath(string scheme, string archive, string inner)
+    {
+        if (string.IsNullOrEmpty(inner))
+            return VfsPath.FromLocal(System.IO.Path.GetDirectoryName(archive) ?? "/");
+
+        var lastSlash = inner.LastIndexOf('/');
+        return lastSlash < 0
+            ? new VfsPath(scheme, null, null, null, null, archive + "|")
+            : new VfsPath(scheme, null, null, null, null, archive + "|" + inner[..lastSlash]);
+    }
 }
