@@ -35,6 +35,21 @@ internal static class WindowsShellContextMenu
     /// </summary>
     public static void Show(string filePath)
     {
+        // Shell context menu handlers are in-process STA COM servers (7-Zip,
+        // Notepad++, etc.). .NET console app threads are MTA by default, which
+        // causes COM to marshal calls across apartments — most extension handlers
+        // then silently fail to load, giving only the generic built-in menu.
+        // Fix: run the entire menu interaction on a dedicated STA thread so COM
+        // creates and calls the handlers in the correct apartment.
+        var thread = new Thread(() => ShowCore(filePath));
+        thread.SetApartmentState(ApartmentState.STA);
+        thread.IsBackground = true;
+        thread.Start();
+        thread.Join();
+    }
+
+    private static void ShowCore(string filePath)
+    {
         IntPtr pidlFull  = IntPtr.Zero;
         IntPtr psfRaw    = IntPtr.Zero;
         IntPtr pCMRaw    = IntPtr.Zero;
@@ -68,11 +83,11 @@ internal static class WindowsShellContextMenu
             hMenu = CreatePopupMenu();
             contextMenu.QueryContextMenu(hMenu, 0, 1, 0x7FFF, CMF_NORMAL | CMF_EXPLORE);
 
-            // 5. TrackPopupMenuEx requires an HWND owned by the CALLING THREAD in
+            // 5. TrackPopupMenuEx requires an HWND owned by the calling thread in
             //    our process. GetConsoleWindow() returns the console host's HWND
             //    (conhost.exe / Windows Terminal) which belongs to a different process
             //    and causes TrackPopupMenuEx to fail silently.
-            //    Solution: create a minimal hidden popup window in our process.
+            //    Solution: create a minimal hidden popup window on this STA thread.
             hwndHost = CreateHelperWindow();
             if (hwndHost == IntPtr.Zero) return;
 
