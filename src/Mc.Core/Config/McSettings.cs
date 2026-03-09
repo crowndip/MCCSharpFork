@@ -109,6 +109,12 @@ public sealed class McSettings
         set => _config.Set("Midnight-Commander", "viewer", value);
     }
 
+    public string SevenZipPath
+    {
+        get => _config.GetString("Midnight-Commander", "seven_zip_path", string.Empty);
+        set => _config.Set("Midnight-Commander", "seven_zip_path", value);
+    }
+
     public string ActiveSkin
     {
         get => _config.GetString("Midnight-Commander", "skin", "WhiteOnBlack");

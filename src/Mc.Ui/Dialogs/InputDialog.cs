@@ -1,3 +1,4 @@
+using Mc.Ui.Widgets;
 using Terminal.Gui;
 
 namespace Mc.Ui.Dialogs;
@@ -20,7 +21,7 @@ public static class InputDialog
 
         d.Add(new Label { X = 1, Y = 1, Text = prompt });
 
-        var input = new TextField
+        var input = new McTextField
         {
             X = 1, Y = 3,
             Width = width - 4,

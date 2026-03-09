@@ -3770,8 +3770,8 @@ public sealed class McApplication : Toplevel
         var d = new Dialog
         {
             Title = "Configuration",
-            Width = 62,
-            Height = 22,
+            Width = 68,
+            Height = 24,
             ColorScheme = McTheme.Dialog,
         };
 
@@ -3779,6 +3779,13 @@ public sealed class McApplication : Toplevel
         {
             X = 2, Y = y, Text = label,
             CheckedState = val ? CheckState.Checked : CheckState.UnChecked,
+            ColorScheme = McTheme.Dialog,
+        };
+
+        McTextField TF(int y, string val) => new McTextField
+        {
+            X = 22, Y = y, Width = 42,
+            Text = val,
             ColorScheme = McTheme.Dialog,
         };
 
@@ -3792,22 +3799,19 @@ public sealed class McApplication : Toplevel
         var useIntEditor = CB(9,  "Use internal edit",           _settings.UseInternalEditor);
 
         d.Add(new Label { X = 2, Y = 11, Text = "External editor:", ColorScheme = McTheme.Dialog });
-        var extEditor = new TextField
-        {
-            X = 20, Y = 11, Width = 38,
-            Text = _settings.ExternalEditor,
-            ColorScheme = McTheme.Dialog,
-        };
-        d.Add(new Label { X = 2, Y = 12, Text = "External viewer:", ColorScheme = McTheme.Dialog });
-        var extViewer = new TextField
-        {
-            X = 20, Y = 12, Width = 38,
-            Text = _settings.ExternalViewer,
-            ColorScheme = McTheme.Dialog,
-        };
+        var extEditor = TF(11, _settings.ExternalEditor);
+
+        d.Add(new Label { X = 2, Y = 13, Text = "External viewer:", ColorScheme = McTheme.Dialog });
+        var extViewer = TF(13, _settings.ExternalViewer);
+
+        d.Add(new Label { X = 2, Y = 15, Text = "7-Zip provider:", ColorScheme = McTheme.Dialog });
+        var sevenZip  = TF(15, _settings.SevenZipPath);
+        d.Add(new Label { X = 2, Y = 16,
+            Text = "  e.g. C:\\Program Files\\7-Zip\\7z.exe",
+            ColorScheme = McTheme.Dialog });
 
         d.Add(verbose, totals, autoSave, showOutput, useSubshell, askRun,
-              useIntViewer, useIntEditor, extEditor, extViewer);
+              useIntViewer, useIntEditor, extEditor, extViewer, sevenZip);
 
         var ok = new Button { Text = "OK", IsDefault = true };
         ok.Accepting += (_, _) =>
@@ -3822,6 +3826,7 @@ public sealed class McApplication : Toplevel
             _settings.UseInternalEditor    = useIntEditor.CheckedState == CheckState.Checked;
             _settings.ExternalEditor       = extEditor.Text?.ToString() ?? "vi";
             _settings.ExternalViewer       = extViewer.Text?.ToString() ?? "less";
+            _settings.SevenZipPath         = sevenZip.Text?.ToString()  ?? string.Empty;
             _settings.Save();
             Application.RequestStop(d);
         };
