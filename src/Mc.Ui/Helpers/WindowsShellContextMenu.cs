@@ -133,12 +133,35 @@ internal static class WindowsShellContextMenu
             // 8. Execute the chosen command (cmd − 1 = offset from idCmdFirst = 1).
             if (cmd > 0)
             {
+                uint offset = cmd - 1;
+
+                // The built-in Properties handler fails with "The properties for this
+                // item are not available" when invoked via a numeric MAKEINTRESOURCE
+                // verb from a non-Explorer process — it can't resolve the PIDL path
+                // in that context. Detect the verb string and call ShellExecuteEx
+                // with verb="properties" directly, which is the documented way to
+                // show the Properties sheet from outside Explorer.
+                if (IsVerb(contextMenu, offset, "properties"))
+                {
+                    var sei = new SHELLEXECUTEINFO
+                    {
+                        cbSize = Marshal.SizeOf<SHELLEXECUTEINFO>(),
+                        fMask  = SEE_MASK_INVOKEIDLIST,   // use shell PIDL path
+                        hwnd   = hwndHost,
+                        lpVerb = "properties",
+                        lpFile = filePath,
+                        nShow  = SW_SHOWNORMAL,
+                    };
+                    ShellExecuteEx(ref sei);
+                    return;
+                }
+
                 var invoke = new CMINVOKECOMMANDINFO
                 {
                     cbSize = Marshal.SizeOf<CMINVOKECOMMANDINFO>(),
                     fMask  = 0,
                     hwnd   = hwndHost,
-                    lpVerb = (IntPtr)(int)(cmd - 1),
+                    lpVerb = (IntPtr)(int)(int)offset,
                     nShow  = SW_SHOWNORMAL,
                 };
                 contextMenu.InvokeCommand(ref invoke);
@@ -156,6 +179,28 @@ internal static class WindowsShellContextMenu
             if (psfRaw   != IntPtr.Zero) Marshal.Release(psfRaw);
             if (pidlFull != IntPtr.Zero) CoTaskMemFree(pidlFull);
         }
+    }
+
+    // ── Verb detection ────────────────────────────────────────────────────────
+
+    private const uint GCS_VERBW = 0x00000004;  // get verb as Unicode string
+
+    /// <summary>
+    /// Returns true if the IContextMenu item at <paramref name="offset"/> from
+    /// idCmdFirst has the given canonical verb name (case-insensitive).
+    /// </summary>
+    private static bool IsVerb(IContextMenu cm, uint offset, string verb)
+    {
+        IntPtr buf = Marshal.AllocHGlobal(512);
+        try
+        {
+            cm.GetCommandString((IntPtr)(int)offset, GCS_VERBW,
+                                IntPtr.Zero, buf, 256);
+            string? name = Marshal.PtrToStringUni(buf);
+            return string.Equals(name, verb, StringComparison.OrdinalIgnoreCase);
+        }
+        catch { return false; }
+        finally { Marshal.FreeHGlobal(buf); }
     }
 
     // ── Custom WndProc ────────────────────────────────────────────────────────
@@ -377,4 +422,31 @@ internal static class WindowsShellContextMenu
 
     [DllImport("ole32.dll")]
     private static extern void OleUninitialize();
+
+    [DllImport("shell32.dll", CharSet = CharSet.Unicode)]
+    private static extern bool ShellExecuteEx(ref SHELLEXECUTEINFO lpExecInfo);
+
+    // ── ShellExecuteEx struct ─────────────────────────────────────────────────
+
+    private const uint SEE_MASK_INVOKEIDLIST = 0x0000000C;
+
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+    private struct SHELLEXECUTEINFO
+    {
+        public int     cbSize;
+        public uint    fMask;
+        public IntPtr  hwnd;
+        public string? lpVerb;
+        public string? lpFile;
+        public string? lpParameters;
+        public string? lpDirectory;
+        public int     nShow;
+        public IntPtr  hInstApp;
+        public IntPtr  lpIDList;
+        public string? lpClass;
+        public IntPtr  hkeyClass;
+        public uint    dwHotKey;
+        public IntPtr  hIcon;
+        public IntPtr  hProcess;
+    }
 }
