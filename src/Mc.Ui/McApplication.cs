@@ -1793,7 +1793,16 @@ public sealed class McApplication : Toplevel
             MessageDialog.Show("Properties", "No file selected.");
             return;
         }
-        InfoDialog.Show(entry);
+
+        if (OperatingSystem.IsWindows())
+        {
+            // Show the native Windows Explorer shell context menu (right-click menu).
+            WindowsShellContextMenu.Show(entry.FullPath.Path);
+        }
+        else
+        {
+            InfoDialog.Show(entry);
+        }
     }
 
     // --- Tools: File info ---
