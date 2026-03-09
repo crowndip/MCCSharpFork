@@ -22,6 +22,7 @@ internal static class WindowsShellContextMenu
 
     private const int  SW_SHOWNORMAL   = 1;
     private const uint WS_POPUP        = 0x80000000;
+    private const uint WM_NULL         = 0x0000;
 
     // Keep delegate alive for the lifetime of the process to prevent GC collection.
     private static readonly WndProcDelegate _wndProc = DefWindowProc;
@@ -50,6 +51,23 @@ internal static class WindowsShellContextMenu
 
     private static void ShowCore(string filePath)
     {
+        // OleInitialize is required for shell extensions that use OLE drag-and-drop
+        // or clipboard internals. It calls CoInitializeEx(STA) internally; if the
+        // thread is already initialised it returns S_FALSE and increments the ref
+        // count, so we must pair it with OleUninitialize() regardless.
+        OleInitialize(IntPtr.Zero);
+        try
+        {
+            ShowCoreOle(filePath);
+        }
+        finally
+        {
+            OleUninitialize();
+        }
+    }
+
+    private static void ShowCoreOle(string filePath)
+    {
         IntPtr pidlFull  = IntPtr.Zero;
         IntPtr psfRaw    = IntPtr.Zero;
         IntPtr pCMRaw    = IntPtr.Zero;
@@ -58,11 +76,18 @@ internal static class WindowsShellContextMenu
 
         try
         {
-            // 1. Parse the absolute path into a shell PIDL.
+            // 1. Create the helper window first so we can pass it as hwndOwner to
+            //    GetUIObjectOf. Some shell extensions (e.g. 7-Zip) inspect hwndOwner
+            //    during IContextMenu creation and skip registering their items when it
+            //    is NULL or belongs to a different process.
+            hwndHost = CreateHelperWindow();
+            if (hwndHost == IntPtr.Zero) return;
+
+            // 2. Parse the absolute path into a shell PIDL.
             int hr = SHParseDisplayName(filePath, IntPtr.Zero, out pidlFull, 0, out _);
             if (hr != 0 || pidlFull == IntPtr.Zero) return;
 
-            // 2. Bind to the parent IShellFolder; ppidlChild points WITHIN pidlFull
+            // 3. Bind to the parent IShellFolder; ppidlChild points WITHIN pidlFull
             //    (must NOT be freed separately).
             var iidSF = typeof(IShellFolder).GUID;
             hr = SHBindToParent(pidlFull, ref iidSF, out psfRaw, out IntPtr pidlChild);
@@ -70,26 +95,25 @@ internal static class WindowsShellContextMenu
 
             var shellFolder = (IShellFolder)Marshal.GetObjectForIUnknown(psfRaw);
 
-            // 3. Ask the parent folder for an IContextMenu for the child item.
+            // 4. Ask the parent folder for an IContextMenu for the child item.
             //    ref IntPtr (not IntPtr[]) is required so the CLR emits a plain
-            //    PCUITEMID_CHILD* pointer — managed array marshaling is wrong here.
+            //    PCUITEMID_CHILD* — managed array marshaling corrupts the call.
+            //    Pass hwndHost so extension handlers have a valid owner window.
             var iidCM = typeof(IContextMenu).GUID;
-            shellFolder.GetUIObjectOf(IntPtr.Zero, 1, ref pidlChild, ref iidCM, IntPtr.Zero, out pCMRaw);
+            shellFolder.GetUIObjectOf(hwndHost, 1, ref pidlChild, ref iidCM, IntPtr.Zero, out pCMRaw);
             if (pCMRaw == IntPtr.Zero) return;
 
             var contextMenu = (IContextMenu)Marshal.GetObjectForIUnknown(pCMRaw);
 
-            // 4. Populate a Win32 popup menu. idCmdFirst = 1.
+            // 5. Populate the Win32 popup menu. idCmdFirst = 1.
             hMenu = CreatePopupMenu();
             contextMenu.QueryContextMenu(hMenu, 0, 1, 0x7FFF, CMF_NORMAL | CMF_EXPLORE);
 
-            // 5. TrackPopupMenuEx requires an HWND owned by the calling thread in
-            //    our process. GetConsoleWindow() returns the console host's HWND
-            //    (conhost.exe / Windows Terminal) which belongs to a different process
-            //    and causes TrackPopupMenuEx to fail silently.
-            //    Solution: create a minimal hidden popup window on this STA thread.
-            hwndHost = CreateHelperWindow();
-            if (hwndHost == IntPtr.Zero) return;
+            // 6. SetForegroundWindow is required before TrackPopupMenuEx so that
+            //    the menu's internal message loop receives keyboard input. Without it
+            //    Escape (and other keys) are never delivered to the menu and it cannot
+            //    be dismissed by keyboard.
+            SetForegroundWindow(hwndHost);
 
             GetCursorPos(out POINT pt);
 
@@ -100,7 +124,11 @@ internal static class WindowsShellContextMenu
                 hwndHost,
                 IntPtr.Zero);
 
-            // 6. Invoke the selected command (cmd - 1 = offset from idCmdFirst = 1).
+            // Post WM_NULL to flush any pending messages left in the queue after the
+            // modal menu loop exits (documented requirement from MSDN).
+            PostMessage(hwndHost, WM_NULL, IntPtr.Zero, IntPtr.Zero);
+
+            // 7. Invoke the selected command (cmd - 1 = offset from idCmdFirst = 1).
             if (cmd > 0)
             {
                 var invoke = new CMINVOKECOMMANDINFO
@@ -276,4 +304,16 @@ internal static class WindowsShellContextMenu
 
     [DllImport("ole32.dll")]
     private static extern void CoTaskMemFree(IntPtr pv);
+
+    [DllImport("ole32.dll")]
+    private static extern int OleInitialize(IntPtr pvReserved);
+
+    [DllImport("ole32.dll")]
+    private static extern void OleUninitialize();
+
+    [DllImport("user32.dll")]
+    private static extern bool SetForegroundWindow(IntPtr hWnd);
+
+    [DllImport("user32.dll")]
+    private static extern bool PostMessage(IntPtr hWnd, uint msg, IntPtr wParam, IntPtr lParam);
 }
