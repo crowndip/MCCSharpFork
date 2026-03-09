@@ -51,9 +51,10 @@ internal static class WindowsShellContextMenu
             var shellFolder = (IShellFolder)Marshal.GetObjectForIUnknown(psfRaw);
 
             // 3. Ask the parent folder for an IContextMenu for the child item.
-            IntPtr[] apidl = [pidlChild];
+            //    Pass pidlChild by ref so the CLR marshals it as a plain pointer (PCUITEMID_CHILD*),
+            //    which is what the COM method expects for a single-item array.
             var iidCM = typeof(IContextMenu).GUID;
-            shellFolder.GetUIObjectOf(IntPtr.Zero, 1, apidl, ref iidCM, IntPtr.Zero, out pCMRaw);
+            shellFolder.GetUIObjectOf(IntPtr.Zero, 1, ref pidlChild, ref iidCM, IntPtr.Zero, out pCMRaw);
             if (pCMRaw == IntPtr.Zero) return;
 
             var contextMenu = (IContextMenu)Marshal.GetObjectForIUnknown(pCMRaw);
@@ -113,8 +114,8 @@ internal static class WindowsShellContextMenu
         void BindToStorage(IntPtr pidl, IntPtr pbc, ref Guid riid, out IntPtr ppv);
         void CompareIDs(IntPtr lParam, IntPtr pidl1, IntPtr pidl2);
         void CreateViewObject(IntPtr hwndOwner, ref Guid riid, out IntPtr ppv);
-        void GetAttributesOf(uint cidl, [In] IntPtr[] apidl, ref uint rgfInOut);
-        void GetUIObjectOf(IntPtr hwndOwner, uint cidl, [In] IntPtr[] apidl,
+        void GetAttributesOf(uint cidl, ref IntPtr apidl, ref uint rgfInOut);
+        void GetUIObjectOf(IntPtr hwndOwner, uint cidl, ref IntPtr apidl,
             ref Guid riid, IntPtr rgfReserved, out IntPtr ppv);
         void GetDisplayNameOf(IntPtr pidl, uint uFlags, out IntPtr pName);
         void SetNameOf(IntPtr hwnd, IntPtr pidl,
