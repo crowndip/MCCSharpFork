@@ -29,6 +29,7 @@ public sealed class McApplication : Toplevel
     private ButtonBarView _buttonBar = null!;
     private CommandLineView _commandLine = null!;
     private MenuBar _menuBar = null!;
+    private MenuBarItem _favoritesMenu = null!;
     private HintsBarView _hintsBar = null!;
 
     // File history: most-recently-used first
@@ -160,7 +161,11 @@ public sealed class McApplication : Toplevel
                     new("Edit e_xtension file",         string.Empty, () => EditConfigFile(ConfigPaths.ExtFile)),
                     new("Edit _menu file",              string.Empty, () => EditConfigFile(ConfigPaths.MenuFile)),
                     new("Edit hi_ghlighting group file",string.Empty, () => EditConfigFile(ConfigPaths.FileHighlightFile)),
+                    new("Edit _favorites file",         string.Empty, () => EditConfigFile(ConfigPaths.FavoritesFile)),
                 }),
+
+                // ── Favorites ─────────────────────────────────────────────
+                _favoritesMenu = BuildFavoritesMenu(),
 
                 // ── Tools ─────────────────────────────────────────────────
                 new MenuBarItem("_Tools", new MenuItem[]
@@ -2835,6 +2840,67 @@ public sealed class McApplication : Toplevel
     private static void ShowStatus(string message)
     {
         // Status messages are displayed in the panel status area on next draw
+    }
+
+    // --- Favorites menu ---
+
+    private MenuBarItem BuildFavoritesMenu()
+    {
+        var items = new List<MenuItem>
+        {
+            new("_Add current folder", string.Empty, AddCurrentFolderToFavorites),
+            null!,
+        };
+
+        var favorites = FavoritesManager.Load();
+        foreach (var path in favorites)
+        {
+            var captured = path;
+            items.Add(new MenuItem(path, string.Empty, () => NavigateToFavorite(captured)));
+        }
+
+        if (favorites.Count == 0)
+        {
+            var placeholder = new MenuItem("(no favorites)", string.Empty, null) { CanExecute = () => false };
+            items.Add(placeholder);
+        }
+
+        return new MenuBarItem("F_avorites", items.ToArray());
+    }
+
+    private void RebuildFavoritesMenu()
+    {
+        _favoritesMenu = BuildFavoritesMenu();
+        // Replace the Favorites slot (index 3) in the menu bar
+        var menus = _menuBar.Menus.ToList();
+        // Find Favorites by title
+        int idx = menus.FindIndex(m => m?.Title?.ToString()?.Contains("avorites") == true);
+        if (idx >= 0)
+            menus[idx] = _favoritesMenu;
+        else
+            menus.Insert(3, _favoritesMenu);
+        _menuBar.Menus = menus.ToArray();
+        _menuBar.SetNeedsDraw();
+    }
+
+    private void AddCurrentFolderToFavorites()
+    {
+        var path = _controller.ActivePanel.CurrentPath.Path;
+        if (string.IsNullOrEmpty(path))
+        {
+            MessageDialog.Error("Cannot add empty path to favorites.");
+            return;
+        }
+        bool added = FavoritesManager.Add(path);
+        if (added)
+            RebuildFavoritesMenu();
+        else
+            MessageDialog.Show("Favorites", $"'{path}' is already in favorites.");
+    }
+
+    private void NavigateToFavorite(string path)
+    {
+        _controller.NavigateTo(VfsPath.FromLocal(path));
     }
 
     // --- Command menu: User menu ---
