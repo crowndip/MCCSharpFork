@@ -20,7 +20,11 @@ internal static class WindowsShellContextMenu
     private const uint TPM_RIGHTBUTTON = 0x0002;
     private const uint TPM_RETURNCMD   = 0x0100;
 
-    private const int SW_SHOWNORMAL = 1;
+    private const int  SW_SHOWNORMAL   = 1;
+    private const uint WS_POPUP        = 0x80000000;
+
+    // Keep delegate alive for the lifetime of the process to prevent GC collection.
+    private static readonly WndProcDelegate _wndProc = DefWindowProc;
 
     // ── Public entry point ────────────────────────────────────────────────────
 
@@ -35,6 +39,7 @@ internal static class WindowsShellContextMenu
         IntPtr psfRaw    = IntPtr.Zero;
         IntPtr pCMRaw    = IntPtr.Zero;
         IntPtr hMenu     = IntPtr.Zero;
+        IntPtr hwndHost  = IntPtr.Zero;
 
         try
         {
@@ -43,7 +48,7 @@ internal static class WindowsShellContextMenu
             if (hr != 0 || pidlFull == IntPtr.Zero) return;
 
             // 2. Bind to the parent IShellFolder; ppidlChild points WITHIN pidlFull
-            //    (do not free it separately).
+            //    (must NOT be freed separately).
             var iidSF = typeof(IShellFolder).GUID;
             hr = SHBindToParent(pidlFull, ref iidSF, out psfRaw, out IntPtr pidlChild);
             if (hr != 0 || psfRaw == IntPtr.Zero) return;
@@ -51,8 +56,8 @@ internal static class WindowsShellContextMenu
             var shellFolder = (IShellFolder)Marshal.GetObjectForIUnknown(psfRaw);
 
             // 3. Ask the parent folder for an IContextMenu for the child item.
-            //    Pass pidlChild by ref so the CLR marshals it as a plain pointer (PCUITEMID_CHILD*),
-            //    which is what the COM method expects for a single-item array.
+            //    ref IntPtr (not IntPtr[]) is required so the CLR emits a plain
+            //    PCUITEMID_CHILD* pointer — managed array marshaling is wrong here.
             var iidCM = typeof(IContextMenu).GUID;
             shellFolder.GetUIObjectOf(IntPtr.Zero, 1, ref pidlChild, ref iidCM, IntPtr.Zero, out pCMRaw);
             if (pCMRaw == IntPtr.Zero) return;
@@ -63,26 +68,31 @@ internal static class WindowsShellContextMenu
             hMenu = CreatePopupMenu();
             contextMenu.QueryContextMenu(hMenu, 0, 1, 0x7FFF, CMF_NORMAL | CMF_EXPLORE);
 
-            // 5. Show the menu at the current mouse position.
-            //    TrackPopupMenuEx runs its own modal message loop — safe in console apps.
+            // 5. TrackPopupMenuEx requires an HWND owned by the CALLING THREAD in
+            //    our process. GetConsoleWindow() returns the console host's HWND
+            //    (conhost.exe / Windows Terminal) which belongs to a different process
+            //    and causes TrackPopupMenuEx to fail silently.
+            //    Solution: create a minimal hidden popup window in our process.
+            hwndHost = CreateHelperWindow();
+            if (hwndHost == IntPtr.Zero) return;
+
             GetCursorPos(out POINT pt);
-            IntPtr hwnd = GetConsoleWindow();
 
             uint cmd = TrackPopupMenuEx(
                 hMenu,
                 TPM_LEFTALIGN | TPM_RIGHTBUTTON | TPM_RETURNCMD,
                 pt.X, pt.Y,
-                hwnd,
+                hwndHost,
                 IntPtr.Zero);
 
-            // 6. Invoke the selected command (cmd - 1 = offset from idCmdFirst).
+            // 6. Invoke the selected command (cmd - 1 = offset from idCmdFirst = 1).
             if (cmd > 0)
             {
                 var invoke = new CMINVOKECOMMANDINFO
                 {
                     cbSize = Marshal.SizeOf<CMINVOKECOMMANDINFO>(),
                     fMask  = 0,
-                    hwnd   = hwnd,
+                    hwnd   = hwndHost,
                     lpVerb = (IntPtr)(int)(cmd - 1),  // MAKEINTRESOURCEA(id)
                     nShow  = SW_SHOWNORMAL,
                 };
@@ -91,12 +101,42 @@ internal static class WindowsShellContextMenu
         }
         finally
         {
-            if (hMenu   != IntPtr.Zero) DestroyMenu(hMenu);
-            if (pCMRaw  != IntPtr.Zero) Marshal.Release(pCMRaw);
-            if (psfRaw  != IntPtr.Zero) Marshal.Release(psfRaw);
+            if (hwndHost != IntPtr.Zero) DestroyWindow(hwndHost);
+            if (hMenu    != IntPtr.Zero) DestroyMenu(hMenu);
+            if (pCMRaw   != IntPtr.Zero) Marshal.Release(pCMRaw);
+            if (psfRaw   != IntPtr.Zero) Marshal.Release(psfRaw);
             if (pidlFull != IntPtr.Zero) CoTaskMemFree(pidlFull);
-            // pidlChild is a pointer into pidlFull — NOT freed separately.
         }
+    }
+
+    // ── Helper window ─────────────────────────────────────────────────────────
+
+    private const string HelperClassName = "Mc_ShellMenuHost";
+
+    /// <summary>
+    /// Creates a 1×1 hidden popup window owned by the calling thread.
+    /// This gives TrackPopupMenuEx a valid in-process HWND to work with.
+    /// </summary>
+    private static IntPtr CreateHelperWindow()
+    {
+        IntPtr hInstance = GetModuleHandle(null);
+
+        var wc = new WNDCLASSEX
+        {
+            cbSize        = (uint)Marshal.SizeOf<WNDCLASSEX>(),
+            lpfnWndProc   = Marshal.GetFunctionPointerForDelegate(_wndProc),
+            hInstance     = hInstance,
+            lpszClassName = HelperClassName,
+        };
+
+        // Ignore the return value — the class may already be registered.
+        RegisterClassEx(ref wc);
+
+        return CreateWindowEx(
+            0, HelperClassName, null,
+            WS_POPUP,
+            0, 0, 1, 1,
+            IntPtr.Zero, IntPtr.Zero, hInstance, IntPtr.Zero);
     }
 
     // ── COM interfaces ────────────────────────────────────────────────────────
@@ -146,13 +186,34 @@ internal static class WindowsShellContextMenu
         public int    cbSize;
         public uint   fMask;
         public IntPtr hwnd;
-        public IntPtr lpVerb;       // MAKEINTRESOURCEA(id) for numeric, or string ptr
-        public IntPtr lpParameters; // null
-        public IntPtr lpDirectory;  // null
+        public IntPtr lpVerb;       // MAKEINTRESOURCEA(id) for numeric invocation
+        public IntPtr lpParameters;
+        public IntPtr lpDirectory;
         public int    nShow;
         public uint   dwHotKey;
         public IntPtr hIcon;
     }
+
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+    private struct WNDCLASSEX
+    {
+        public uint    cbSize;
+        public uint    style;
+        public IntPtr  lpfnWndProc;
+        public int     cbClsExtra;
+        public int     cbWndExtra;
+        public IntPtr  hInstance;
+        public IntPtr  hIcon;
+        public IntPtr  hCursor;
+        public IntPtr  hbrBackground;
+        public string? lpszMenuName;
+        public string? lpszClassName;
+        public IntPtr  hIconSm;
+    }
+
+    // ── Delegates ─────────────────────────────────────────────────────────────
+
+    private delegate IntPtr WndProcDelegate(IntPtr hWnd, uint msg, IntPtr wParam, IntPtr lParam);
 
     // ── P/Invoke declarations ─────────────────────────────────────────────────
 
@@ -180,8 +241,23 @@ internal static class WindowsShellContextMenu
     [DllImport("user32.dll")]
     private static extern bool GetCursorPos(out POINT lpPoint);
 
-    [DllImport("kernel32.dll")]
-    private static extern IntPtr GetConsoleWindow();
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+    private static extern ushort RegisterClassEx(ref WNDCLASSEX lpWndClass);
+
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+    private static extern IntPtr CreateWindowEx(
+        uint dwExStyle, string lpClassName, string? lpWindowName,
+        uint dwStyle, int x, int y, int nWidth, int nHeight,
+        IntPtr hWndParent, IntPtr hMenu, IntPtr hInstance, IntPtr lpParam);
+
+    [DllImport("user32.dll")]
+    private static extern bool DestroyWindow(IntPtr hWnd);
+
+    [DllImport("user32.dll")]
+    private static extern IntPtr DefWindowProc(IntPtr hWnd, uint uMsg, IntPtr wParam, IntPtr lParam);
+
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode)]
+    private static extern IntPtr GetModuleHandle(string? lpModuleName);
 
     [DllImport("ole32.dll")]
     private static extern void CoTaskMemFree(IntPtr pv);
