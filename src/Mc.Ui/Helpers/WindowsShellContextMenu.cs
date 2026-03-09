@@ -95,10 +95,14 @@ internal static class WindowsShellContextMenu
             hr = SHBindToParent(pidlFull, ref iidSF, out psfRaw, out IntPtr pidlChild);
             if (hr != 0 || psfRaw == IntPtr.Zero) return;
 
-            // 4. Also parse the parent directory to get its standalone full PIDL
-            //    (needed by DEFCONTEXTMENU.pidlFolder).
-            string dirPath = Path.GetDirectoryName(filePath) ?? filePath;
-            SHParseDisplayName(dirPath, IntPtr.Zero, out pidlFolder, 0, out _);
+            // 4. Obtain the parent folder's absolute PIDL directly from psfRaw.
+            //    Re-parsing the directory path via SHParseDisplayName can produce a
+            //    subtly different PIDL (e.g. different case or junction resolution)
+            //    than the one psfRaw actually represents. The Properties verb combines
+            //    pidlFolder + pidlChild to resolve the file path; a mismatch causes
+            //    "The properties for this item are not available". Asking the folder
+            //    object for its own PIDL guarantees consistency.
+            SHGetIDListFromObject(psfRaw, out pidlFolder);
 
             // 5. Open the registry keys that define which shell extension handlers
             //    to load. Explorer passes these to SHCreateDefaultContextMenu so
@@ -370,6 +374,9 @@ internal static class WindowsShellContextMenu
     [DllImport("shell32.dll")]
     private static extern int SHCreateDefaultContextMenu(
         ref DEFCONTEXTMENU pdcm, ref Guid riid, out IntPtr ppv);
+
+    [DllImport("shell32.dll")]
+    private static extern int SHGetIDListFromObject(IntPtr punk, out IntPtr ppidl);
 
     [DllImport("user32.dll")]
     private static extern IntPtr CreatePopupMenu();
