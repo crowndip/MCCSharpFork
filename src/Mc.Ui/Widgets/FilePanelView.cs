@@ -138,10 +138,7 @@ public sealed class FilePanelView : View
         }
 
         if (!_isActive)
-        {
             BecameActive?.Invoke(this, EventArgs.Empty);
-            return;
-        }
 
         var idx = HitTestEntry(e);
         if (idx < 0) return;
