@@ -815,9 +815,50 @@ public sealed class McApplication : Toplevel
     /// <summary>Launch an external viewer or editor with the given file path.</summary>
     private static void LaunchExternalProgram(string program, string filePath)
     {
-        // Single-quote the path to safely handle spaces and special chars in shell
-        var quotedPath = "'" + filePath.Replace("'", "'\\''") + "'";
-        ProcessHelper.RunDetached($"{program} {quotedPath}");
+        if (string.IsNullOrWhiteSpace(program)) return;
+
+        // Parse the program field which may be:
+        //   "C:\path\prog.exe"          – quoted path (may contain spaces)
+        //   C:\TOOLS\prog.exe           – unquoted absolute path
+        //   code --wait                 – command + flags
+        program = program.Trim();
+
+        string exe;
+        string[] preArgs;
+
+        if (program.StartsWith('"'))
+        {
+            int close = program.IndexOf('"', 1);
+            exe     = close > 0 ? program[1..close] : program[1..];
+            var rem = close > 0 ? program[(close + 1)..].Trim() : string.Empty;
+            preArgs = rem.Length > 0 ? rem.Split(' ', StringSplitOptions.RemoveEmptyEntries) : [];
+        }
+        else
+        {
+            // If it looks like an absolute path (drive letter or /), treat the whole
+            // string as the executable so paths with spaces don't need quoting.
+            bool isAbsPath = program.Length >= 2 &&
+                             (program[1] == ':' || program[0] == '/' || program.StartsWith(@"\\"));
+            if (isAbsPath)
+            {
+                exe     = program;
+                preArgs = [];
+            }
+            else
+            {
+                int sp  = program.IndexOf(' ');
+                exe     = sp < 0 ? program : program[..sp];
+                var rem = sp < 0 ? string.Empty : program[(sp + 1)..].Trim();
+                preArgs = rem.Length > 0 ? rem.Split(' ', StringSplitOptions.RemoveEmptyEntries) : [];
+            }
+        }
+
+        var allArgs = new string[preArgs.Length + 1];
+        preArgs.CopyTo(allArgs, 0);
+        allArgs[^1] = filePath;
+
+        if (!ProcessHelper.TryLaunchArgs(exe, allArgs))
+            MessageDialog.Error($"Could not launch external program:\n{exe}");
     }
 
     private void EditCurrent()
