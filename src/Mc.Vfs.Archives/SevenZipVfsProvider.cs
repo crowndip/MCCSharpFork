@@ -11,7 +11,17 @@ namespace Mc.Vfs.Archives;
 public sealed class SevenZipVfsProvider : IVfsProvider
 {
     private static readonly string[] Candidates = ["7z", "7za", "7zz"];
+    private readonly string? _configuredPath;
     private string? _exe; // resolved at Initialize()
+
+    /// <param name="configuredPath">
+    /// Full path to 7z.exe set by the user in Options → Configuration.
+    /// Tried first; falls back to PATH candidates if null/empty or not found.
+    /// </param>
+    public SevenZipVfsProvider(string? configuredPath = null)
+    {
+        _configuredPath = configuredPath;
+    }
 
     public IReadOnlyList<string> Schemes => ["7z"];
     public string Name => "7-Zip Archive";
@@ -25,10 +35,20 @@ public sealed class SevenZipVfsProvider : IVfsProvider
 
     public void Initialize()
     {
+        // Try user-configured path first (e.g. C:\Program Files\7-Zip\7z.exe)
+        if (!string.IsNullOrWhiteSpace(_configuredPath))
+        {
+            if (TryExec(_configuredPath, "i", out _)) { _exe = _configuredPath; return; }
+        }
+        // Fall back to well-known names on PATH
         foreach (var candidate in Candidates)
         {
-            if (TryExec(candidate, "i", out _)) { _exe = candidate; break; }
+            if (TryExec(candidate, "i", out _)) { _exe = candidate; return; }
         }
+        // Last-resort: common Windows install location
+        const string winDefault = @"C:\Program Files\7-Zip\7z.exe";
+        if (File.Exists(winDefault) && TryExec(winDefault, "i", out _))
+            _exe = winDefault;
     }
 
     public void Dispose() { }
@@ -182,7 +202,9 @@ public sealed class SevenZipVfsProvider : IVfsProvider
     {
         if (_exe == null)
             throw new InvalidOperationException(
-                "7z/7za not found on PATH — install p7zip-full to browse .7z archives");
+                "7z executable not found.\n" +
+                "Set the full path in Options → Configuration → 7-Zip provider,\n" +
+                "or install 7-Zip and ensure 7z.exe is on PATH.");
     }
 
     /// <summary>
