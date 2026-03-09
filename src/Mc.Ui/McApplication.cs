@@ -167,6 +167,9 @@ public sealed class McApplication : Toplevel
                 // ── Favorites ─────────────────────────────────────────────
                 _favoritesMenu = BuildFavoritesMenu(),
 
+                // ── Drives ────────────────────────────────────────────────
+                BuildDrivesMenu(),
+
                 // ── Tools ─────────────────────────────────────────────────
                 new MenuBarItem("_Tools", new MenuItem[]
                 {
@@ -2901,6 +2904,70 @@ public sealed class McApplication : Toplevel
     private void NavigateToFavorite(string path)
     {
         _controller.NavigateTo(VfsPath.FromLocal(path));
+    }
+
+    // --- Drives menu ---
+
+    private MenuBarItem BuildDrivesMenu()
+    {
+        var items = new List<MenuItem>();
+
+        try
+        {
+            foreach (var drive in DriveInfo.GetDrives())
+            {
+                string displayName;
+                string rootPath = drive.Name;
+                bool ready = drive.IsReady;
+
+                if (ready)
+                {
+                    string label = string.Empty;
+                    try { label = drive.VolumeLabel; } catch { }
+
+                    string typeTag = drive.DriveType switch
+                    {
+                        DriveType.CDRom     => "CD",
+                        DriveType.Network   => "Net",
+                        DriveType.Removable => "Removable",
+                        DriveType.Ram       => "RAM",
+                        _                   => string.Empty,
+                    };
+
+                    if (!string.IsNullOrEmpty(label) && !string.IsNullOrEmpty(typeTag))
+                        displayName = $"{rootPath.TrimEnd('/', '\\')}  {label} [{typeTag}]";
+                    else if (!string.IsNullOrEmpty(label))
+                        displayName = $"{rootPath.TrimEnd('/', '\\')}  {label}";
+                    else if (!string.IsNullOrEmpty(typeTag))
+                        displayName = $"{rootPath.TrimEnd('/', '\\')}  [{typeTag}]";
+                    else
+                        displayName = rootPath.TrimEnd('/', '\\');
+                }
+                else
+                {
+                    displayName = $"{rootPath.TrimEnd('/', '\\')}  [not ready]";
+                }
+
+                var captured = rootPath;
+                items.Add(new MenuItem(displayName, string.Empty,
+                    () => _controller.NavigateTo(VfsPath.FromLocal(captured)),
+                    canExecute: () => ready));
+            }
+        }
+        catch { /* drive enumeration failed */ }
+
+        if (items.Count > 0) items.Add(null!);
+        items.Add(new MenuItem("_Open location...", string.Empty, OpenLocation));
+
+        return new MenuBarItem("_Drives", items.ToArray());
+    }
+
+    private void OpenLocation()
+    {
+        var path = InputDialog.Show("Open Location",
+            "Enter local or network path:", string.Empty);
+        if (string.IsNullOrWhiteSpace(path)) return;
+        _controller.NavigateTo(VfsPath.Parse(path.Trim()));
     }
 
     // --- Command menu: User menu ---
