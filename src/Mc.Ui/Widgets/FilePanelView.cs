@@ -125,6 +125,18 @@ public sealed class FilePanelView : View
 
     private void OnMouseClick(object? sender, MouseEventArgs e)
     {
+        // Mouse wheel: scroll the viewport, keep cursor inside visible range.
+        // Activate the panel first if it wasn't focused — scrolling over an
+        // inactive panel is a natural gesture that implies switching to it.
+        if (e.Flags.HasFlag(MouseFlags.WheeledDown) ||
+            e.Flags.HasFlag(MouseFlags.WheeledUp))
+        {
+            if (!_isActive)
+                BecameActive?.Invoke(this, EventArgs.Empty);
+            ScrollBy(e.Flags.HasFlag(MouseFlags.WheeledDown) ? 3 : -3);
+            return;
+        }
+
         if (!_isActive)
         {
             BecameActive?.Invoke(this, EventArgs.Empty);
@@ -213,6 +225,42 @@ public sealed class FilePanelView : View
             else if (_cursorIndex >= _scrollOffset + contentRows)
                 _scrollOffset = _cursorIndex - contentRows + 1;
         }
+    }
+
+    /// <summary>
+    /// Scrolls the viewport by <paramref name="delta"/> rows (positive = down),
+    /// then clamps the cursor so it stays within the newly visible range.
+    /// In Brief (two-column) mode the scroll is rounded to column boundaries.
+    /// </summary>
+    private void ScrollBy(int delta)
+    {
+        int count = _listing.Entries.Count;
+        if (count == 0) return;
+        int rows = ContentRows;
+        if (rows <= 0) return;
+
+        if (_listingMode == PanelListingMode.Brief)
+        {
+            // In Brief mode _scrollOffset must stay on a column boundary (multiple of rows).
+            int totalCols = (int)Math.Ceiling((double)count / rows);
+            int currentCol = _scrollOffset / rows;
+            int newCol = Math.Clamp(currentCol + (delta > 0 ? 1 : -1), 0, Math.Max(0, totalCols - 2));
+            _scrollOffset = newCol * rows;
+        }
+        else
+        {
+            _scrollOffset = Math.Clamp(_scrollOffset + delta, 0, Math.Max(0, count - rows));
+        }
+
+        // Clamp cursor into the new visible range.
+        int visibleLast = _listingMode == PanelListingMode.Brief
+            ? _scrollOffset + 2 * rows - 1
+            : _scrollOffset + rows - 1;
+        _cursorIndex = Math.Clamp(_cursorIndex, _scrollOffset, Math.Min(visibleLast, count - 1));
+
+        UpdateStatus();
+        CursorChanged?.Invoke(this, _cursorIndex);
+        SetNeedsDraw();
     }
 
     private void UpdateStatus()
