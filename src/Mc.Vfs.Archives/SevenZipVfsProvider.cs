@@ -232,30 +232,56 @@ public sealed class SevenZipVfsProvider : IVfsProvider
 
     /// <summary>
     /// Read all entries in the archive using "7z l -slt" (technical listing).
-    /// Output format per entry (blocks separated by "----------"):
-    ///   Path = ...
-    ///   Size = ...
-    ///   Attributes = D... (directory if starts with D)
-    ///   Modified = YYYY-MM-DD HH:MM:SS
+    ///
+    /// Output structure:
+    ///   [header lines]
+    ///   --                        ← archive metadata block begins
+    ///   Path = /abs/path/arc.7z   ← the ARCHIVE itself (must be skipped)
+    ///   Type = 7z
+    ///   ...
+    ///   ----------                ← first separator: end of metadata, start of entries
+    ///   Path = folder1            ← first file/dir entry
+    ///   Folder = +
+    ///   Modified = ...
+    ///   ----------
+    ///   Path = folder1\file.txt   ← Windows uses backslashes
+    ///   Size = 1234
+    ///   Attributes = A
+    ///   Modified = ...
+    ///   ----------                ← (no trailing separator sometimes)
+    ///
+    /// Bugs fixed vs original:
+    ///   - Skip the archive-metadata block (first block) so the .7z itself
+    ///     doesn't appear as a file entry in the listing.
+    ///   - Normalise backslashes to '/' so subdirectory grouping works on Windows.
+    ///   - Detect directories via "Folder = +" in addition to "Attributes = D…".
     /// </summary>
     private IEnumerable<(string path, long size, bool isDir, DateTime modified)> ReadEntries(string archive)
     {
         if (_exe == null) yield break;
-        string output;
-        if (!TryExec(_exe, $"l -slt {Q(archive)}", out output)) yield break;
+        if (!TryExec(_exe, $"l -slt {Q(archive)}", out var output)) yield break;
 
-        string? curPath  = null;
-        long    curSize  = 0;
-        bool    curIsDir = false;
-        var     curMod   = DateTime.MinValue;
+        string? curPath     = null;
+        long    curSize     = 0;
+        bool    curIsDir    = false;
+        var     curMod      = DateTime.MinValue;
+        bool    pastHeader  = false; // true after the first "----------" (archive metadata block)
 
         foreach (var raw in output.Split('\n'))
         {
             var line = raw.TrimEnd('\r');
             if (line.StartsWith("----------", StringComparison.Ordinal))
             {
-                if (curPath != null)
+                if (!pastHeader)
+                {
+                    // First separator ends the archive-metadata block.
+                    // Discard whatever was collected (it's archive info, not a file).
+                    pastHeader = true;
+                }
+                else if (curPath != null)
+                {
                     yield return (curPath, curSize, curIsDir, curMod);
+                }
                 curPath = null; curSize = 0; curIsDir = false; curMod = DateTime.MinValue;
                 continue;
             }
@@ -267,14 +293,28 @@ public sealed class SevenZipVfsProvider : IVfsProvider
 
             switch (key)
             {
-                case "Path":       curPath  = val; break;
-                case "Size":       long.TryParse(val, out curSize); break;
-                case "Attributes": curIsDir = val.Length > 0 && val[0] == 'D'; break;
-                case "Modified":   DateTime.TryParse(val, out curMod); break;
+                case "Path":
+                    // Normalise Windows backslashes → forward slashes for consistent splitting
+                    curPath = val.Replace('\\', '/');
+                    break;
+                case "Size":
+                    long.TryParse(val, out curSize);
+                    break;
+                case "Attributes":
+                    // "D___" prefix indicates a directory
+                    if (val.Length > 0 && val[0] == 'D') curIsDir = true;
+                    break;
+                case "Folder":
+                    // "Folder = +" is the primary directory indicator in .7z archives
+                    if (val == "+") curIsDir = true;
+                    break;
+                case "Modified":
+                    DateTime.TryParse(val, out curMod);
+                    break;
             }
         }
-        // Flush last entry (no trailing "----------" sometimes)
-        if (curPath != null)
+        // Flush last entry when output has no trailing "----------"
+        if (pastHeader && curPath != null)
             yield return (curPath, curSize, curIsDir, curMod);
     }
 
