@@ -6,12 +6,14 @@ namespace Mc.Ui.Helpers;
 /// <summary>
 /// Shows the native Windows Explorer shell context menu for a file or folder,
 /// identical to what appears when you right-click an item in Explorer.
-/// Uses IShellFolder + IContextMenu COM interfaces via P/Invoke.
+/// Uses SHCreateDefaultContextMenu (the same API Explorer uses internally)
+/// so that all dynamic shell extension handlers (7-Zip, Notepad++, etc.)
+/// are loaded correctly.
 /// </summary>
 [SupportedOSPlatform("windows")]
 internal static class WindowsShellContextMenu
 {
-    // IContextMenu flags
+    // IContextMenu / QueryContextMenu flags
     private const uint CMF_NORMAL      = 0x00000000;
     private const uint CMF_EXPLORE     = 0x00000001;
 
@@ -24,97 +26,127 @@ internal static class WindowsShellContextMenu
     private const uint WS_POPUP        = 0x80000000;
     private const uint WM_NULL         = 0x0000;
 
-    // Keep delegate alive for the lifetime of the process to prevent GC collection.
+    // Registry
+    private static readonly IntPtr HKEY_CLASSES_ROOT =
+        (IntPtr)unchecked((int)0x80000000);
+    private const uint KEY_READ = 0x20019;
+
+    // Keep delegate alive to prevent GC collection.
     private static readonly WndProcDelegate _wndProc = DefWindowProc;
 
     // ── Public entry point ────────────────────────────────────────────────────
 
     /// <summary>
     /// Shows the Windows shell context menu for <paramref name="filePath"/> at
-    /// the current mouse cursor position. Blocks until the user dismisses the menu
-    /// or selects a command, then executes the selected command.
+    /// the current mouse cursor position. Blocks until the user dismisses the
+    /// menu or selects a command, then executes the selected command.
     /// </summary>
     public static void Show(string filePath)
     {
-        // Shell context menu handlers are in-process STA COM servers (7-Zip,
-        // Notepad++, etc.). .NET console app threads are MTA by default, which
-        // causes COM to marshal calls across apartments — most extension handlers
-        // then silently fail to load, giving only the generic built-in menu.
-        // Fix: run the entire menu interaction on a dedicated STA thread so COM
-        // creates and calls the handlers in the correct apartment.
-        var thread = new Thread(() => ShowCore(filePath));
+        // Shell extension handlers are in-process STA COM servers. .NET console
+        // threads are MTA by default — spin up a dedicated STA thread so COM
+        // creates all handlers in the correct apartment.
+        var thread = new Thread(() =>
+        {
+            // OleInitialize is required by some shell handlers (OLE clipboard,
+            // drag-and-drop internals). Pair with OleUninitialize in finally.
+            OleInitialize(IntPtr.Zero);
+            try   { ShowCore(filePath); }
+            finally { OleUninitialize(); }
+        });
         thread.SetApartmentState(ApartmentState.STA);
         thread.IsBackground = true;
         thread.Start();
         thread.Join();
     }
 
+    // ── Core implementation ───────────────────────────────────────────────────
+
     private static void ShowCore(string filePath)
     {
-        // OleInitialize is required for shell extensions that use OLE drag-and-drop
-        // or clipboard internals. It calls CoInitializeEx(STA) internally; if the
-        // thread is already initialised it returns S_FALSE and increments the ref
-        // count, so we must pair it with OleUninitialize() regardless.
-        OleInitialize(IntPtr.Zero);
-        try
-        {
-            ShowCoreOle(filePath);
-        }
-        finally
-        {
-            OleUninitialize();
-        }
-    }
-
-    private static void ShowCoreOle(string filePath)
-    {
-        IntPtr pidlFull  = IntPtr.Zero;
-        IntPtr psfRaw    = IntPtr.Zero;
-        IntPtr pCMRaw    = IntPtr.Zero;
-        IntPtr hMenu     = IntPtr.Zero;
-        IntPtr hwndHost  = IntPtr.Zero;
+        IntPtr pidlFull    = IntPtr.Zero;  // full PIDL of file
+        IntPtr pidlFolder  = IntPtr.Zero;  // full PIDL of parent folder
+        IntPtr psfRaw      = IntPtr.Zero;  // IShellFolder* of parent
+        IntPtr pCMRaw      = IntPtr.Zero;  // IContextMenu*
+        IntPtr hMenu       = IntPtr.Zero;
+        IntPtr hwndHost    = IntPtr.Zero;
+        IntPtr apidlNative = IntPtr.Zero;  // native PCUITEMID_CHILD array (1 entry)
+        IntPtr hkeysNative = IntPtr.Zero;  // native HKEY array
+        var    hkeys       = new List<IntPtr>();
 
         try
         {
-            // 1. Create the helper window first so we can pass it as hwndOwner to
-            //    GetUIObjectOf. Some shell extensions (e.g. 7-Zip) inspect hwndOwner
-            //    during IContextMenu creation and skip registering their items when it
-            //    is NULL or belongs to a different process.
+            // 1. Create the helper window first.
+            //    TrackPopupMenuEx requires an HWND owned by the calling thread in
+            //    our process. GetConsoleWindow() returns conhost.exe's HWND (a
+            //    different process) which causes silent failure.
+            //    The window must exist before GetUIObjectOf so extension handlers
+            //    that inspect hwndOwner during init have a valid window to use.
             hwndHost = CreateHelperWindow();
             if (hwndHost == IntPtr.Zero) return;
 
-            // 2. Parse the absolute path into a shell PIDL.
+            // 2. Parse the file path into a full shell PIDL.
             int hr = SHParseDisplayName(filePath, IntPtr.Zero, out pidlFull, 0, out _);
             if (hr != 0 || pidlFull == IntPtr.Zero) return;
 
-            // 3. Bind to the parent IShellFolder; ppidlChild points WITHIN pidlFull
-            //    (must NOT be freed separately).
+            // 3. Bind to the parent IShellFolder. pidlChild points WITHIN pidlFull
+            //    — must NOT be freed separately.
             var iidSF = typeof(IShellFolder).GUID;
             hr = SHBindToParent(pidlFull, ref iidSF, out psfRaw, out IntPtr pidlChild);
             if (hr != 0 || psfRaw == IntPtr.Zero) return;
 
-            var shellFolder = (IShellFolder)Marshal.GetObjectForIUnknown(psfRaw);
+            // 4. Also parse the parent directory to get its standalone full PIDL
+            //    (needed by DEFCONTEXTMENU.pidlFolder).
+            string dirPath = Path.GetDirectoryName(filePath) ?? filePath;
+            SHParseDisplayName(dirPath, IntPtr.Zero, out pidlFolder, 0, out _);
 
-            // 4. Ask the parent folder for an IContextMenu for the child item.
-            //    ref IntPtr (not IntPtr[]) is required so the CLR emits a plain
-            //    PCUITEMID_CHILD* — managed array marshaling corrupts the call.
-            //    Pass hwndHost so extension handlers have a valid owner window.
+            // 5. Open the registry keys that define which shell extension handlers
+            //    to load. Explorer passes these to SHCreateDefaultContextMenu so
+            //    that dynamic handlers like 7-Zip (registered under HKCR\*\shellex
+            //    \ContextMenuHandlers) are discovered. Without them, only static
+            //    verbs (e.g. "Run as administrator" from HKCR\exefile\shell\runas)
+            //    appear because those come directly from the IShellFolder and do not
+            //    require the dynamic handler enumeration path.
+            hkeys = OpenAssocKeys(filePath);
+
+            // 6. Marshal the child PIDL and HKEY arrays into native memory for
+            //    DEFCONTEXTMENU (the struct holds raw pointers, not managed arrays).
+            apidlNative = Marshal.AllocHGlobal(IntPtr.Size);
+            Marshal.WriteIntPtr(apidlNative, pidlChild);
+
+            if (hkeys.Count > 0)
+            {
+                hkeysNative = Marshal.AllocHGlobal(IntPtr.Size * hkeys.Count);
+                for (int i = 0; i < hkeys.Count; i++)
+                    Marshal.WriteIntPtr(hkeysNative, i * IntPtr.Size, hkeys[i]);
+            }
+
+            // 7. Build the full default context menu via SHCreateDefaultContextMenu.
+            //    This is the same function Explorer uses — it aggregates static verbs
+            //    AND all dynamic shell extension handlers for the given file.
+            var dcm = new DEFCONTEXTMENU
+            {
+                hwnd       = hwndHost,
+                pidlFolder = pidlFolder,
+                psf        = psfRaw,
+                cidl       = 1,
+                apidl      = apidlNative,
+                cKeys      = (uint)hkeys.Count,
+                aKeys      = hkeysNative,
+            };
             var iidCM = typeof(IContextMenu).GUID;
-            shellFolder.GetUIObjectOf(hwndHost, 1, ref pidlChild, ref iidCM, IntPtr.Zero, out pCMRaw);
-            if (pCMRaw == IntPtr.Zero) return;
+            hr = SHCreateDefaultContextMenu(ref dcm, ref iidCM, out pCMRaw);
+            if (hr != 0 || pCMRaw == IntPtr.Zero) return;
 
             var contextMenu = (IContextMenu)Marshal.GetObjectForIUnknown(pCMRaw);
 
-            // 5. Populate the Win32 popup menu. idCmdFirst = 1.
+            // 8. Populate the Win32 popup menu. idCmdFirst = 1.
             hMenu = CreatePopupMenu();
             contextMenu.QueryContextMenu(hMenu, 0, 1, 0x7FFF, CMF_NORMAL | CMF_EXPLORE);
 
-            // 6. SetForegroundWindow is required before TrackPopupMenuEx so that
-            //    the menu's internal message loop receives keyboard input. Without it
-            //    Escape (and other keys) are never delivered to the menu and it cannot
-            //    be dismissed by keyboard.
+            // 9. SetForegroundWindow before TrackPopupMenuEx routes keyboard events
+            //    (Escape, arrow keys, Enter) to the menu's internal message loop.
             SetForegroundWindow(hwndHost);
-
             GetCursorPos(out POINT pt);
 
             uint cmd = TrackPopupMenuEx(
@@ -124,11 +156,10 @@ internal static class WindowsShellContextMenu
                 hwndHost,
                 IntPtr.Zero);
 
-            // Post WM_NULL to flush any pending messages left in the queue after the
-            // modal menu loop exits (documented requirement from MSDN).
+            // Flush any messages left in the queue after the modal loop exits.
             PostMessage(hwndHost, WM_NULL, IntPtr.Zero, IntPtr.Zero);
 
-            // 7. Invoke the selected command (cmd - 1 = offset from idCmdFirst = 1).
+            // 10. Execute the chosen command.
             if (cmd > 0)
             {
                 var invoke = new CMINVOKECOMMANDINFO
@@ -136,7 +167,7 @@ internal static class WindowsShellContextMenu
                     cbSize = Marshal.SizeOf<CMINVOKECOMMANDINFO>(),
                     fMask  = 0,
                     hwnd   = hwndHost,
-                    lpVerb = (IntPtr)(int)(cmd - 1),  // MAKEINTRESOURCEA(id)
+                    lpVerb = (IntPtr)(int)(cmd - 1),  // MAKEINTRESOURCEA(offset)
                     nShow  = SW_SHOWNORMAL,
                 };
                 contextMenu.InvokeCommand(ref invoke);
@@ -144,12 +175,61 @@ internal static class WindowsShellContextMenu
         }
         finally
         {
-            if (hwndHost != IntPtr.Zero) DestroyWindow(hwndHost);
-            if (hMenu    != IntPtr.Zero) DestroyMenu(hMenu);
-            if (pCMRaw   != IntPtr.Zero) Marshal.Release(pCMRaw);
-            if (psfRaw   != IntPtr.Zero) Marshal.Release(psfRaw);
-            if (pidlFull != IntPtr.Zero) CoTaskMemFree(pidlFull);
+            if (hwndHost    != IntPtr.Zero) DestroyWindow(hwndHost);
+            if (hMenu       != IntPtr.Zero) DestroyMenu(hMenu);
+            if (pCMRaw      != IntPtr.Zero) Marshal.Release(pCMRaw);
+            if (psfRaw      != IntPtr.Zero) Marshal.Release(psfRaw);
+            if (apidlNative != IntPtr.Zero) Marshal.FreeHGlobal(apidlNative);
+            if (hkeysNative != IntPtr.Zero) Marshal.FreeHGlobal(hkeysNative);
+            foreach (var hk in hkeys) RegCloseKey(hk);
+            if (pidlFolder  != IntPtr.Zero) CoTaskMemFree(pidlFolder);
+            if (pidlFull    != IntPtr.Zero) CoTaskMemFree(pidlFull);
         }
+    }
+
+    // ── Registry key helpers ──────────────────────────────────────────────────
+
+    /// <summary>
+    /// Opens the registry keys that list which shell extension handlers apply to
+    /// <paramref name="filePath"/> and returns their native HKEY handles.
+    /// Caller is responsible for closing them with RegCloseKey.
+    /// </summary>
+    private static List<IntPtr> OpenAssocKeys(string filePath)
+    {
+        var keys = new List<IntPtr>();
+
+        TryOpenKey("*",                  keys);  // handlers for ALL file types
+        TryOpenKey("AllFilesystemObjects", keys); // handlers for any fs object
+
+        string ext = Path.GetExtension(filePath).ToLowerInvariant();
+        if (string.IsNullOrEmpty(ext)) return keys;
+
+        TryOpenKey(ext, keys);  // e.g. ".txt", ".zip"
+
+        // Resolve the ProgID (e.g. "txtfile", "7-Zip.7z") and open that key too.
+        // The ProgID is the default value of HKCR\<ext>.
+        string? progId = ReadDefaultValue(ext);
+        if (!string.IsNullOrEmpty(progId))
+            TryOpenKey(progId, keys);
+
+        return keys;
+    }
+
+    private static void TryOpenKey(string subKey, List<IntPtr> list)
+    {
+        if (RegOpenKeyEx(HKEY_CLASSES_ROOT, subKey, 0, KEY_READ, out IntPtr hk) == 0)
+            list.Add(hk);
+    }
+
+    /// <summary>Reads the default (unnamed) string value of HKCR\<paramref name="subKey"/>.</summary>
+    private static string? ReadDefaultValue(string subKey)
+    {
+        try
+        {
+            return Microsoft.Win32.Registry.GetValue(
+                @"HKEY_CLASSES_ROOT\" + subKey, "", null) as string;
+        }
+        catch { return null; }
     }
 
     // ── Helper window ─────────────────────────────────────────────────────────
@@ -157,8 +237,8 @@ internal static class WindowsShellContextMenu
     private const string HelperClassName = "Mc_ShellMenuHost";
 
     /// <summary>
-    /// Creates a 1×1 hidden popup window owned by the calling thread.
-    /// This gives TrackPopupMenuEx a valid in-process HWND to work with.
+    /// Creates a minimal hidden WS_POPUP window owned by the calling thread,
+    /// giving TrackPopupMenuEx and shell extension handlers a valid in-process HWND.
     /// </summary>
     private static IntPtr CreateHelperWindow()
     {
@@ -171,9 +251,7 @@ internal static class WindowsShellContextMenu
             hInstance     = hInstance,
             lpszClassName = HelperClassName,
         };
-
-        // Ignore the return value — the class may already be registered.
-        RegisterClassEx(ref wc);
+        RegisterClassEx(ref wc);  // Ignore failure — class may already be registered.
 
         return CreateWindowEx(
             0, HelperClassName, null,
@@ -229,12 +307,30 @@ internal static class WindowsShellContextMenu
         public int    cbSize;
         public uint   fMask;
         public IntPtr hwnd;
-        public IntPtr lpVerb;       // MAKEINTRESOURCEA(id) for numeric invocation
+        public IntPtr lpVerb;
         public IntPtr lpParameters;
         public IntPtr lpDirectory;
         public int    nShow;
         public uint   dwHotKey;
         public IntPtr hIcon;
+    }
+
+    /// <summary>
+    /// Input structure for SHCreateDefaultContextMenu.
+    /// Mirrors the Windows SDK DEFCONTEXTMENU typedef exactly.
+    /// </summary>
+    [StructLayout(LayoutKind.Sequential)]
+    private struct DEFCONTEXTMENU
+    {
+        public IntPtr hwnd;         // owner HWND
+        public IntPtr pcmcb;        // IContextMenuCB* (null = none)
+        public IntPtr pidlFolder;   // full PIDL of parent folder
+        public IntPtr psf;          // IShellFolder* of parent folder
+        public uint   cidl;         // number of selected items
+        public IntPtr apidl;        // PCUITEMID_CHILD* array (native alloc)
+        public IntPtr punkAssocInfo; // IUnknown* (null = use file assoc)
+        public uint   cKeys;        // number of registry keys
+        public IntPtr aKeys;        // HKEY array (native alloc, null if cKeys=0)
     }
 
     [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
@@ -256,9 +352,10 @@ internal static class WindowsShellContextMenu
 
     // ── Delegates ─────────────────────────────────────────────────────────────
 
-    private delegate IntPtr WndProcDelegate(IntPtr hWnd, uint msg, IntPtr wParam, IntPtr lParam);
+    private delegate IntPtr WndProcDelegate(
+        IntPtr hWnd, uint msg, IntPtr wParam, IntPtr lParam);
 
-    // ── P/Invoke declarations ─────────────────────────────────────────────────
+    // ── P/Invoke ──────────────────────────────────────────────────────────────
 
     [DllImport("shell32.dll", CharSet = CharSet.Unicode)]
     private static extern int SHParseDisplayName(
@@ -269,6 +366,10 @@ internal static class WindowsShellContextMenu
     private static extern int SHBindToParent(
         IntPtr pidl, ref Guid riid,
         out IntPtr ppv, out IntPtr ppidlLast);
+
+    [DllImport("shell32.dll")]
+    private static extern int SHCreateDefaultContextMenu(
+        ref DEFCONTEXTMENU pdcm, ref Guid riid, out IntPtr ppv);
 
     [DllImport("user32.dll")]
     private static extern IntPtr CreatePopupMenu();
@@ -284,6 +385,13 @@ internal static class WindowsShellContextMenu
     [DllImport("user32.dll")]
     private static extern bool GetCursorPos(out POINT lpPoint);
 
+    [DllImport("user32.dll")]
+    private static extern bool SetForegroundWindow(IntPtr hWnd);
+
+    [DllImport("user32.dll")]
+    private static extern bool PostMessage(
+        IntPtr hWnd, uint msg, IntPtr wParam, IntPtr lParam);
+
     [DllImport("user32.dll", CharSet = CharSet.Unicode)]
     private static extern ushort RegisterClassEx(ref WNDCLASSEX lpWndClass);
 
@@ -297,7 +405,8 @@ internal static class WindowsShellContextMenu
     private static extern bool DestroyWindow(IntPtr hWnd);
 
     [DllImport("user32.dll")]
-    private static extern IntPtr DefWindowProc(IntPtr hWnd, uint uMsg, IntPtr wParam, IntPtr lParam);
+    private static extern IntPtr DefWindowProc(
+        IntPtr hWnd, uint uMsg, IntPtr wParam, IntPtr lParam);
 
     [DllImport("kernel32.dll", CharSet = CharSet.Unicode)]
     private static extern IntPtr GetModuleHandle(string? lpModuleName);
@@ -311,9 +420,11 @@ internal static class WindowsShellContextMenu
     [DllImport("ole32.dll")]
     private static extern void OleUninitialize();
 
-    [DllImport("user32.dll")]
-    private static extern bool SetForegroundWindow(IntPtr hWnd);
+    [DllImport("advapi32.dll", CharSet = CharSet.Unicode)]
+    private static extern int RegOpenKeyEx(
+        IntPtr hKey, string lpSubKey, uint ulOptions,
+        uint samDesired, out IntPtr phkResult);
 
-    [DllImport("user32.dll")]
-    private static extern bool PostMessage(IntPtr hWnd, uint msg, IntPtr wParam, IntPtr lParam);
+    [DllImport("advapi32.dll")]
+    private static extern int RegCloseKey(IntPtr hKey);
 }
