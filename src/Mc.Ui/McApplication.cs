@@ -1787,20 +1787,28 @@ public sealed class McApplication : Toplevel
             return;
         }
 
-        // Ask before overwriting when the destination already has content.
+        var msg = $"Unpack \"{entry.Name}\"\ninto: {destDir}";
         if (Directory.EnumerateFileSystemEntries(destDir).Any())
+            msg += "\n\nDestination has files — existing will be overwritten.";
+
+        var runMode = AskRunMode("Unpack here", msg, "Unpack");
+        if (runMode == null) return;
+
+        if (runMode == false) // background
         {
-            if (!MessageDialog.Confirm("Unpack here",
-                    "Destination folder already contains files.\n" +
-                    "Existing files with the same name will be overwritten.",
-                    "Overwrite all", "Cancel"))
-                return;
+            StartSevenZipBackground($"Unpack {entry.Name}", exe, psi =>
+            {
+                psi.ArgumentList.Add("x");
+                psi.ArgumentList.Add(archivePath);
+                psi.ArgumentList.Add($"-o{destDir}");
+                psi.ArgumentList.Add("-y");
+                psi.ArgumentList.Add("-bb1");
+            });
+            return;
         }
 
-        // Count total entries for the progress bar (fast listing pass).
+        // Foreground: count entries then show progress dialog.
         int totalEntries = CountArchiveEntries(exe, archivePath);
-
-        // Run extraction on a background thread, show progress on the main thread.
         int    exitCode  = 0;
         string errorText = string.Empty;
 
@@ -2018,6 +2026,31 @@ public sealed class McApplication : Toplevel
         var timestamp   = DateTime.Now.ToString("yyyyMMdd_HHmmss");
         var archivePath = Path.Combine(destDir, $"Archive_{timestamp}.{extension}");
 
+        var itemLabel = sources.Count == 1 ? $"\"{sources[0].Name}\"" : $"{sources.Count} items";
+        var runMode = AskRunMode(
+            $"Pack to {extension.ToUpperInvariant()}",
+            $"Pack {itemLabel} to:\n{Path.GetFileName(archivePath)}",
+            "Pack");
+        if (runMode == null) return;
+
+        if (runMode == false) // background
+        {
+            StartSevenZipBackground($"Pack {Path.GetFileName(archivePath)}", exe, psi =>
+            {
+                psi.WorkingDirectory = destDir;
+                psi.ArgumentList.Add("a");
+                psi.ArgumentList.Add(formatSwitch);
+                psi.ArgumentList.Add("-mx=7");
+                psi.ArgumentList.Add("-bb1");
+                psi.ArgumentList.Add("-y");
+                psi.ArgumentList.Add(archivePath);
+                foreach (var e in sources)
+                    psi.ArgumentList.Add(e.FullPath.Path);
+            });
+            return;
+        }
+
+        // Foreground: show progress dialog.
         int    exitCode  = 0;
         string errorText = string.Empty;
 
@@ -2092,6 +2125,94 @@ public sealed class McApplication : Toplevel
 
         _controller.ActivePanel.Reload();
         _controller.InactivePanel.Reload();
+    }
+
+    /// <summary>
+    /// Shows a 3-button dialog: action / Background / Cancel.
+    /// Returns true = run foreground, false = run background, null = cancelled.
+    /// </summary>
+    private static bool? AskRunMode(string title, string message, string actionLabel)
+    {
+        bool? result = null;
+        var lines    = message.Split('\n');
+        int  width   = Math.Min(72, Math.Max(44, lines.Max(l => l.Length) + 6));
+        int  height  = lines.Length + 6;
+
+        var d = new Dialog { Title = title, Width = width, Height = height, ColorScheme = McTheme.Dialog };
+
+        int y = 1;
+        foreach (var line in lines)
+            d.Add(new Label { X = 1, Y = y++, Text = line });
+
+        var btnAction = new Button { Text = actionLabel, IsDefault = true };
+        btnAction.Accepting += (_, _) => { result = true;  Application.RequestStop(d); };
+
+        var btnBg = new Button { Text = "Background" };
+        btnBg.Accepting += (_, _) => { result = false; Application.RequestStop(d); };
+
+        var btnCancel = new Button { Text = "Cancel" };
+        btnCancel.Accepting += (_, _) => Application.RequestStop(d);
+
+        d.AddButton(btnAction);
+        d.AddButton(btnBg);
+        d.AddButton(btnCancel);
+        Application.Run(d);
+        d.Dispose();
+        return result;
+    }
+
+    /// <summary>
+    /// Starts a 7-Zip process as a background job tracked in <see cref="_backgroundJobs"/>.
+    /// <paramref name="configureArgs"/> receives a pre-built <see cref="ProcessStartInfo"/> and
+    /// should add the required ArgumentList entries. The process is killed if the job is cancelled.
+    /// </summary>
+    private void StartSevenZipBackground(string jobName, string exe,
+        Action<System.Diagnostics.ProcessStartInfo> configureArgs)
+    {
+        var job = new BackgroundJob { Name = jobName };
+        _backgroundJobs.Add(job);
+        job.Task = Task.Run(() =>
+        {
+            System.Diagnostics.Process? proc = null;
+            try
+            {
+                var psi = new System.Diagnostics.ProcessStartInfo(exe)
+                {
+                    UseShellExecute        = false,
+                    RedirectStandardOutput = true,
+                    RedirectStandardError  = true,
+                };
+                configureArgs(psi);
+                proc = System.Diagnostics.Process.Start(psi)
+                    ?? throw new InvalidOperationException("Failed to start 7z.");
+
+                // Kill the process if the user hits "Kill" in the Background jobs dialog.
+                job.Cts.Token.Register(() => { try { proc.Kill(entireProcessTree: true); } catch { } });
+
+                string? line;
+                while ((line = proc.StandardOutput.ReadLine()) != null)
+                {
+                    // Both extraction ("- file") and packing ("+ file") use prefix + space
+                    if (line.Length > 2 && line[1] == ' ')
+                        job.Status = line[2..];
+                }
+
+                proc.WaitForExit(300_000);
+                job.Status = job.Cts.IsCancellationRequested
+                    ? "Cancelled"
+                    : proc.ExitCode == 0 ? "Done" : $"Error (exit {proc.ExitCode})";
+            }
+            catch (Exception ex)
+            {
+                job.Status = $"Error: {ex.Message}";
+            }
+            finally
+            {
+                proc?.Dispose();
+                job.Running = false;
+                Application.Invoke(RefreshPanels);
+            }
+        });
     }
 
     /// <summary>
@@ -4185,12 +4306,6 @@ public sealed class McApplication : Toplevel
             Height = Math.Min(5 + _backgroundJobs.Count * 2, 22),
             ColorScheme = McTheme.Dialog,
         };
-
-        for (int i = 0; i < _backgroundJobs.Count; i++)
-        {
-            var job = _backgroundJobs[i];
-            d.Add(new Label { X = 1, Y = 1 + i * 2, Text = $"{job.Name}: {job.Status}" });
-        }
 
         var listView = new ListView
         {
