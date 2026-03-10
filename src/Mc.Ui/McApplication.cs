@@ -1783,33 +1783,80 @@ public sealed class McApplication : Toplevel
             return;
         }
 
-        string output;
-        int exitCode;
-        try
+        // Ask before overwriting when the destination already has content.
+        if (Directory.EnumerateFileSystemEntries(destDir).Any())
         {
-            var psi = new System.Diagnostics.ProcessStartInfo(exe)
-            {
-                UseShellExecute        = false,
-                RedirectStandardOutput = true,
-                RedirectStandardError  = true,
-            };
-            // x = extract with full paths; -o = output dir; -y = yes to all prompts
-            psi.ArgumentList.Add("x");
-            psi.ArgumentList.Add(archivePath);
-            psi.ArgumentList.Add($"-o{destDir}");
-            psi.ArgumentList.Add("-y");
+            if (!MessageDialog.Confirm("Unpack here",
+                    "Destination folder already contains files.\n" +
+                    "Existing files with the same name will be overwritten.",
+                    "Overwrite all", "Cancel"))
+                return;
+        }
 
-            using var proc = System.Diagnostics.Process.Start(psi)
-                ?? throw new InvalidOperationException("Failed to start 7z.");
-            output   = proc.StandardOutput.ReadToEnd() + proc.StandardError.ReadToEnd();
-            proc.WaitForExit(300_000);
-            exitCode = proc.ExitCode;
-        }
-        catch (Exception ex)
+        // Count total entries for the progress bar (fast listing pass).
+        int totalEntries = CountArchiveEntries(exe, archivePath);
+
+        // Run extraction on a background thread, show progress on the main thread.
+        int    exitCode  = 0;
+        string errorText = string.Empty;
+
+        using var progress = new ProgressDialog("Unpacking");
+        _ = Task.Run(() =>
         {
-            MessageDialog.Error($"Failed to run 7z:\n{ex.Message}");
-            return;
-        }
+            try
+            {
+                var psi = new System.Diagnostics.ProcessStartInfo(exe)
+                {
+                    UseShellExecute        = false,
+                    RedirectStandardOutput = true,
+                    RedirectStandardError  = true,
+                };
+                // x = extract with full paths; -bb1 = one line per file; -y = yes to all
+                psi.ArgumentList.Add("x");
+                psi.ArgumentList.Add(archivePath);
+                psi.ArgumentList.Add($"-o{destDir}");
+                psi.ArgumentList.Add("-y");
+                psi.ArgumentList.Add("-bb1");
+
+                using var proc = System.Diagnostics.Process.Start(psi)
+                    ?? throw new InvalidOperationException("Failed to start 7z.");
+
+                int done = 0;
+                string? line;
+                while ((line = proc.StandardOutput.ReadLine()) != null)
+                {
+                    // -bb1 outputs "- path/to/file" for each extracted entry
+                    if (line.StartsWith("- ", StringComparison.Ordinal))
+                    {
+                        done++;
+                        var name = line[2..];
+                        progress.Report(new OperationProgress
+                        {
+                            CurrentFile = name,
+                            FilesDone   = done,
+                            TotalFiles  = totalEntries,
+                            BytesDone   = done,
+                            TotalBytes  = totalEntries > 0 ? totalEntries : done + 1,
+                        });
+                    }
+                }
+
+                errorText = proc.StandardError.ReadToEnd();
+                proc.WaitForExit(300_000);
+                exitCode = proc.ExitCode;
+            }
+            catch (Exception ex)
+            {
+                exitCode  = -1;
+                errorText = ex.Message;
+            }
+            finally
+            {
+                progress.Close();
+            }
+        });
+
+        progress.Show(); // blocks until Close() is called from the task
 
         if (exitCode != 0)
         {
@@ -1819,6 +1866,44 @@ public sealed class McApplication : Toplevel
 
         _controller.ActivePanel.Reload();
         _controller.InactivePanel.Reload();
+    }
+
+    /// <summary>
+    /// Runs "7z l" on the archive and returns the total number of entries
+    /// (files + folders) by parsing the summary line at the bottom.
+    /// Returns 0 on any failure (progress bar will run without a known total).
+    /// </summary>
+    private static int CountArchiveEntries(string exe, string archivePath)
+    {
+        try
+        {
+            var psi = new System.Diagnostics.ProcessStartInfo(exe)
+            {
+                UseShellExecute        = false,
+                RedirectStandardOutput = true,
+                RedirectStandardError  = true,
+            };
+            psi.ArgumentList.Add("l");
+            psi.ArgumentList.Add(archivePath);
+
+            using var proc = System.Diagnostics.Process.Start(psi);
+            if (proc == null) return 0;
+            var output = proc.StandardOutput.ReadToEnd();
+            proc.WaitForExit(30_000);
+
+            // Last data line: "2024-01-01  D....  …   N files, M folders"
+            // or just "N files" with no folders line.
+            var match = System.Text.RegularExpressions.Regex.Match(
+                output,
+                @"(\d+)\s+files?(?:,\s*(\d+)\s+folders?)?",
+                System.Text.RegularExpressions.RegexOptions.RightToLeft);
+            if (!match.Success) return 0;
+
+            int files   = int.Parse(match.Groups[1].Value);
+            int folders = match.Groups[2].Success ? int.Parse(match.Groups[2].Value) : 0;
+            return files + folders;
+        }
+        catch { return 0; }
     }
 
     private void OnCommandEntered(object? sender, string command)
