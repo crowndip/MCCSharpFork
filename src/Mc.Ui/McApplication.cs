@@ -2027,15 +2027,19 @@ public sealed class McApplication : Toplevel
         var archivePath = Path.Combine(destDir, $"Archive_{timestamp}.{extension}");
 
         var itemLabel = sources.Count == 1 ? $"\"{sources[0].Name}\"" : $"{sources.Count} items";
-        var runMode = AskRunMode(
+        var (runMode, chosenName) = AskPackMode(
             $"Pack to {extension.ToUpperInvariant()}",
-            $"Pack {itemLabel} to:\n{Path.GetFileName(archivePath)}",
-            "Pack");
+            destDir,
+            Path.GetFileName(archivePath),
+            itemLabel);
         if (runMode == null) return;
+
+        // Rebuild archivePath from user-edited filename.
+        archivePath = Path.Combine(destDir, chosenName);
 
         if (runMode == false) // background
         {
-            StartSevenZipBackground($"Pack {Path.GetFileName(archivePath)}", exe, psi =>
+            StartSevenZipBackground($"Pack {chosenName}", exe, psi =>
             {
                 psi.WorkingDirectory = destDir;
                 psi.ArgumentList.Add("a");
@@ -2130,6 +2134,7 @@ public sealed class McApplication : Toplevel
     /// <summary>
     /// Shows a 3-button dialog: action / Background / Cancel.
     /// Returns true = run foreground, false = run background, null = cancelled.
+    /// Used for operations that have no editable output name (e.g. Unpack here).
     /// </summary>
     private static bool? AskRunMode(string title, string message, string actionLabel)
     {
@@ -2162,16 +2167,82 @@ public sealed class McApplication : Toplevel
     }
 
     /// <summary>
-    /// Starts a 7-Zip process as a background job tracked in <see cref="_backgroundJobs"/>.
-    /// <paramref name="configureArgs"/> receives a pre-built <see cref="ProcessStartInfo"/> and
-    /// should add the required ArgumentList entries. The process is killed if the job is cancelled.
+    /// Shows the pack confirmation dialog. The destination filename is pre-filled with
+    /// <paramref name="defaultName"/> but is fully editable.
+    /// Returns (true=foreground, false=background, null=cancelled, chosenFilename).
+    /// </summary>
+    private static (bool? mode, string archiveName) AskPackMode(
+        string title, string destDir, string defaultName, string itemLabel)
+    {
+        bool?  mode        = null;
+        string archiveName = defaultName;
+
+        int width = Math.Min(72, Math.Max(52, Math.Max(destDir.Length, defaultName.Length) + 6));
+
+        var d = new Dialog { Title = title, Width = width, Height = 10, ColorScheme = McTheme.Dialog };
+
+        // Truncate destDir display if wider than the dialog interior.
+        var dirDisplay = destDir.Length > width - 4
+            ? "…" + destDir[^(width - 5)..]
+            : destDir;
+
+        d.Add(new Label { X = 1, Y = 1, Text = $"Pack {itemLabel} to:" });
+        d.Add(new Label { X = 1, Y = 2, Text = dirDisplay });
+
+        var nameField = new TextField
+        {
+            X = 1, Y = 4, Width = Dim.Fill(2), Height = 1,
+            Text = defaultName,
+            ColorScheme = McTheme.Dialog,
+        };
+        nameField.CursorPosition = defaultName.LastIndexOf('.') > 0
+            ? defaultName.LastIndexOf('.')
+            : defaultName.Length;
+        d.Add(nameField);
+
+        var btnPack = new Button { Text = "Pack", IsDefault = true };
+        btnPack.Accepting += (_, _) =>
+        {
+            archiveName = nameField.Text?.ToString() ?? defaultName;
+            mode = true;
+            Application.RequestStop(d);
+        };
+
+        var btnBg = new Button { Text = "Background" };
+        btnBg.Accepting += (_, _) =>
+        {
+            archiveName = nameField.Text?.ToString() ?? defaultName;
+            mode = false;
+            Application.RequestStop(d);
+        };
+
+        var btnCancel = new Button { Text = "Cancel" };
+        btnCancel.Accepting += (_, _) => Application.RequestStop(d);
+
+        d.AddButton(btnPack);
+        d.AddButton(btnBg);
+        d.AddButton(btnCancel);
+        nameField.SetFocus();
+        Application.Run(d);
+        d.Dispose();
+        return (mode, archiveName);
+    }
+
+    /// <summary>
+    /// Starts a 7-Zip process as a true background OS thread tracked in
+    /// <see cref="_backgroundJobs"/>. Uses async output reading to avoid stdout/stderr
+    /// deadlocks. The process is killed when the job's <see cref="BackgroundJob.Cts"/> is
+    /// cancelled (via the Kill button in the Background Jobs dialog).
     /// </summary>
     private void StartSevenZipBackground(string jobName, string exe,
         Action<System.Diagnostics.ProcessStartInfo> configureArgs)
     {
         var job = new BackgroundJob { Name = jobName };
         _backgroundJobs.Add(job);
-        job.Task = Task.Run(() =>
+
+        // Use a dedicated OS thread so the Terminal.Gui synchronization context
+        // cannot schedule this work back onto the UI thread.
+        var thread = new System.Threading.Thread(() =>
         {
             System.Diagnostics.Process? proc = null;
             try
@@ -2186,16 +2257,19 @@ public sealed class McApplication : Toplevel
                 proc = System.Diagnostics.Process.Start(psi)
                     ?? throw new InvalidOperationException("Failed to start 7z.");
 
-                // Kill the process if the user hits "Kill" in the Background jobs dialog.
+                // Kill the process if the user hits "Kill" in the Background Jobs dialog.
                 job.Cts.Token.Register(() => { try { proc.Kill(entireProcessTree: true); } catch { } });
 
-                string? line;
-                while ((line = proc.StandardOutput.ReadLine()) != null)
+                // Read both streams asynchronously to avoid pipe-buffer deadlocks.
+                // Both extraction ("- file") and packing ("+ file") use "<prefix> <space> <name>".
+                proc.OutputDataReceived += (_, e) =>
                 {
-                    // Both extraction ("- file") and packing ("+ file") use prefix + space
-                    if (line.Length > 2 && line[1] == ' ')
+                    if (e.Data is { Length: > 2 } line && line[1] == ' ')
                         job.Status = line[2..];
-                }
+                };
+                proc.ErrorDataReceived += (_, _) => { /* discard — errors surface via exit code */ };
+                proc.BeginOutputReadLine();
+                proc.BeginErrorReadLine();
 
                 proc.WaitForExit(300_000);
                 job.Status = job.Cts.IsCancellationRequested
@@ -2212,7 +2286,9 @@ public sealed class McApplication : Toplevel
                 job.Running = false;
                 Application.Invoke(RefreshPanels);
             }
-        });
+        }) { IsBackground = true, Name = jobName };
+
+        thread.Start();
     }
 
     /// <summary>
