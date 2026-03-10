@@ -239,22 +239,23 @@ public sealed class SevenZipVfsProvider : IVfsProvider
     ///   Path = /abs/path/arc.7z   ← the ARCHIVE itself (must be skipped)
     ///   Type = 7z
     ///   ...
-    ///   ----------                ← first separator: end of metadata, start of entries
-    ///   Path = folder1            ← first file/dir entry
-    ///   Folder = +
-    ///   Modified = ...
+    ///   ----------                ← ONLY separator: ends metadata, starts entries
+    ///   Path = folder1            ← first file/dir entry (Linux 7z 23+)
+    ///   Attributes = D drwxr-xr-x
+    ///   ...
+    ///   Block =
+    ///                             ← blank line separates entries (Linux format)
+    ///   Path = folder1/file.txt
+    ///   ...
+    ///
+    /// Windows 7z format uses "----------" between every entry instead of blank lines:
     ///   ----------
     ///   Path = folder1\file.txt   ← Windows uses backslashes
     ///   Size = 1234
-    ///   Attributes = A
-    ///   Modified = ...
-    ///   ----------                ← (no trailing separator sometimes)
+    ///   Folder = +                ← directory marker in Windows .7z listing
+    ///   ----------
     ///
-    /// Bugs fixed vs original:
-    ///   - Skip the archive-metadata block (first block) so the .7z itself
-    ///     doesn't appear as a file entry in the listing.
-    ///   - Normalise backslashes to '/' so subdirectory grouping works on Windows.
-    ///   - Detect directories via "Folder = +" in addition to "Attributes = D…".
+    /// The parser handles both: "----------" and blank lines both act as entry separators.
     /// </summary>
     private IEnumerable<(string path, long size, bool isDir, DateTime modified)> ReadEntries(string archive)
     {
@@ -270,6 +271,9 @@ public sealed class SevenZipVfsProvider : IVfsProvider
         foreach (var raw in output.Split('\n'))
         {
             var line = raw.TrimEnd('\r');
+
+            // "----------" ends the archive-metadata block (first occurrence) or
+            // separates entries (Windows 7z format).
             if (line.StartsWith("----------", StringComparison.Ordinal))
             {
                 if (!pastHeader)
@@ -283,6 +287,17 @@ public sealed class SevenZipVfsProvider : IVfsProvider
                     yield return (curPath, curSize, curIsDir, curMod);
                 }
                 curPath = null; curSize = 0; curIsDir = false; curMod = DateTime.MinValue;
+                continue;
+            }
+
+            // Blank lines separate entries in Linux/Unix 7z output (no "----------" between entries).
+            if (line.Length == 0)
+            {
+                if (pastHeader && curPath != null)
+                {
+                    yield return (curPath, curSize, curIsDir, curMod);
+                    curPath = null; curSize = 0; curIsDir = false; curMod = DateTime.MinValue;
+                }
                 continue;
             }
 
