@@ -1657,10 +1657,16 @@ public sealed class McApplication : Toplevel
             ? (Environment.GetEnvironmentVariable("COMSPEC") ?? "cmd.exe")
             : (Environment.GetEnvironmentVariable("SHELL") ?? "/bin/sh");
 
+        var activePath = _controller.ActivePanel.CurrentPath;
+        var workingDir = activePath.IsLocal && Directory.Exists(activePath.Path)
+            ? activePath.Path
+            : Environment.CurrentDirectory;
+
         var psi = new System.Diagnostics.ProcessStartInfo
         {
             FileName = shell,
             UseShellExecute = false,
+            WorkingDirectory = workingDir,
         };
 
         // For bash: pre-fill readline buffer with any typed command (#40)
