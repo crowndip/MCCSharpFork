@@ -232,6 +232,7 @@ public sealed class McApplication : Toplevel
         };
         _leftPanelView.EntryActivated += OnPanelEntryActivated;
         _leftPanelView.BecameActive += (_, _) => SetActivePanel(_leftPanelView);
+        _leftPanelView.ScrollOtherRequested += (_, delta) => _rightPanelView.ScrollBy(delta);
         _leftPanelView.IsActive = true;
         ApplyPanelSettings(_leftPanelView);
         // ApplyFilterSettings() is called after both panels are constructed (see below)
@@ -246,6 +247,7 @@ public sealed class McApplication : Toplevel
         };
         _rightPanelView.EntryActivated += OnPanelEntryActivated;
         _rightPanelView.BecameActive += (_, _) => SetActivePanel(_rightPanelView);
+        _rightPanelView.ScrollOtherRequested += (_, delta) => _leftPanelView.ScrollBy(delta);
         ApplyPanelSettings(_rightPanelView);
 
         // Apply filter settings now that both panels are constructed (#4)

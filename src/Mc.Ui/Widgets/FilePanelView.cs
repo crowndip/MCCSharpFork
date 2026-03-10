@@ -59,6 +59,11 @@ public sealed class FilePanelView : View
     public event EventHandler<FileEntry?>? EntryActivated;
     public event EventHandler<int>? CursorChanged;
     public event EventHandler? BecameActive;
+    /// <summary>
+    /// Raised when a wheel scroll should be applied to the OTHER panel.
+    /// The argument is the scroll delta (positive = down).
+    /// </summary>
+    public event EventHandler<int>? ScrollOtherRequested;
 
     public bool IsActive
     {
@@ -125,15 +130,20 @@ public sealed class FilePanelView : View
 
     private void OnMouseClick(object? sender, MouseEventArgs e)
     {
-        // Mouse wheel: scroll the viewport, keep cursor inside visible range.
-        // Activate the panel first if it wasn't focused — scrolling over an
-        // inactive panel is a natural gesture that implies switching to it.
+        // Mouse wheel scrolling:
+        //   Plain wheel       → scroll the ACTIVE panel (self if active, other if inactive).
+        //   Shift + wheel     → scroll the INACTIVE panel (other if active, self if inactive).
         if (e.Flags.HasFlag(MouseFlags.WheeledDown) ||
             e.Flags.HasFlag(MouseFlags.WheeledUp))
         {
-            if (!_isActive)
-                BecameActive?.Invoke(this, EventArgs.Empty);
-            ScrollBy(e.Flags.HasFlag(MouseFlags.WheeledDown) ? 3 : -3);
+            bool shift = e.Flags.HasFlag(MouseFlags.ButtonShift);
+            int  delta = e.Flags.HasFlag(MouseFlags.WheeledDown) ? 3 : -3;
+            // Scroll self when: (active and no-shift) OR (inactive and shift).
+            // Scroll other when: (active and shift) OR (inactive and no-shift).
+            if (_isActive != shift)
+                ScrollBy(delta);
+            else
+                ScrollOtherRequested?.Invoke(this, delta);
             return;
         }
 
@@ -229,7 +239,7 @@ public sealed class FilePanelView : View
     /// then clamps the cursor so it stays within the newly visible range.
     /// In Brief (two-column) mode the scroll is rounded to column boundaries.
     /// </summary>
-    private void ScrollBy(int delta)
+    public void ScrollBy(int delta)
     {
         int count = _listing.Entries.Count;
         if (count == 0) return;
