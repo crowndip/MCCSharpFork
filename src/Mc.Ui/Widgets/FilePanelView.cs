@@ -101,6 +101,9 @@ public sealed class FilePanelView : View
         _listing.Changed    += OnListingChanged;
         _listing.Reloading  += OnListingReloading;  // #45
         MouseClick += OnMouseClick;
+        // Terminal.Gui 2.0 routes wheel events through MouseWheel (not MouseClick) on Windows.
+        // Subscribe to both so scrolling works on all platforms.
+        MouseWheel += (_, e) => HandleWheelEvent(e);
 
         UpdateStatus();
     }
@@ -130,20 +133,11 @@ public sealed class FilePanelView : View
 
     private void OnMouseClick(object? sender, MouseEventArgs e)
     {
-        // Mouse wheel scrolling:
-        //   Plain wheel       → scroll the ACTIVE panel (self if active, other if inactive).
-        //   Shift + wheel     → scroll the INACTIVE panel (other if active, self if inactive).
-        if (e.Flags.HasFlag(MouseFlags.WheeledDown) ||
-            e.Flags.HasFlag(MouseFlags.WheeledUp))
+        // Wheel events may arrive here on Linux (ANSI driver) or via the dedicated
+        // MouseWheel event on Windows. Both paths call HandleWheelEvent.
+        if (e.Flags.HasFlag(MouseFlags.WheeledDown) || e.Flags.HasFlag(MouseFlags.WheeledUp))
         {
-            bool shift = e.Flags.HasFlag(MouseFlags.ButtonShift);
-            int  delta = e.Flags.HasFlag(MouseFlags.WheeledDown) ? 3 : -3;
-            // Scroll self when: (active and no-shift) OR (inactive and shift).
-            // Scroll other when: (active and shift) OR (inactive and no-shift).
-            if (_isActive != shift)
-                ScrollBy(delta);
-            else
-                ScrollOtherRequested?.Invoke(this, delta);
+            HandleWheelEvent(e);
             return;
         }
 
@@ -177,6 +171,23 @@ public sealed class FilePanelView : View
             CursorChanged?.Invoke(this, _cursorIndex);
             SetNeedsDraw();
         }
+    }
+
+    /// <summary>
+    /// Mouse wheel scrolling logic shared between MouseClick (Linux/ANSI) and
+    /// MouseWheel (Windows/Win32) event paths.
+    ///   Plain wheel   → scroll the ACTIVE panel (self if active, other if inactive).
+    ///   Shift + wheel → scroll the INACTIVE panel (other if active, self if inactive).
+    /// </summary>
+    private void HandleWheelEvent(MouseEventArgs e)
+    {
+        bool shift = e.Flags.HasFlag(MouseFlags.ButtonShift);
+        int  delta = e.Flags.HasFlag(MouseFlags.WheeledDown) ? 3 : -3;
+        // _isActive XOR shift: true → scroll self, false → scroll the other panel.
+        if (_isActive != shift)
+            ScrollBy(delta);
+        else
+            ScrollOtherRequested?.Invoke(this, delta);
     }
 
     private void OnListingReloading(object? sender, EventArgs e)  // #45
