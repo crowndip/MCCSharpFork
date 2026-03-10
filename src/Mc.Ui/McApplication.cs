@@ -176,6 +176,8 @@ public sealed class McApplication : Toplevel
                     new("_Unpack here",     string.Empty, UnpackHere),
                     new("_Selection to ZIP", string.Empty, SelectionToZip),
                     new("Selection to _7z",  string.Empty, SelectionTo7z),
+                    null!,
+                    new("_Test archive",     string.Empty, TestArchive),
                 }),
 
                 // ── Tools ─────────────────────────────────────────────────
@@ -1868,6 +1870,116 @@ public sealed class McApplication : Toplevel
 
         _controller.ActivePanel.Reload();
         _controller.InactivePanel.Reload();
+    }
+
+    private void TestArchive()
+    {
+        var entry = GetCurrentEntry();
+        if (entry == null || entry.IsDirectory)
+        {
+            MessageDialog.Error("Select an archive file first.");
+            return;
+        }
+
+        var exe = ResolveSevenZip();
+        if (exe == null)
+        {
+            MessageDialog.Error(
+                "7-Zip executable not found.\n" +
+                "Set the path in Options → Configuration → 7-Zip provider,\n" +
+                "or install 7-Zip and ensure 7z is on PATH.");
+            return;
+        }
+
+        var archivePath = entry.FullPath.Path;
+
+        int dialogW = Math.Max(76, (Application.Driver?.Cols ?? 80) - 4);
+        int dialogH = Math.Clamp((Application.Driver?.Rows ?? 40) * 2 / 3, 18, (Application.Driver?.Rows ?? 40) - 4);
+
+        var d = new Dialog
+        {
+            Title       = $"Test archive: {entry.Name}",
+            Width       = dialogW,
+            Height      = dialogH,
+            ColorScheme = McTheme.Dialog,
+        };
+
+        var tv = new TextView
+        {
+            X           = 1,
+            Y           = 1,
+            Width       = Dim.Fill(1),
+            Height      = Dim.Fill(4),
+            Text        = "Running 7z t …\n",
+            ReadOnly    = true,
+            ColorScheme = McTheme.Dialog,
+        };
+        d.Add(tv);
+
+        var btnClose = new Button
+        {
+            X         = Pos.Center(),
+            Y         = Pos.AnchorEnd(2),
+            Text      = "Close",
+            IsDefault = true,
+        };
+        btnClose.Accepting += (_, _) => Application.RequestStop(d);
+        d.AddButton(btnClose);
+
+        _ = Task.Run(() =>
+        {
+            try
+            {
+                var psi = new System.Diagnostics.ProcessStartInfo(exe)
+                {
+                    UseShellExecute        = false,
+                    RedirectStandardOutput = true,
+                    RedirectStandardError  = true,
+                };
+                psi.ArgumentList.Add("t");
+                psi.ArgumentList.Add(archivePath);
+
+                using var proc = System.Diagnostics.Process.Start(psi)
+                    ?? throw new InvalidOperationException("Failed to start 7z.");
+
+                string? line;
+                while ((line = proc.StandardOutput.ReadLine()) != null)
+                {
+                    var captured = line;
+                    Application.Invoke(() =>
+                    {
+                        tv.Text += captured + "\n";
+                        tv.MoveEnd();
+                        d.SetNeedsDraw();
+                    });
+                }
+
+                var stderr = proc.StandardError.ReadToEnd();
+                proc.WaitForExit(300_000);
+
+                if (!string.IsNullOrWhiteSpace(stderr))
+                {
+                    Application.Invoke(() =>
+                    {
+                        tv.Text += "\n--- stderr ---\n" + stderr;
+                        tv.MoveEnd();
+                        d.SetNeedsDraw();
+                    });
+                }
+            }
+            catch (Exception ex)
+            {
+                Application.Invoke(() =>
+                {
+                    tv.Text += $"\nError: {ex.Message}";
+                    tv.MoveEnd();
+                    d.SetNeedsDraw();
+                });
+            }
+        });
+
+        Application.Run(d);
+        d.Dispose();
     }
 
     private void SelectionToZip() => SelectionToArchive("zip", "-tzip");
