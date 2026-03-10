@@ -2061,6 +2061,7 @@ public sealed class McApplication : Toplevel
         using var progress = new ProgressDialog($"Creating {extension.ToUpperInvariant()}");
         _ = Task.Run(() =>
         {
+            System.Diagnostics.Process? proc = null;
             try
             {
                 var psi = new System.Diagnostics.ProcessStartInfo(exe)
@@ -2080,8 +2081,12 @@ public sealed class McApplication : Toplevel
                 foreach (var e in sources)
                     psi.ArgumentList.Add(e.FullPath.Path);
 
-                using var proc = System.Diagnostics.Process.Start(psi)
+                proc = System.Diagnostics.Process.Start(psi)
                     ?? throw new InvalidOperationException("Failed to start 7z.");
+
+                // Kill the process when the user clicks Cancel in the progress dialog.
+                progress.CancellationToken.Register(
+                    () => { try { proc.Kill(entireProcessTree: true); } catch { } });
 
                 int done = 0;
                 string? line;
@@ -2115,15 +2120,19 @@ public sealed class McApplication : Toplevel
             }
             finally
             {
+                proc?.Dispose();
                 progress.Close();
             }
         });
 
         progress.Show(); // blocks until Close() is called from the task
 
-        if (exitCode != 0)
+        if (progress.CancellationToken.IsCancellationRequested || exitCode != 0)
         {
-            MessageDialog.Error($"7-Zip failed (exit code {exitCode}).\n{errorText}");
+            // Delete any partial archive left behind.
+            try { if (File.Exists(archivePath)) File.Delete(archivePath); } catch { }
+            if (!progress.CancellationToken.IsCancellationRequested)
+                MessageDialog.Error($"7-Zip failed (exit code {exitCode}).\n{errorText}");
             return;
         }
 
@@ -2200,7 +2209,7 @@ public sealed class McApplication : Toplevel
             : defaultName.Length;
         d.Add(nameField);
 
-        var btnPack = new Button { Text = "Pack", IsDefault = true };
+        var btnPack = new Button { Text = "Pack" };
         btnPack.Accepting += (_, _) =>
         {
             archiveName = nameField.Text?.ToString() ?? defaultName;
