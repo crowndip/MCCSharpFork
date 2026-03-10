@@ -175,6 +175,7 @@ public sealed class McApplication : Toplevel
                 {
                     new("_Unpack here",     string.Empty, UnpackHere),
                     new("_Selection to ZIP", string.Empty, SelectionToZip),
+                    new("Selection to _7z",  string.Empty, SelectionTo7z),
                 }),
 
                 // ── Tools ─────────────────────────────────────────────────
@@ -1869,7 +1870,10 @@ public sealed class McApplication : Toplevel
         _controller.InactivePanel.Reload();
     }
 
-    private void SelectionToZip()
+    private void SelectionToZip() => SelectionToArchive("zip", "-tzip");
+    private void SelectionTo7z()  => SelectionToArchive("7z",  "-t7z");
+
+    private void SelectionToArchive(string extension, string formatSwitch)
     {
         var marked  = _controller.ActivePanel.GetMarkedEntries();
         List<FileEntry> sources;
@@ -1900,13 +1904,12 @@ public sealed class McApplication : Toplevel
 
         var destDir     = _controller.ActivePanel.CurrentPath.Path;
         var timestamp   = DateTime.Now.ToString("yyyyMMdd_HHmmss");
-        var archiveName = $"Archive_{timestamp}.zip";
-        var archivePath = Path.Combine(destDir, archiveName);
+        var archivePath = Path.Combine(destDir, $"Archive_{timestamp}.{extension}");
 
         int    exitCode  = 0;
         string errorText = string.Empty;
 
-        using var progress = new ProgressDialog("Creating ZIP");
+        using var progress = new ProgressDialog($"Creating {extension.ToUpperInvariant()}");
         _ = Task.Run(() =>
         {
             try
@@ -1918,9 +1921,9 @@ public sealed class McApplication : Toplevel
                     RedirectStandardError  = true,
                     WorkingDirectory       = destDir,
                 };
-                // a = add; -tzip = ZIP format; -mx=7 = Maximum compression; -bb1 = one line per file; -y = yes to all
+                // a = add; formatSwitch = archive type; -mx=7 = Maximum compression; -bb1 = one line per file; -y = yes to all
                 psi.ArgumentList.Add("a");
-                psi.ArgumentList.Add("-tzip");
+                psi.ArgumentList.Add(formatSwitch);
                 psi.ArgumentList.Add("-mx=7");
                 psi.ArgumentList.Add("-bb1");
                 psi.ArgumentList.Add("-y");
