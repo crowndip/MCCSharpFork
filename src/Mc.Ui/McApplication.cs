@@ -4374,21 +4374,17 @@ public sealed class McApplication : Toplevel
     /// </summary>
     private void ShowBackgroundJobs()
     {
-        // Prune finished jobs
-        _backgroundJobs.RemoveAll(j => !j.Running && (j.Task?.IsCompleted ?? true) &&
-                                       j.Status is "Done" or "Cancelled");
-
         if (_backgroundJobs.Count == 0)
         {
-            MessageDialog.Show("Background jobs", "No background jobs running.");
+            MessageDialog.Show("Background jobs", "No background jobs.");
             return;
         }
 
         var d = new Dialog
         {
             Title  = "Background Jobs",
-            Width  = 68,
-            Height = Math.Min(5 + _backgroundJobs.Count * 2, 22),
+            Width  = 72,
+            Height = Math.Clamp(_backgroundJobs.Count + 6, 8, 22),
             ColorScheme = McTheme.Dialog,
         };
 
@@ -4398,8 +4394,16 @@ public sealed class McApplication : Toplevel
             Height = Dim.Fill(4),
             ColorScheme = McTheme.Panel,
         };
-        var items = _backgroundJobs.Select(j => $"{j.Name,-10} {(j.Running ? "Running" : "Finished"),-10} {j.Status}").ToList();
-        listView.SetSource(new System.Collections.ObjectModel.ObservableCollection<string>(items));
+
+        void RefreshList()
+        {
+            var items = _backgroundJobs
+                .Select(j => $"{(j.Running ? "Running " : "Done    ")}  {j.Name,-30}  {j.Status}")
+                .ToList();
+            listView.SetSource(new System.Collections.ObjectModel.ObservableCollection<string>(items));
+        }
+
+        RefreshList();
         d.Add(listView);
 
         var kill = new Button { Text = "Kill" };
@@ -4410,10 +4414,23 @@ public sealed class McApplication : Toplevel
                 _backgroundJobs[idx].Cts.Cancel();
         };
 
+        var removeFinished = new Button { Text = "Remove finished" };
+        removeFinished.Accepting += (_, _) =>
+        {
+            _backgroundJobs.RemoveAll(j => !j.Running);
+            if (_backgroundJobs.Count == 0)
+            {
+                Application.RequestStop(d);
+                return;
+            }
+            RefreshList();
+        };
+
         var close = new Button { Text = "Close", IsDefault = true };
         close.Accepting += (_, _) => Application.RequestStop(d);
 
         d.AddButton(kill);
+        d.AddButton(removeFinished);
         d.AddButton(close);
         Application.Run(d);
     }
