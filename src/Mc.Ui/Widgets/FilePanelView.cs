@@ -176,15 +176,15 @@ public sealed class FilePanelView : View
     /// <summary>
     /// Mouse wheel scrolling logic shared between MouseClick (Linux/ANSI) and
     /// MouseWheel (Windows/Win32) event paths.
-    ///   Plain wheel   → scroll the ACTIVE panel (self if active, other if inactive).
-    ///   Shift + wheel → scroll the INACTIVE panel (other if active, self if inactive).
+    ///   Plain wheel  → scroll the ACTIVE panel (self if active, other if inactive).
+    ///   Alt + wheel  → scroll the INACTIVE panel (other if active, self if inactive).
     /// </summary>
     private void HandleWheelEvent(MouseEventArgs e)
     {
-        bool shift = e.Flags.HasFlag(MouseFlags.ButtonShift);
+        bool alt   = e.Flags.HasFlag(MouseFlags.ButtonAlt);
         int  delta = e.Flags.HasFlag(MouseFlags.WheeledDown) ? 3 : -3;
-        // _isActive XOR shift: true → scroll self, false → scroll the other panel.
-        if (_isActive != shift)
+        // _isActive XOR alt: true → scroll self, false → scroll the other panel.
+        if (_isActive != alt)
             ScrollBy(delta);
         else
             ScrollOtherRequested?.Invoke(this, delta);
