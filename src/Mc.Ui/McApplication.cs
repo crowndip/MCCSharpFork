@@ -170,6 +170,12 @@ public sealed class McApplication : Toplevel
                 // ── Drives ────────────────────────────────────────────────
                 BuildDrivesMenu(),
 
+                // ── Compression ───────────────────────────────────────────
+                new MenuBarItem("C_ompression", new MenuItem[]
+                {
+                    new("_Unpack here", string.Empty, UnpackHere),
+                }),
+
                 // ── Tools ─────────────────────────────────────────────────
                 new MenuBarItem("_Tools", new MenuItem[]
                 {
@@ -1714,6 +1720,105 @@ public sealed class McApplication : Toplevel
         Application.Driver?.Init();
         RefreshPanels();
         Application.LayoutAndDraw(true);
+    }
+
+    // ── Compression ───────────────────────────────────────────────────────
+
+    private static readonly string[] SevenZipCandidates = ["7z", "7za", "7zz"];
+
+    /// <summary>
+    /// Resolves the 7z executable: tries the user-configured path first, then
+    /// well-known names on PATH, then the Windows default install location.
+    /// Returns null when 7z cannot be found.
+    /// </summary>
+    private string? ResolveSevenZip()
+    {
+        bool Probe(string exe)
+        {
+            try
+            {
+                using var p = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(exe, "i")
+                {
+                    RedirectStandardOutput = true,
+                    RedirectStandardError  = true,
+                    UseShellExecute        = false,
+                });
+                p?.WaitForExit(5_000);
+                return true;
+            }
+            catch { return false; }
+        }
+
+        var configured = _settings.SevenZipPath;
+        if (!string.IsNullOrWhiteSpace(configured) && Probe(configured)) return configured;
+
+        foreach (var c in SevenZipCandidates)
+            if (Probe(c)) return c;
+
+        const string winDefault = @"C:\Program Files\7-Zip\7z.exe";
+        if (File.Exists(winDefault) && Probe(winDefault)) return winDefault;
+
+        return null;
+    }
+
+    private void UnpackHere()
+    {
+        var entry = GetCurrentEntry();
+        if (entry == null || entry.IsDirectory)
+        {
+            MessageDialog.Error("Select an archive file first.");
+            return;
+        }
+
+        var archivePath = entry.FullPath.Path;
+        var destDir     = _controller.ActivePanel.CurrentPath.Path;
+
+        var exe = ResolveSevenZip();
+        if (exe == null)
+        {
+            MessageDialog.Error(
+                "7-Zip executable not found.\n" +
+                "Set the path in Options → Configuration → 7-Zip provider,\n" +
+                "or install 7-Zip and ensure 7z is on PATH.");
+            return;
+        }
+
+        string output;
+        int exitCode;
+        try
+        {
+            var psi = new System.Diagnostics.ProcessStartInfo(exe)
+            {
+                UseShellExecute        = false,
+                RedirectStandardOutput = true,
+                RedirectStandardError  = true,
+            };
+            // x = extract with full paths; -o = output dir; -y = yes to all prompts
+            psi.ArgumentList.Add("x");
+            psi.ArgumentList.Add(archivePath);
+            psi.ArgumentList.Add($"-o{destDir}");
+            psi.ArgumentList.Add("-y");
+
+            using var proc = System.Diagnostics.Process.Start(psi)
+                ?? throw new InvalidOperationException("Failed to start 7z.");
+            output   = proc.StandardOutput.ReadToEnd() + proc.StandardError.ReadToEnd();
+            proc.WaitForExit(300_000);
+            exitCode = proc.ExitCode;
+        }
+        catch (Exception ex)
+        {
+            MessageDialog.Error($"Failed to run 7z:\n{ex.Message}");
+            return;
+        }
+
+        if (exitCode != 0)
+        {
+            MessageDialog.Error("Not a valid archive.");
+            return;
+        }
+
+        _controller.ActivePanel.Reload();
+        _controller.InactivePanel.Reload();
     }
 
     private void OnCommandEntered(object? sender, string command)
