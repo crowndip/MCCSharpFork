@@ -173,7 +173,8 @@ public sealed class McApplication : Toplevel
                 // ── Compression ───────────────────────────────────────────
                 new MenuBarItem("C_ompression", new MenuItem[]
                 {
-                    new("_Unpack here", string.Empty, UnpackHere),
+                    new("_Unpack here",     string.Empty, UnpackHere),
+                    new("_Selection to ZIP", string.Empty, SelectionToZip),
                 }),
 
                 // ── Tools ─────────────────────────────────────────────────
@@ -1861,6 +1862,116 @@ public sealed class McApplication : Toplevel
         if (exitCode != 0)
         {
             MessageDialog.Error("Not a valid archive.");
+            return;
+        }
+
+        _controller.ActivePanel.Reload();
+        _controller.InactivePanel.Reload();
+    }
+
+    private void SelectionToZip()
+    {
+        var marked  = _controller.ActivePanel.GetMarkedEntries();
+        List<FileEntry> sources;
+        if (marked.Count > 0)
+        {
+            sources = [..marked];
+        }
+        else
+        {
+            var cur = GetCurrentEntry();
+            if (cur == null)
+            {
+                MessageDialog.Error("No file or folder selected.");
+                return;
+            }
+            sources = [cur];
+        }
+
+        var exe = ResolveSevenZip();
+        if (exe == null)
+        {
+            MessageDialog.Error(
+                "7-Zip executable not found.\n" +
+                "Set the path in Options → Configuration → 7-Zip provider,\n" +
+                "or install 7-Zip and ensure 7z is on PATH.");
+            return;
+        }
+
+        var destDir     = _controller.ActivePanel.CurrentPath.Path;
+        var timestamp   = DateTime.Now.ToString("yyyyMMdd_HHmmss");
+        var archiveName = $"Archive_{timestamp}.zip";
+        var archivePath = Path.Combine(destDir, archiveName);
+
+        int    exitCode  = 0;
+        string errorText = string.Empty;
+
+        using var progress = new ProgressDialog("Creating ZIP");
+        _ = Task.Run(() =>
+        {
+            try
+            {
+                var psi = new System.Diagnostics.ProcessStartInfo(exe)
+                {
+                    UseShellExecute        = false,
+                    RedirectStandardOutput = true,
+                    RedirectStandardError  = true,
+                    WorkingDirectory       = destDir,
+                };
+                // a = add; -tzip = ZIP format; -mx=7 = Maximum compression; -bb1 = one line per file; -y = yes to all
+                psi.ArgumentList.Add("a");
+                psi.ArgumentList.Add("-tzip");
+                psi.ArgumentList.Add("-mx=7");
+                psi.ArgumentList.Add("-bb1");
+                psi.ArgumentList.Add("-y");
+                psi.ArgumentList.Add(archivePath);
+                foreach (var e in sources)
+                    psi.ArgumentList.Add(e.FullPath.Path);
+
+                using var proc = System.Diagnostics.Process.Start(psi)
+                    ?? throw new InvalidOperationException("Failed to start 7z.");
+
+                int done = 0;
+                string? line;
+                while ((line = proc.StandardOutput.ReadLine()) != null)
+                {
+                    // -bb1 outputs "+ path/to/file" for each added entry
+                    if (line.StartsWith("+ ", StringComparison.Ordinal) ||
+                        line.StartsWith("U ", StringComparison.Ordinal))
+                    {
+                        done++;
+                        var name = line[2..];
+                        progress.Report(new OperationProgress
+                        {
+                            CurrentFile = name,
+                            FilesDone   = done,
+                            TotalFiles  = sources.Count,
+                            BytesDone   = done,
+                            TotalBytes  = sources.Count > 0 ? sources.Count : done + 1,
+                        });
+                    }
+                }
+
+                errorText = proc.StandardError.ReadToEnd();
+                proc.WaitForExit(300_000);
+                exitCode = proc.ExitCode;
+            }
+            catch (Exception ex)
+            {
+                exitCode  = -1;
+                errorText = ex.Message;
+            }
+            finally
+            {
+                progress.Close();
+            }
+        });
+
+        progress.Show(); // blocks until Close() is called from the task
+
+        if (exitCode != 0)
+        {
+            MessageDialog.Error($"7-Zip failed (exit code {exitCode}).\n{errorText}");
             return;
         }
 
