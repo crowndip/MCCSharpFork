@@ -2269,18 +2269,20 @@ public sealed class McApplication : Toplevel
                 // Kill the process if the user hits "Kill" in the Background Jobs dialog.
                 job.Cts.Token.Register(() => { try { proc.Kill(entireProcessTree: true); } catch { } });
 
-                // Read both streams asynchronously to avoid pipe-buffer deadlocks.
+                // Drain stdout and stderr on dedicated threads to prevent pipe-buffer
+                // deadlocks on Windows (BeginOutputReadLine has known WaitForExit issues).
                 // Both extraction ("- file") and packing ("+ file") use "<prefix> <space> <name>".
-                proc.OutputDataReceived += (_, e) =>
+                var drainOut = Task.Run(() =>
                 {
-                    if (e.Data is { Length: > 2 } line && line[1] == ' ')
-                        job.Status = line[2..];
-                };
-                proc.ErrorDataReceived += (_, _) => { /* discard — errors surface via exit code */ };
-                proc.BeginOutputReadLine();
-                proc.BeginErrorReadLine();
+                    string? line;
+                    while ((line = proc.StandardOutput.ReadLine()) != null)
+                        if (line.Length > 2 && line[1] == ' ')
+                            job.Status = line[2..];
+                });
+                var drainErr = Task.Run(() => proc.StandardError.ReadToEnd());
 
                 proc.WaitForExit(300_000);
+                Task.WaitAll(drainOut, drainErr);
                 job.Status = job.Cts.IsCancellationRequested
                     ? "Cancelled"
                     : proc.ExitCode == 0 ? "Done" : $"Error (exit {proc.ExitCode})";
