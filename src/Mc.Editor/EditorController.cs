@@ -29,9 +29,15 @@ public sealed class EditorController
     public bool HasSelection => _selectionStart >= 0 && _selectionEnd > _selectionStart;
 
     // Editor display options (from McSettings) (#23 #42)
-    public bool ShowLineNumbers { get; set; }
-    public int  TabWidth        { get; set; } = 4;
-    public bool ExpandTabs      { get; set; }
+    public bool ShowLineNumbers   { get; set; }
+    public int  TabWidth          { get; set; } = 4;
+    public bool ExpandTabs        { get; set; }
+    public bool AutoIndent        { get; set; } = true;
+    public bool TypewriterWrap    { get; set; } = false;
+    public int  WrapLineLength    { get; set; } = 72;
+    public int  SaveMode          { get; set; } = 0;  // 0=quick, 1=safe, 2=backup
+    public string BackupExtension { get; set; } = "~";
+    public bool SavePosition      { get; set; } = true;
 
     public SyntaxHighlighter? Highlighter { get; private set; }
 
@@ -45,7 +51,16 @@ public sealed class EditorController
             content = File.ReadAllText(filePath);
         _buffer = new TextBuffer(content);
         if (filePath != null)
+        {
             Highlighter = SyntaxHighlighter.ForFile(filePath);
+            // Restore saved cursor position
+            if (SavePosition)
+            {
+                var (line, col) = LoadFilePosition(filePath);
+                _cursorOffset = _buffer.LineColToOffset(
+                    Math.Min(line, _buffer.GetLineCount() - 1), col);
+            }
+        }
     }
 
     // --- Cursor movement ---
@@ -102,6 +117,7 @@ public sealed class EditorController
         RecordUndo(new InsertOp(_cursorOffset, ch.ToString()));
         _buffer.Insert(_cursorOffset, ch);
         _cursorOffset++;
+        if (TypewriterWrap) CheckTypewriterWrap();
         Changed?.Invoke(this, EventArgs.Empty);
     }
 
@@ -136,6 +152,11 @@ public sealed class EditorController
     /// <summary>Insert newline and reproduce leading whitespace from the current line (auto-indent). (#24)</summary>
     public void InsertNewlineWithIndent()
     {
+        if (!AutoIndent)
+        {
+            InsertChar('\n');
+            return;
+        }
         var (line, _) = _buffer.OffsetToLineCol(_cursorOffset);
         var lineText  = _buffer.GetLine(line);
         int indent    = 0;
@@ -380,7 +401,29 @@ public sealed class EditorController
             SearchType.Regex => (ISearchProvider)new RegexSearchProvider(),
             _ => new NormalSearchProvider(),
         };
-        var result = provider.Search(text, opts, _lastSearchOffset + 1);
+
+        SearchResult result;
+        if (opts.Backward)
+        {
+            // Search backward: look for last occurrence before _lastSearchOffset
+            int searchFrom = _lastSearchOffset > 0 ? _lastSearchOffset : text.Length;
+            result = provider.Search(text, opts, searchFrom);
+            if (!result.Found && searchFrom < text.Length)
+            {
+                // Wrap around: try from end of file
+                result = provider.Search(text, opts, text.Length);
+            }
+        }
+        else
+        {
+            result = provider.Search(text, opts, _lastSearchOffset + 1);
+            if (!result.Found && _lastSearchOffset > 0)
+            {
+                // Wrap around: try from the beginning
+                result = provider.Search(text, opts, 0);
+            }
+        }
+
         if (result.Found)
         {
             _lastSearchOffset = (int)result.Offset;
@@ -424,8 +467,65 @@ public sealed class EditorController
         _undoStack.Clear();
         _redoStack.Clear();
         Highlighter = _filePath != null ? SyntaxHighlighter.ForFile(_filePath) : null;
+        // Restore saved cursor position
+        if (_filePath != null && SavePosition)
+        {
+            var (line, col) = LoadFilePosition(_filePath);
+            _cursorOffset = _buffer.LineColToOffset(
+                Math.Min(line, _buffer.GetLineCount() - 1), col);
+        }
         Changed?.Invoke(this, EventArgs.Empty);
     }
+
+    /// <summary>Save current cursor position to the positions file.</summary>
+    public void SaveCurrentPosition()
+    {
+        if (_filePath != null && SavePosition)
+        {
+            var (line, col) = _buffer.OffsetToLineCol(_cursorOffset);
+            SaveFilePosition(_filePath, line, col);
+        }
+    }
+
+    public static (int Line, int Col) LoadFilePosition(string filePath)
+    {
+        var posFile = GetPosFilePath();
+        if (!File.Exists(posFile)) return (0, 0);
+        try
+        {
+            foreach (var line in File.ReadLines(posFile))
+            {
+                var parts = line.Split('\t');
+                if (parts.Length >= 3 && parts[0] == filePath)
+                    if (int.TryParse(parts[1], out int l) && int.TryParse(parts[2], out int c))
+                        return (l, c);
+            }
+        }
+        catch { }
+        return (0, 0);
+    }
+
+    public static void SaveFilePosition(string filePath, int line, int col)
+    {
+        var posFile = GetPosFilePath();
+        var dir = Path.GetDirectoryName(posFile)!;
+        try
+        {
+            Directory.CreateDirectory(dir);
+            var entries = new List<string>();
+            if (File.Exists(posFile))
+                entries.AddRange(File.ReadAllLines(posFile)
+                    .Where(l => !l.StartsWith(filePath + "\t")));
+            entries.Insert(0, $"{filePath}\t{line}\t{col}");
+            if (entries.Count > 200) entries = entries[..200]; // cap at 200
+            File.WriteAllLines(posFile, entries);
+        }
+        catch { }
+    }
+
+    private static string GetPosFilePath() =>
+        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+            ".local", "share", "mc", "filepos");
 
     public void ReloadSyntax()
     {
@@ -436,7 +536,26 @@ public sealed class EditorController
     public void Save()
     {
         if (_filePath == null) throw new InvalidOperationException("No file path set");
-        _buffer.SaveFile(_filePath);
+        switch (SaveMode)
+        {
+            case 1: // Safe save: write to temp then move
+            {
+                var tmp = _filePath + ".tmp";
+                _buffer.SaveFile(tmp);
+                File.Move(tmp, _filePath, overwrite: true);
+                break;
+            }
+            case 2: // Backup save: copy existing to backup first
+            {
+                if (File.Exists(_filePath))
+                    File.Copy(_filePath, _filePath + BackupExtension, overwrite: true);
+                _buffer.SaveFile(_filePath);
+                break;
+            }
+            default: // Quick save
+                _buffer.SaveFile(_filePath);
+                break;
+        }
     }
 
     public void SaveAs(string newPath)
@@ -444,6 +563,19 @@ public sealed class EditorController
         _filePath = newPath;
         _buffer.SaveFile(newPath);
         Highlighter = SyntaxHighlighter.ForFile(newPath);
+    }
+
+    /// <summary>Save the buffer content with a specific line ending to a file.</summary>
+    public void SaveAsWithLineEnding(string path, string lineEnding)
+    {
+        var content = _buffer.ToString();
+        // Normalize to LF first, then convert
+        content = content.Replace("\r\n", "\n").Replace("\r", "\n");
+        if (lineEnding != "\n")
+            content = content.Replace("\n", lineEnding);
+        File.WriteAllText(path, content, System.Text.Encoding.UTF8);
+        _filePath = path;
+        Highlighter = SyntaxHighlighter.ForFile(path);
     }
 
     // --- Goto ---
@@ -567,6 +699,28 @@ public sealed class EditorController
     }
 
     private static bool IsWordChar(char c) => char.IsLetterOrDigit(c) || c == '_';
+
+    private void CheckTypewriterWrap()
+    {
+        if (!TypewriterWrap) return;
+        var (line, col) = _buffer.OffsetToLineCol(_cursorOffset);
+        var lineText = _buffer.GetLine(line);
+        if (lineText.Length <= WrapLineLength) return;
+        // Find last space before wrap column
+        int wrapAt = -1;
+        for (int i = Math.Min(col, WrapLineLength) - 1; i >= 0; i--)
+        {
+            if (lineText[i] == ' ' || lineText[i] == '\t') { wrapAt = i; break; }
+        }
+        if (wrapAt < 0) return; // No space found, don't wrap
+        // Replace the space at wrapAt with a newline
+        int spaceOffset = _buffer.LineColToOffset(line, wrapAt);
+        RecordUndo(new DeleteOp(spaceOffset, _buffer[spaceOffset].ToString()));
+        _buffer.Delete(spaceOffset);
+        RecordUndo(new InsertOp(spaceOffset, "\n"));
+        _buffer.Insert(spaceOffset, '\n');
+        // The buffer handles offset adjustments internally
+    }
 
     // --- Insert / Save block ---
 

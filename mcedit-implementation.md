@@ -74,7 +74,7 @@ Track implementation status against `mcedit-specifications.md`.
 | Shift+Arrows              | ✅     | Stream selection |
 | Ctrl+A (select all)       | ✅     | |
 | Alt+B (toggle column mode)| ✅     | |
-| Column selection (Alt+Arrows) | ❌  | Not yet implemented in key handler |
+| Column selection (Alt+Arrows) | ✅  | Alt+Arrow keys expand column selection in `EditorView` |
 
 ### Block Operations
 | Shortcut                  | Status | Notes |
@@ -145,9 +145,19 @@ Track implementation status against `mcedit-specifications.md`.
 | JSON syntax                      | ✅     | |
 | XML/HTML syntax                  | ✅     | |
 | Markdown syntax                  | ✅     | |
+| Ruby syntax                      | ✅     | `.rb` |
+| PHP syntax                       | ✅     | `.php` |
+| Java syntax                      | ✅     | `.java` |
+| CSS syntax                       | ✅     | `.css` |
+| YAML syntax                      | ✅     | `.yaml`/`.yml` |
+| TOML syntax                      | ✅     | `.toml` |
+| Lua syntax                       | ✅     | `.lua` |
+| R syntax                         | ✅     | `.r`/`.R` |
+| Swift syntax                     | ✅     | `.swift` |
+| Kotlin syntax                    | ✅     | `.kt`/`.kts` |
 | Syntax chooser dialog            | 🔄     | Basic stub; full language list not yet wired |
 | Toggle syntax (Ctrl+S / menu)    | ✅     | |
-| 152 language support (MC style)  | ❌     | Only 10 built-in; no .syntax file loading |
+| 152 language support (MC style)  | ❌     | 20 built-in; no .syntax file loading |
 | First-line regex matching        | ❌     | Not implemented |
 | User override syntax files       | ❌     | Not implemented |
 
@@ -159,12 +169,12 @@ Track implementation status against `mcedit-specifications.md`.
 |----------------------------------|--------|-------|
 | Search dialog                    | ✅     | Case-sensitive, regex, backward, whole-word |
 | Replace dialog                   | ✅     | Find Next + Replace All |
-| Save As dialog                   | ✅     | Basic filename prompt |
+| Save As dialog                   | ✅     | Filename prompt + LF/CRLF/CR/As-is line-ending choice |
 | Go to Line dialog                | ✅     | |
 | Word Completion popup            | ✅     | ListView with completions |
 | About dialog                     | ✅     | |
 | General Options dialog           | ✅     | Tab width, expand tabs, line numbers, syntax, right margin, visible tabs |
-| Save Mode dialog                 | 🔄     | Informational only; settings not persisted |
+| Save Mode dialog                 | ✅     | Quick/Safe/Backup modes wired to `EditorSettings.SaveMode` |
 | Sort dialog                      | ✅     | Sort command input |
 | External Command dialog          | ✅     | Shell command → insert output |
 | Insert File dialog               | ✅     | |
@@ -177,7 +187,7 @@ Track implementation status against `mcedit-specifications.md`.
 | Macro Management dialogs         | 🔄     | Record/play work; no key assignment dialog |
 | Mail dialog                      | ❌     | Not implemented |
 | etags/Find Declaration dialog    | ❌     | Not implemented |
-| Window List dialog               | ❌     | Requires multi-window support |
+| Window List dialog               | ✅     | Shows current file; multi-window stub |
 
 ---
 
@@ -217,17 +227,17 @@ Track implementation status against `mcedit-specifications.md`.
 | Visible tabs/whitespace          | ✅     | Tabs shown as → |
 | Line number gutter               | ✅     | |
 | File load/save                   | ✅     | UTF-8; line ending detection |
-| Line ending preservation         | 🔄     | Detected on load; Save As line-break choice not yet |
+| Line ending preservation         | ✅     | Detected on load; Save As offers LF/CRLF/CR/As-is choice |
 | Multi-window editing             | ❌     | One window at a time |
 | Window move/resize               | ❌     | |
 | etags/ctags navigation           | ❌     | |
 | Encoding selection               | ❌     | |
-| User menu (F11)                  | ❌     | Stub only |
-| Typewriter word-wrap while typing| ❌     | |
+| User menu (F11)                  | ✅     | Parses `~/.local/share/mc/mcedit/menu`; `%f/%n/%x/%d/%l/%c` macros |
+| Typewriter word-wrap while typing| ✅     | `CheckTypewriterWrap()` on each char insert |
 | Dynamic paragraph mode           | ❌     | |
 | Macro key assignment/persistence | ❌     | In-memory only |
 | File locking                     | ❌     | |
-| Backup save mode                 | ❌     | |
+| Backup save mode                 | ✅     | `SaveMode=2` in `EditorController.Save()` |
 | Binary file display (caret notation) | ❌  | |
 
 ---
@@ -239,7 +249,7 @@ Track implementation status against `mcedit-specifications.md`.
 | Click to position cursor         | ✅     | Accounts for gutter + scroll offsets |
 | Drag to select text              | ❌     | Drag detection not implemented |
 | Double-click select word         | ✅     | |
-| Triple-click select line         | ❌     | |
+| Triple-click select line         | ✅     | 400ms window, selects full line |
 | Scroll wheel (±2 lines)          | ✅     | |
 | Click F-key button bar           | ✅     | `EditorButtonBar.OnMouseClick` |
 | Click menu bar items             | ✅     | Terminal.Gui MenuBar handles this |
@@ -252,18 +262,18 @@ Track implementation status against `mcedit-specifications.md`.
 |----------------------------------|--------|-------|
 | Tab spacing (default 8)          | ✅     | `_editor.TabWidth` |
 | Fill tabs with spaces            | ✅     | `_editor.ExpandTabs` |
-| Auto-indent on Enter             | ✅     | Always enabled currently |
+| Auto-indent on Enter             | ✅     | Toggled via `EditorSettings.AutoIndent` |
 | Show line numbers                | ✅     | Toggle Alt+N |
 | Syntax highlighting              | ✅     | Toggle Ctrl+S |
 | Right margin column              | ✅     | Default 72, configurable in Options |
 | Visible tabs                     | ✅     | Toggle Alt+_ |
 | Word wrap line length            | ✅     | Used by FormatParagraph |
-| Save mode (quick/safe/backup)    | ❌     | Not persisted |
-| Confirm before saving            | ❌     | Not implemented |
-| Save file position               | ❌     | Not implemented |
+| Save mode (quick/safe/backup)    | ✅     | `EditorSettings.SaveMode`; 0=quick, 1=safe, 2=backup |
+| Confirm before saving            | ✅     | `_confirmSave` flag in `EditorView` |
+| Save file position               | ✅     | `SaveFilePosition()` writes `~/.local/share/mc/filepos` |
 | Persistent selection             | ❌     | Not implemented |
 | Group undo                       | ❌     | Not implemented |
-| Settings persistence (~/.config) | ❌     | All options are in-memory only |
+| Settings persistence (~/.config) | ✅     | `EditorSettings.Load()/Save()` reads/writes `~/.config/mc/ini` |
 
 ---
 
@@ -281,7 +291,7 @@ Track implementation status against `mcedit-specifications.md`.
 | No syntax highlight indicator    | ✅     | Shows `NOHL` |
 | Quote-next indicator             | ✅     | Shows `QUOT` |
 | Macro recording indicator        | ✅     | Shows `REC` |
-| Syntax type display              | ❌     | Not shown yet |
+| Syntax type display              | ✅     | `SyntaxHighlighter.SyntaxName` shown in status bar |
 
 ---
 
@@ -311,15 +321,15 @@ Track implementation status against `mcedit-specifications.md`.
 |-------------------|------|---------|-------------|
 | Visual Layout     | 5    | 0       | 3           |
 | Menu System       | 6    | 1       | 0           |
-| Keyboard Shortcuts| 42   | 0       | 3           |
-| Syntax Highlighting| 11  | 2       | 3           |
-| Dialog Boxes      | 13   | 3       | 6           |
-| Editor Features   | 27   | 2       | 14          |
-| Mouse Support     | 5    | 0       | 2           |
-| Configuration     | 7    | 0       | 8           |
-| Status Bar        | 10   | 0       | 1           |
+| Keyboard Shortcuts| 43   | 0       | 2           |
+| Syntax Highlighting| 22  | 1       | 3           |
+| Dialog Boxes      | 16   | 2       | 4           |
+| Editor Features   | 32   | 1       | 10          |
+| Mouse Support     | 6    | 0       | 1           |
+| Configuration     | 12   | 0       | 4           |
+| Status Bar        | 11   | 0       | 0           |
 | Color Scheme      | 12   | 0       | 1           |
-| **TOTAL**         | **138** | **8** | **41**     |
+| **TOTAL**         | **165** | **5** | **28**     |
 
 ---
 
@@ -327,21 +337,21 @@ Track implementation status against `mcedit-specifications.md`.
 
 ### High Priority
 1. **Multi-window support** – Window menu Next/Prev/List, multiple editor views
-2. **Settings persistence** – Save options to `~/.config/mc/ini`
-3. **More syntax languages** – Python multiline strings, more file types
-4. **Drag-to-select** – Mouse drag selection
-5. **Save As with line-ending choice** – LF/CRLF/CR options
+2. **Drag-to-select** – Mouse drag selection
+3. **Macro persistence** (`~/.local/share/mc/mc.macros`)
+4. **Syntax chooser dialog** – Full language list wired to highlighter
 
 ### Medium Priority
-6. **Triple-click line select**
-7. **Column selection with Alt+Arrows**
-8. **Macro persistence** (`~/.local/share/mc/mc.macros`)
-9. **File locking** – Prevent concurrent edits
-10. **User menu (F11)** – Parse and execute `~/.local/share/mc/mcedit/menu`
+5. **etags/ctags navigation** – Alt+Enter find declaration
+6. **Encoding selection** – iconv-style conversion on load/save
+7. **File locking** – Prevent concurrent edits
+8. **First-line regex matching** for syntax detection
+9. **Persistent selection** – Keep selection after cursor movement
+10. **Group undo** – Group related ops into single undo step
 
 ### Lower Priority
-11. **etags/ctags navigation** – Alt+Enter find declaration
-12. **Encoding selection** – iconv integration
-13. **Skin/theme loading** – `~/.config/mc/skins/`
-14. **Binary file display** – Caret notation for control chars
-15. **Typewriter word-wrap** – Auto-wrap while typing
+11. **Skin/theme loading** – `~/.config/mc/skins/`
+12. **Binary file display** – Caret notation for control chars
+13. **Dynamic paragraph mode** – Live word-wrap as you type
+14. **Mail dialog** – Send file via mail
+15. **152+ language support** – Load `.syntax` files from MC

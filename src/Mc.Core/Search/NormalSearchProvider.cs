@@ -24,6 +24,34 @@ public sealed class NormalSearchProvider : ISearchProvider
             ? StringComparison.Ordinal
             : StringComparison.OrdinalIgnoreCase;
 
+        // Backward search: find last occurrence before startIndex (exclusive)
+        if (options.Backward)
+        {
+            int searchEnd = startIndex < 0 ? 0 : Math.Min(startIndex, text.Length);
+            if (options.WholeWords)
+            {
+                // Scan from right to left within text[0..searchEnd]
+                int bwIdx = searchEnd - options.Pattern.Length;
+                while (bwIdx >= 0)
+                {
+                    int found = text.LastIndexOf(options.Pattern, bwIdx + options.Pattern.Length - 1, bwIdx + options.Pattern.Length, comparison);
+                    if (found < 0) break;
+                    bool leftBound  = found == 0 || !char.IsLetterOrDigit(text[found - 1]);
+                    bool rightBound = found + options.Pattern.Length >= text.Length ||
+                                      !char.IsLetterOrDigit(text[found + options.Pattern.Length]);
+                    if (leftBound && rightBound)
+                        return SearchResult.Match(found, options.Pattern.Length, text.Substring(found, options.Pattern.Length));
+                    bwIdx = found - 1;
+                }
+                return SearchResult.NotFound;
+            }
+            if (searchEnd < options.Pattern.Length) return SearchResult.NotFound;
+            int bidx = text.LastIndexOf(options.Pattern, searchEnd - 1, searchEnd, comparison);
+            return bidx >= 0
+                ? SearchResult.Match(bidx, options.Pattern.Length, text.Substring(bidx, options.Pattern.Length))
+                : SearchResult.NotFound;
+        }
+
         var searchIn = startIndex > 0 && startIndex < text.Length ? text[startIndex..] : text;
         var startOff = startIndex > 0 ? startIndex : 0;
 

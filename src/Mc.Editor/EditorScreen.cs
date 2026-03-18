@@ -21,6 +21,8 @@ public sealed class EditorScreen : Toplevel
     private readonly List<string> _fileHistory = [];
     private const int MaxHistory = 20;
 
+    private EditorSettings _settings = new();
+
     public EditorScreen(string? filePath = null)
     {
         if (filePath != null && File.Exists(filePath))
@@ -37,6 +39,10 @@ public sealed class EditorScreen : Toplevel
 
         _menuBar   = BuildMenuBar();
         _buttonBar = BuildButtonBar();
+
+        // Load and apply settings
+        _settings = EditorSettings.Load();
+        _view.ApplySettings(_settings);
 
         // Menu bar sits at the very top (Terminal.Gui puts MenuBar at Y=0 automatically when added to Toplevel)
         Add(_menuBar, _view, _buttonBar);
@@ -127,6 +133,7 @@ public sealed class EditorScreen : Toplevel
             {
                 new MenuItem("_Toggle fullscreen", string.Empty,  () => { /* always fullscreen in this impl */ }),
                 null!,
+                new MenuItem("_List…",             string.Empty,  () => ExecuteWindowList()),
                 new MenuItem("_Open another file…", string.Empty, () => ShowOpenAnotherFile()),
             }),
             new MenuBarItem("_Options", new MenuItem[]
@@ -137,6 +144,8 @@ public sealed class EditorScreen : Toplevel
                 new MenuItem("S_yntax highlighting…", string.Empty, () => _view.ExecuteSyntaxChoose()),
                 null!,
                 new MenuItem("Toggle _visible tabs","Alt+_",       () => _view.ExecuteToggleShowTabs()),
+                null!,
+                new MenuItem("_Save setup",       string.Empty,   () => ExecuteSaveSetup()),
             }),
           }
         };
@@ -219,6 +228,21 @@ public sealed class EditorScreen : Toplevel
     private void ShowOpenAnotherFile()
     {
         _view.ExecuteOpenFile();
+    }
+
+    private void ExecuteWindowList()
+    {
+        // Since only one file at a time is supported, just show the current filename
+        var view = _view;
+        var title = view.Title;
+        MessageBox.Query("Window List", title, "OK");
+    }
+
+    private void ExecuteSaveSetup()
+    {
+        _settings = _view.CaptureSettings();
+        _settings.Save();
+        MessageBox.Query("Save Setup", "Settings saved to ~/.config/mc/ini", "OK");
     }
 }
 

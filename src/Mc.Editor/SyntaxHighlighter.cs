@@ -28,6 +28,9 @@ public sealed class SyntaxHighlighter
 
     public SyntaxHighlighter(SyntaxRuleSet rules) => _rules = rules;
 
+    /// <summary>The display name of this syntax rule set (e.g. "C#", "Python").</summary>
+    public string SyntaxName => _rules.Name;
+
     public static SyntaxHighlighter? ForFile(string fileName)
     {
         var ext = Path.GetExtension(fileName).ToLowerInvariant();
@@ -82,6 +85,16 @@ public sealed class SyntaxRuleSet
         ".json" => Json(),
         ".xml" or ".html" or ".htm" => Xml(),
         ".md" => Markdown(),
+        ".rb" => Ruby(),
+        ".php" => Php(),
+        ".java" => Java(),
+        ".css" => Css(),
+        ".yaml" or ".yml" => Yaml(),
+        ".toml" => Toml(),
+        ".lua" => Lua(),
+        ".r" or ".R" => R(),
+        ".swift" => Swift(),
+        ".kt" or ".kts" => Kotlin(),
         _ => null,
     };
 
@@ -193,6 +206,119 @@ public sealed class SyntaxRuleSet
             Comment(@"`[^`]+`|```[\s\S]*?```"),
             StringLiteral(@"\*\*[\s\S]*?\*\*|__[\s\S]*?__"),
             Preprocessor(@"^\s*[-*+]\s|^\s*\d+\.\s")
+        )
+    };
+
+    private static SyntaxRuleSet Ruby() => new()
+    {
+        Name = "Ruby",
+        Rules = BuildRules(
+            Comment(@"#.*$", @"=begin[\s\S]*?=end"),
+            StringLiteral(@"""(?:\\.|[^""\\])*""|'(?:[^'\\]|\\.)*'|`(?:[^`\\]|\\.)*`"),
+            Keyword(@"\b(?:def|end|do|class|module|if|else|elsif|unless|while|until|for|begin|rescue|ensure|return|nil|true|false|self|super|yield|raise|require|include|extend|attr_reader|attr_writer|attr_accessor|lambda|proc)\b"),
+            Number(@"\b\d+(?:\.\d+)?(?:[eE][+-]?\d+)?\b")
+        )
+    };
+
+    private static SyntaxRuleSet Php() => new()
+    {
+        Name = "PHP",
+        Rules = BuildRules(
+            Comment(@"//.*$", @"#.*$", @"/\*[\s\S]*?\*/"),
+            StringLiteral(@"""(?:\\.|[^""\\])*""|'(?:[^'\\]|\\.)*'"),
+            Keyword(@"\b(?:echo|print|class|function|if|else|elseif|while|for|foreach|do|switch|case|break|continue|return|new|extends|implements|interface|abstract|public|private|protected|static|final|const|namespace|use|require|include|null|true|false)\b"),
+            Number(@"\b\d+(?:\.\d+)?(?:[eE][+-]?\d+)?\b")
+        )
+    };
+
+    private static SyntaxRuleSet Java() => new()
+    {
+        Name = "Java",
+        Rules = BuildRules(
+            Comment(@"//.*$", @"/\*[\s\S]*?\*/"),
+            StringLiteral(@"""(?:\\.|[^""\\])*""|'(?:\\.|[^'\\])'"),
+            Keyword(@"\b(?:public|private|protected|class|interface|extends|implements|abstract|final|static|new|return|if|else|while|for|do|switch|case|break|continue|throw|throws|try|catch|finally|null|true|false|void|int|long|double|float|boolean|byte|char|short|import|package|this|super|instanceof)\b"),
+            Number(@"\b\d+(?:\.\d+)?(?:[eE][+-]?\d+)?[lLfFdD]?\b"),
+            TypeName(@"\b[A-Z][a-zA-Z0-9]*\b")
+        )
+    };
+
+    private static SyntaxRuleSet Css() => new()
+    {
+        Name = "CSS",
+        Rules = BuildRules(
+            Comment(@"/\*[\s\S]*?\*/"),
+            StringLiteral(@"""(?:[^""\\]|\\.)*"""),
+            Keyword(@"\b(?:color|background|font|margin|padding|border|width|height|display|position|top|left|right|bottom|flex|grid|align|justify|overflow|visibility|opacity|transition|transform|animation|content|float|clear|z-index|cursor)\b"),
+            Number(@"-?\b\d+(?:\.\d+)?(?:px|em|rem|%|vh|vw|pt|pc|cm|mm|ex|ch|vmin|vmax|s|ms|deg|rad|turn)?\b")
+        )
+    };
+
+    private static SyntaxRuleSet Yaml() => new()
+    {
+        Name = "YAML",
+        Rules = BuildRules(
+            Comment(@"#.*$"),
+            StringLiteral(@"""(?:\\.|[^""\\])*""|'(?:[^'\\]|\\.)*'"),
+            Keyword(@"(?m)^\s*[\w\-]+(?=\s*:)|\b(?:true|false|null|yes|no|on|off)\b"),
+            Number(@"\b\d+(?:\.\d+)?(?:[eE][+-]?\d+)?\b")
+        )
+    };
+
+    private static SyntaxRuleSet Toml() => new()
+    {
+        Name = "TOML",
+        Rules = BuildRules(
+            Comment(@"#.*$"),
+            StringLiteral(@"""(?:\\.|[^""\\])*""|'[^']*'"),
+            Keyword(@"(?m)^\s*\[[\w\.\-]+\]|\b(?:true|false)\b"),
+            Number(@"\b\d+(?:\.\d+)?(?:[eE][+-]?\d+)?\b")
+        )
+    };
+
+    private static SyntaxRuleSet Lua() => new()
+    {
+        Name = "Lua",
+        Rules = BuildRules(
+            Comment(@"--(?:\[\[[\s\S]*?\]\]|.*$)"),
+            StringLiteral(@"""(?:\\.|[^""\\])*""|'(?:\\.|[^'\\])*'|\[\[[\s\S]*?\]\]"),
+            Keyword(@"\b(?:and|break|do|else|elseif|end|false|for|function|goto|if|in|local|nil|not|or|repeat|return|then|true|until|while)\b"),
+            Number(@"\b\d+(?:\.\d+)?(?:[eE][+-]?\d+)?\b|0x[0-9a-fA-F]+")
+        )
+    };
+
+    private static SyntaxRuleSet R() => new()
+    {
+        Name = "R",
+        Rules = BuildRules(
+            Comment(@"#.*$"),
+            StringLiteral(@"""(?:\\.|[^""\\])*""|'(?:\\.|[^'\\])*'"),
+            Keyword(@"\b(?:function|return|if|else|for|while|repeat|break|next|NULL|TRUE|FALSE|NA|Inf|NaN|library|require)\b"),
+            Number(@"\b\d+(?:\.\d+)?(?:[eE][+-]?\d+)?[iL]?\b")
+        )
+    };
+
+    private static SyntaxRuleSet Swift() => new()
+    {
+        Name = "Swift",
+        Rules = BuildRules(
+            Comment(@"//.*$", @"/\*[\s\S]*?\*/"),
+            StringLiteral(@"""(?:\\.|[^""\\])*"""),
+            Keyword(@"\b(?:func|var|let|class|struct|enum|protocol|extension|if|else|guard|switch|case|for|while|return|import|public|private|internal|override|init|self|super|true|false|nil|try|catch|throw|throws|async|await|actor|in|is|as|where)\b"),
+            Number(@"\b\d+(?:\.\d+)?(?:[eE][+-]?\d+)?\b"),
+            TypeName(@"\b[A-Z][a-zA-Z0-9]*\b")
+        )
+    };
+
+    private static SyntaxRuleSet Kotlin() => new()
+    {
+        Name = "Kotlin",
+        Rules = BuildRules(
+            Comment(@"//.*$", @"/\*[\s\S]*?\*/"),
+            StringLiteral(@"""(?:\\.|[^""\\])*""|'(?:\\.|[^'\\])'"),
+            Keyword(@"\b(?:fun|val|var|class|interface|object|if|else|when|for|while|do|return|import|package|public|private|protected|internal|override|data|sealed|abstract|companion|null|true|false|is|in|as|this|super|throw|try|catch|finally)\b"),
+            Number(@"\b\d+(?:\.\d+)?(?:[eE][+-]?\d+)?[lLfF]?\b"),
+            TypeName(@"\b[A-Z][a-zA-Z0-9]*\b")
         )
     };
 

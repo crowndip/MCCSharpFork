@@ -46,6 +46,13 @@ public sealed class EditorView : View
     // Scroll-without-cursor (Ctrl+Up / Ctrl+Down)
     private bool _lockScroll;
 
+    // Settings
+    private bool _confirmSave;
+
+    // Triple-click tracking
+    private DateTime _lastClickTime = DateTime.MinValue;
+    private int _lastClickLine = -1;
+
     // Line-number gutter width
     private int GutterWidth => _showLineNumbers ? _editor.Buffer.GetLineCount().ToString().Length + 1 : 0;
 
@@ -79,16 +86,16 @@ public sealed class EditorView : View
         get
         {
             var (ln, col) = _editor.CursorPosition;
-            var mode = _insertMode ? "INS" : "OVR";
-            var modified = _editor.IsModified ? "Modified" : "Saved";
+            char colFlag = _colBlock ? 'C' : '-';
+            char modFlag = _editor.IsModified ? 'M' : '-';
+            char recFlag = _isRecordingMacro ? 'R' : '-';
+            char ovrFlag = !_insertMode ? 'O' : '-';
             var file = _editor.FilePath != null ? Path.GetFileName(_editor.FilePath) : "new";
-            var extra = new StringBuilder();
-            if (_colBlock) extra.Append(" COL");
-            if (_showLineNumbers) extra.Append(" NUMS");
-            if (!_syntaxHighlightingOn) extra.Append(" NOHL");
-            if (_quoteNext) extra.Append(" QUOT");
-            if (_isRecordingMacro) extra.Append(" REC");
-            return $" {file} | Ln {ln + 1}, Col {col + 1} | {mode} | {modified}{extra}";
+            var syntaxName = _syntaxHighlightingOn && _editor.Highlighter != null
+                ? $" [{_editor.Highlighter.SyntaxName}]"
+                : string.Empty;
+            var total = _editor.Buffer.GetLineCount();
+            return $"[{colFlag}{modFlag}{recFlag}{ovrFlag}] {col + 1} L:[{ln + 1}/{total}] {file}{syntaxName}";
         }
     }
 
@@ -323,17 +330,35 @@ public sealed class EditorView : View
 
                 if (e.Flags.HasFlag(MouseFlags.Button1DoubleClicked))
                 {
-                    // Double-click: select current word
-                    _editor.MoveWordLeft();
-                    _editor.StartSelection();
-                    _editor.MoveWordRight();
-                    _editor.ExtendSelection();
-                    _selecting = true;
+                    // Check for triple-click: second click within 400ms on same line
+                    var now = DateTime.UtcNow;
+                    if ((now - _lastClickTime).TotalMilliseconds <= 400 && _lastClickLine == targetLine)
+                    {
+                        // Triple-click: select entire line
+                        _editor.MoveToLineStart();
+                        _editor.StartSelection();
+                        _editor.MoveToLineEnd();
+                        _editor.ExtendSelection();
+                        _selecting = true;
+                        _lastClickTime = DateTime.MinValue;
+                    }
+                    else
+                    {
+                        // Double-click: select current word
+                        _editor.MoveWordLeft();
+                        _editor.StartSelection();
+                        _editor.MoveWordRight();
+                        _editor.ExtendSelection();
+                        _selecting = true;
+                        _lastClickTime = now;
+                        _lastClickLine = targetLine;
+                    }
                 }
                 else if (e.Flags.HasFlag(MouseFlags.Button1Pressed))
                 {
                     _selecting = false;
                     _editor.ClearSelection();
+                    _lastClickTime = DateTime.MinValue;
                 }
                 SetNeedsDraw();
                 SetFocus();
@@ -449,6 +474,52 @@ public sealed class EditorView : View
             case KeyCode.CursorRight  when keyEvent.IsCtrl:  _editor.MoveWordRight(); return true;
             case KeyCode.Home         when keyEvent.IsCtrl:  _editor.MoveToStart(); return true;
             case KeyCode.End          when keyEvent.IsCtrl:  _editor.MoveToEnd();   return true;
+
+            // Alt+Arrows: extend column selection
+            case KeyCode.CursorUp when keyEvent.IsAlt:
+                if (!_selecting || !_colBlock)
+                {
+                    _colBlock = true;
+                    (_colBlockAnchorLine, _colBlockAnchorCol) = _editor.CursorPosition;
+                    _selecting = true;
+                    _editor.StartSelection();
+                }
+                _editor.MoveUp();
+                SetNeedsDraw();
+                return true;
+            case KeyCode.CursorDown when keyEvent.IsAlt:
+                if (!_selecting || !_colBlock)
+                {
+                    _colBlock = true;
+                    (_colBlockAnchorLine, _colBlockAnchorCol) = _editor.CursorPosition;
+                    _selecting = true;
+                    _editor.StartSelection();
+                }
+                _editor.MoveDown();
+                SetNeedsDraw();
+                return true;
+            case KeyCode.CursorLeft when keyEvent.IsAlt:
+                if (!_selecting || !_colBlock)
+                {
+                    _colBlock = true;
+                    (_colBlockAnchorLine, _colBlockAnchorCol) = _editor.CursorPosition;
+                    _selecting = true;
+                    _editor.StartSelection();
+                }
+                _editor.MoveLeft();
+                SetNeedsDraw();
+                return true;
+            case KeyCode.CursorRight when keyEvent.IsAlt:
+                if (!_selecting || !_colBlock)
+                {
+                    _colBlock = true;
+                    (_colBlockAnchorLine, _colBlockAnchorCol) = _editor.CursorPosition;
+                    _selecting = true;
+                    _editor.StartSelection();
+                }
+                _editor.MoveRight();
+                SetNeedsDraw();
+                return true;
 
             // Ctrl+Up / Ctrl+Down = scroll display without moving cursor
             case KeyCode.CursorUp   when keyEvent.IsCtrl:
@@ -625,11 +696,59 @@ public sealed class EditorView : View
 
     // ── Public Command Methods ───────────────────────────────────────────────
 
+    /// <summary>Apply settings from an EditorSettings object to this view and its controller.</summary>
+    public void ApplySettings(EditorSettings s)
+    {
+        _editor.TabWidth        = s.TabWidth;
+        _editor.ExpandTabs      = s.ExpandTabs;
+        _editor.AutoIndent      = s.AutoIndent;
+        _editor.TypewriterWrap  = s.TypewriterWrap;
+        _editor.WrapLineLength  = s.WrapLineLength;
+        _editor.SaveMode        = s.SaveMode;
+        _editor.BackupExtension = s.BackupExtension;
+        _editor.SavePosition    = s.SavePosition;
+        _showLineNumbers        = s.ShowLineNumbers;
+        _syntaxHighlightingOn   = s.SyntaxHighlighting;
+        _showRightMargin        = s.ShowRightMargin;
+        _rightMarginColumn      = s.RightMarginColumn;
+        _showTabTws             = s.ShowTabTws;
+        _confirmSave            = s.ConfirmSave;
+        SetNeedsDraw();
+    }
+
+    /// <summary>Capture current view and controller state into an EditorSettings object.</summary>
+    public EditorSettings CaptureSettings()
+    {
+        return new EditorSettings
+        {
+            TabWidth           = _editor.TabWidth,
+            ExpandTabs         = _editor.ExpandTabs,
+            AutoIndent         = _editor.AutoIndent,
+            TypewriterWrap     = _editor.TypewriterWrap,
+            WrapLineLength     = _editor.WrapLineLength,
+            SaveMode           = _editor.SaveMode,
+            BackupExtension    = _editor.BackupExtension,
+            SavePosition       = _editor.SavePosition,
+            ShowLineNumbers    = _showLineNumbers,
+            SyntaxHighlighting = _syntaxHighlightingOn,
+            ShowRightMargin    = _showRightMargin,
+            RightMarginColumn  = _rightMarginColumn,
+            ShowTabTws         = _showTabTws,
+            ConfirmSave        = _confirmSave,
+        };
+    }
+
     public void ExecuteSave()
     {
         try
         {
             if (_editor.FilePath == null) { ExecuteSaveAs(); return; }
+            if (_confirmSave)
+            {
+                var fileName = Path.GetFileName(_editor.FilePath);
+                var choice = MessageBox.Query("Confirm Save", $"Save to {fileName}?", "Yes", "No");
+                if (choice != 0) return;
+            }
             _editor.Save();
             EditorTitleChanged?.Invoke(this, EventArgs.Empty);
         }
@@ -640,9 +759,44 @@ public sealed class EditorView : View
     {
         var path = PromptInput("Save As", "File name:", _editor.FilePath ?? string.Empty);
         if (path == null) return;
+
+        // Show line ending choice dialog
+        string lineEnding = "\n"; // default LF
         try
         {
-            _editor.SaveAs(path);
+            var d = new Dialog { Title = "Line Ending", Width = 40, Height = 12 };
+            d.Add(new Label { X = 1, Y = 1, Text = "Choose line ending:" });
+            var rg = new RadioGroup
+            {
+                X = 1, Y = 3,
+                RadioLabels = new string[] { "LF (Unix)", "CRLF (Windows)", "CR (Mac)", "As-is" },
+                SelectedItem = 0,
+            };
+            d.Add(rg);
+            var ok     = new Button { Text = "OK", IsDefault = true };
+            var cancel = new Button { Text = "Cancel" };
+            bool cancelled = false;
+            ok.Accepting     += (_, _) => Application.RequestStop(d);
+            cancel.Accepting += (_, _) => { cancelled = true; Application.RequestStop(d); };
+            d.AddButton(ok); d.AddButton(cancel);
+            Application.Run(d); d.Dispose();
+            if (cancelled) return;
+            lineEnding = rg.SelectedItem switch
+            {
+                0 => "\n",
+                1 => "\r\n",
+                2 => "\r",
+                _ => null!,  // As-is: null signals no conversion
+            };
+        }
+        catch { /* if dialog fails, use default */ }
+
+        try
+        {
+            if (lineEnding == null)
+                _editor.SaveAs(path);
+            else
+                _editor.SaveAsWithLineEnding(path, lineEnding);
             EditorTitleChanged?.Invoke(this, EventArgs.Empty);
         }
         catch (Exception ex) { MessageBox.ErrorQuery("Save Failed", ex.Message, "OK"); }
@@ -691,6 +845,7 @@ public sealed class EditorView : View
             if (choice == 2) return;
             if (choice == 0) ExecuteSave();
         }
+        _editor.SaveCurrentPosition();
         RequestClose?.Invoke(this, EventArgs.Empty);
     }
 
@@ -789,19 +944,48 @@ public sealed class EditorView : View
         _editor.Cut(); _selecting = false; _editor.ClearSelection(); SetNeedsDraw();
     }
 
+    private static string ClipFilePath => Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+        ".cache", "mc", "mcedit", "mcedit.clip");
+
     public void ExecuteCopyToClipfile()
     {
         _clipboardText = _editor.Copy();
+        try
+        {
+            var clipDir = Path.GetDirectoryName(ClipFilePath)!;
+            Directory.CreateDirectory(clipDir);
+            File.WriteAllText(ClipFilePath, _clipboardText ?? string.Empty);
+        }
+        catch { /* ignore file write errors */ }
         _selecting = false; _editor.ClearSelection(); SetNeedsDraw();
     }
 
     public void ExecuteCutToClipfile()
     {
-        _clipboardText = _editor.Copy(); _editor.Cut();
+        _clipboardText = _editor.Copy();
+        _editor.Cut();
+        try
+        {
+            var clipDir = Path.GetDirectoryName(ClipFilePath)!;
+            Directory.CreateDirectory(clipDir);
+            File.WriteAllText(ClipFilePath, _clipboardText ?? string.Empty);
+        }
+        catch { /* ignore file write errors */ }
         _selecting = false; _editor.ClearSelection(); SetNeedsDraw();
     }
 
-    public void ExecutePasteFromClipfile() { PasteClipboard(); SetNeedsDraw(); }
+    public void ExecutePasteFromClipfile()
+    {
+        try
+        {
+            if (File.Exists(ClipFilePath))
+                _clipboardText = File.ReadAllText(ClipFilePath);
+        }
+        catch { /* fall back to in-memory clipboard */ }
+        PasteClipboard();
+        SetNeedsDraw();
+    }
 
     public void ExecuteGotoTop()    { _editor.MoveToStart(); SetNeedsDraw(); }
     public void ExecuteGotoBottom() { _editor.MoveToEnd();   SetNeedsDraw(); }
@@ -953,15 +1137,86 @@ public sealed class EditorView : View
 
     public void ExecuteUserMenu()
     {
-        var userMenuPath = Path.Combine(
+        var menuPath = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
             ".local", "share", "mc", "mcedit", "menu");
-        if (!File.Exists(userMenuPath))
+
+        // Fallback to system menu
+        if (!File.Exists(menuPath))
+            menuPath = "/usr/share/mc/mcedit/menu";
+
+        if (!File.Exists(menuPath))
         {
-            MessageBox.Query("User Menu", "No user menu file found.\n" + userMenuPath, "OK");
+            MessageBox.Query("User Menu", "No user menu file found.\n" + menuPath, "OK");
             return;
         }
-        MessageBox.Query("User Menu", "User menu support not yet implemented.", "OK");
+
+        // Parse menu file
+        var entries = ParseUserMenu(menuPath);
+        if (entries.Count == 0)
+        {
+            MessageBox.Query("User Menu", "No menu entries found.", "OK");
+            return;
+        }
+
+        var labels = entries.Select(e => $"{(e.Key != '\0' ? e.Key.ToString() : " ")} {e.Label}").ToArray();
+        int choice = MessageBox.Query("User Menu", "Select action:", labels);
+        if (choice < 0 || choice >= entries.Count) return;
+
+        // Execute the command
+        var cmd = ExpandMacros(entries[choice].Command);
+        try
+        {
+            using var proc = new System.Diagnostics.Process
+            {
+                StartInfo = new System.Diagnostics.ProcessStartInfo("/bin/sh", $"-c \"{cmd}\"")
+                { UseShellExecute = false, CreateNoWindow = false }
+            };
+            proc.Start();
+            proc.WaitForExit(30000);
+        }
+        catch (Exception ex) { MessageBox.ErrorQuery("User Menu", ex.Message, "OK"); }
+    }
+
+    private record UserMenuItem(char Key, string Label, string Command);
+
+    private static List<UserMenuItem> ParseUserMenu(string path)
+    {
+        var entries = new List<UserMenuItem>();
+        var lines = File.ReadAllLines(path);
+        for (int i = 0; i < lines.Length; i++)
+        {
+            var line = lines[i];
+            if (string.IsNullOrWhiteSpace(line) || line.TrimStart().StartsWith('#')) continue;
+            if (!char.IsWhiteSpace(line[0]))
+            {
+                // Header line: [key] label
+                char key = '\0';
+                string label = line.Trim();
+                if (label.Length > 1 && !char.IsWhiteSpace(label[1]))
+                { key = label[0]; label = label[1..].Trim(); }
+                // Collect command lines (indented)
+                var cmd = new StringBuilder();
+                while (i + 1 < lines.Length && lines[i + 1].Length > 0 && char.IsWhiteSpace(lines[i + 1][0]))
+                {
+                    cmd.AppendLine(lines[++i].Trim());
+                }
+                entries.Add(new UserMenuItem(key, label, cmd.ToString().Trim()));
+            }
+        }
+        return entries;
+    }
+
+    private string ExpandMacros(string cmd)
+    {
+        var file = _editor.FilePath ?? string.Empty;
+        return cmd
+            .Replace("%f", file)
+            .Replace("%n", Path.GetFileNameWithoutExtension(file))
+            .Replace("%x", Path.GetExtension(file))
+            .Replace("%d", Path.GetDirectoryName(file) ?? ".")
+            .Replace("%l", (_editor.CursorPosition.Line + 1).ToString())
+            .Replace("%c", (_editor.CursorPosition.Column + 1).ToString());
     }
 
     // ── Private helpers ──────────────────────────────────────────────────────
@@ -1099,8 +1354,10 @@ public sealed class EditorView : View
         var opts = new SearchOptions
         {
             Pattern       = pattern,
-            CaseSensitive = caseCb.CheckedState == CheckState.Checked,
-            Type          = regexCb.CheckedState == CheckState.Checked ? SearchType.Regex : SearchType.Normal,
+            CaseSensitive = caseCb.CheckedState  == CheckState.Checked,
+            Type          = regexCb.CheckedState  == CheckState.Checked ? SearchType.Regex : SearchType.Normal,
+            Backward      = backCb.CheckedState   == CheckState.Checked,
+            WholeWords    = wholeCb.CheckedState   == CheckState.Checked,
         };
         var result = _editor.FindNext(opts);
         if (!result.Found) MessageBox.Query("Find", "Pattern not found", "OK");
@@ -1280,34 +1537,47 @@ public sealed class EditorView : View
 
     private void ShowOptionsDialog()
     {
-        var d = new Dialog { Title = "Editor Options", Width = 60, Height = 22 };
+        var d = new Dialog { Title = "Editor Options", Width = 64, Height = 32 };
         d.Add(new Label { X = 1, Y = 1, Text = "Tab width:" });
         var tabTf = new TextField { X = 20, Y = 1, Width = 6, Text = _editor.TabWidth.ToString() };
         d.Add(tabTf);
         var expandTabsCb = new CheckBox { X = 1, Y = 3, Text = "Fill tabs with spaces",
             CheckedState = _editor.ExpandTabs ? CheckState.Checked : CheckState.UnChecked };
-        var lineNumCb = new CheckBox { X = 1, Y = 5, Text = "Show line numbers",
+        var autoIndentCb = new CheckBox { X = 1, Y = 5, Text = "Auto indent",
+            CheckedState = _editor.AutoIndent ? CheckState.Checked : CheckState.UnChecked };
+        var lineNumCb = new CheckBox { X = 1, Y = 7, Text = "Show line numbers",
             CheckedState = _showLineNumbers ? CheckState.Checked : CheckState.UnChecked };
-        var syntaxCb = new CheckBox { X = 1, Y = 7, Text = "Syntax highlighting",
+        var syntaxCb = new CheckBox { X = 1, Y = 9, Text = "Syntax highlighting",
             CheckedState = _syntaxHighlightingOn ? CheckState.Checked : CheckState.UnChecked };
-        var rightMarginCb = new CheckBox { X = 1, Y = 9, Text = "Show right margin",
+        var rightMarginCb = new CheckBox { X = 1, Y = 11, Text = "Show right margin",
             CheckedState = _showRightMargin ? CheckState.Checked : CheckState.UnChecked };
-        var tabTwsCb = new CheckBox { X = 1, Y = 11, Text = "Visible tabs/spaces",
+        var tabTwsCb = new CheckBox { X = 1, Y = 13, Text = "Visible tabs/spaces",
             CheckedState = _showTabTws ? CheckState.Checked : CheckState.UnChecked };
-        d.Add(new Label { X = 1, Y = 13, Text = "Right margin column:" });
-        var marginTf = new TextField { X = 22, Y = 13, Width = 6, Text = _rightMarginColumn.ToString() };
-        d.Add(expandTabsCb, lineNumCb, syntaxCb, rightMarginCb, tabTwsCb, marginTf);
+        var confirmSaveCb = new CheckBox { X = 1, Y = 15, Text = "Confirm before saving",
+            CheckedState = _confirmSave ? CheckState.Checked : CheckState.UnChecked };
+        var typewriterWrapCb = new CheckBox { X = 1, Y = 17, Text = "Typewriter word wrap",
+            CheckedState = _editor.TypewriterWrap ? CheckState.Checked : CheckState.UnChecked };
+        d.Add(new Label { X = 1, Y = 19, Text = "Right margin column:" });
+        var marginTf = new TextField { X = 22, Y = 19, Width = 6, Text = _rightMarginColumn.ToString() };
+        d.Add(new Label { X = 1, Y = 21, Text = "Wrap line length:" });
+        var wrapTf = new TextField { X = 22, Y = 21, Width = 6, Text = _editor.WrapLineLength.ToString() };
+        d.Add(expandTabsCb, autoIndentCb, lineNumCb, syntaxCb, rightMarginCb, tabTwsCb,
+              confirmSaveCb, typewriterWrapCb, marginTf, wrapTf);
         var ok     = new Button { Text = "OK", IsDefault = true };
         var cancel = new Button { Text = "Cancel" };
         ok.Accepting += (_, _) =>
         {
             if (int.TryParse(tabTf.Text, out var tw) && tw > 0) _editor.TabWidth = tw;
             if (int.TryParse(marginTf.Text, out var mc) && mc > 0) _rightMarginColumn = mc;
-            _editor.ExpandTabs      = expandTabsCb.CheckedState == CheckState.Checked;
-            _showLineNumbers        = lineNumCb.CheckedState    == CheckState.Checked;
-            _syntaxHighlightingOn   = syntaxCb.CheckedState     == CheckState.Checked;
-            _showRightMargin        = rightMarginCb.CheckedState == CheckState.Checked;
-            _showTabTws             = tabTwsCb.CheckedState      == CheckState.Checked;
+            if (int.TryParse(wrapTf.Text, out var wl) && wl > 0) _editor.WrapLineLength = wl;
+            _editor.ExpandTabs      = expandTabsCb.CheckedState    == CheckState.Checked;
+            _editor.AutoIndent      = autoIndentCb.CheckedState     == CheckState.Checked;
+            _editor.TypewriterWrap  = typewriterWrapCb.CheckedState == CheckState.Checked;
+            _showLineNumbers        = lineNumCb.CheckedState        == CheckState.Checked;
+            _syntaxHighlightingOn   = syntaxCb.CheckedState         == CheckState.Checked;
+            _showRightMargin        = rightMarginCb.CheckedState     == CheckState.Checked;
+            _showTabTws             = tabTwsCb.CheckedState          == CheckState.Checked;
+            _confirmSave            = confirmSaveCb.CheckedState     == CheckState.Checked;
             Application.RequestStop(d);
         };
         cancel.Accepting += (_, _) => Application.RequestStop(d);

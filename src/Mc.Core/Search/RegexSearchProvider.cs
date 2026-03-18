@@ -17,6 +17,25 @@ public sealed class RegexSearchProvider : ISearchProvider
     {
         if (!TryBuildRegex(options, out var regex, out _)) return SearchResult.NotFound;
 
+        // Backward search: get all matches before startIndex, return the last one
+        if (options.Backward)
+        {
+            var allMatches = regex!.Matches(text);
+            System.Text.RegularExpressions.Match? lastBefore = null;
+            foreach (System.Text.RegularExpressions.Match m in allMatches)
+            {
+                if (m.Index < startIndex)
+                    lastBefore = m;
+                else
+                    break;
+            }
+            if (lastBefore == null) return SearchResult.NotFound;
+            var backGroups = new List<string>(lastBefore.Groups.Count);
+            for (int i = 0; i < lastBefore.Groups.Count; i++)
+                backGroups.Add(lastBefore.Groups[i].Value);
+            return SearchResult.Match(lastBefore.Index, lastBefore.Length, lastBefore.Value, backGroups);
+        }
+
         var match = regex!.Match(text, startIndex);
         if (!match.Success) return SearchResult.NotFound;
 
