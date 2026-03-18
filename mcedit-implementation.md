@@ -26,7 +26,7 @@ Track implementation status against `mcedit-specifications.md`.
 | Menu                             | Status | Notes |
 |----------------------------------|--------|-------|
 | **File** (Alt+F)                 | ✅     | Open, New, Close, History, Save, Save As, Insert File, Copy to File, User Menu, About, Quit |
-| **Edit** (Alt+E)                 | ✅     | Undo, Redo, Toggle insert, Mark, Mark Column, Mark All, Unmark, Copy, Move, Delete, Clipboard ops, Top/Bottom |
+| **Edit** (Alt+E)                 | ✅     | Undo, Redo, Toggle insert, Mark, Mark Column, Mark All, Unmark, Copy, Move, Delete, Clipboard ops, **Copy/Cut/Paste to desktop** (Ctrl+C/X/V), Top/Bottom |
 | **Search** (Alt+S)               | ✅     | Search, Search Again, Replace, Bookmarks (Toggle/Next/Prev/Flush) |
 | **Command** (Alt+C)              | ✅     | Goto Line, Toggle Line Numbers, Match Bracket, Toggle Syntax, Right Margin, Encoding, Refresh, Macro (record/delete), Spell Check (word/language), Mail |
 | **Format** (Alt+M)               | ✅     | Insert Literal, Insert Date/Time, Format Paragraph, Sort, Paste Output, External Formatter |
@@ -232,6 +232,8 @@ Track implementation status against `mcedit-specifications.md`.
 | Visible tabs/whitespace          | ✅     | Tabs as `→`; trailing spaces as `·` |
 | Line number gutter               | ✅     | |
 | File load/save                   | ✅     | UTF-8; line ending detection |
+| OS desktop clipboard (copy)      | ✅     | `OsClipboard.Set()` — Win32/xclip/xsel/wl-copy; Ctrl+C / Ctrl+X |
+| OS desktop clipboard (paste)     | ✅     | `OsClipboard.Get()` — Win32/xclip/xsel/wl-paste; Ctrl+V |
 | Line ending preservation         | ✅     | Detected on load; Save As offers LF/CRLF/CR/As-is choice |
 | Multi-window editing             | ❌     | One window at a time |
 | Window move/resize               | ❌     | |
@@ -335,7 +337,7 @@ Track implementation status against `mcedit-specifications.md`.
 | Configuration     | 13   | 0       | 3           |
 | Status Bar        | 11   | 0       | 0           |
 | Color Scheme      | 12   | 0       | 1           |
-| **TOTAL**         | **180** | **2** | **22**     |
+| **TOTAL**         | **182** | **2** | **22**     |
 
 ---
 

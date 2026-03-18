@@ -608,14 +608,13 @@ public sealed class EditorView : View
                 _selecting = false; _editor.ClearSelection();
                 return true;
             case KeyCode.C when keyEvent.IsCtrl:
-                _clipboardText = _editor.Copy(); _selecting = false; _editor.ClearSelection();
+                ExecuteCopyToSystemClipboard();
                 return true;
             case KeyCode.X when keyEvent.IsCtrl:
-                _clipboardText = _editor.Copy(); _editor.Cut();
-                _selecting = false; _editor.ClearSelection();
+                ExecuteCutToSystemClipboard();
                 return true;
             case KeyCode.V when keyEvent.IsCtrl:
-                PasteClipboard();
+                ExecutePasteFromSystemClipboard();
                 return true;
             case KeyCode.V | KeyCode.AltMask:
                 _editor.PageUp(Viewport.Height - 2); SetNeedsDraw();
@@ -1016,6 +1015,50 @@ public sealed class EditorView : View
         catch { /* fall back to in-memory clipboard */ }
         PasteClipboard();
         SetNeedsDraw();
+    }
+
+    // ── OS / Desktop Clipboard ───────────────────────────────────────────────
+
+    /// <summary>Copy selected text to the OS desktop clipboard (Ctrl+C).</summary>
+    public void ExecuteCopyToSystemClipboard()
+    {
+        var text = _editor.Copy();
+        if (string.IsNullOrEmpty(text)) return;
+        _clipboardText = text;           // keep internal clipboard in sync
+        if (!OsClipboard.Set(text))
+            MessageBox.Query("Clipboard", "Could not access the system clipboard.\n" +
+                "On Linux, install xclip, xsel, or wl-clipboard.", "OK");
+        _selecting = false; _editor.ClearSelection(); SetNeedsDraw();
+    }
+
+    /// <summary>Cut selected text to the OS desktop clipboard (Ctrl+X).</summary>
+    public void ExecuteCutToSystemClipboard()
+    {
+        var text = _editor.Copy();
+        if (string.IsNullOrEmpty(text)) return;
+        _clipboardText = text;           // keep internal clipboard in sync
+        _editor.Cut();
+        if (!OsClipboard.Set(text))
+            MessageBox.Query("Clipboard", "Could not access the system clipboard.\n" +
+                "On Linux, install xclip, xsel, or wl-clipboard.", "OK");
+        _selecting = false; _editor.ClearSelection(); SetNeedsDraw();
+    }
+
+    /// <summary>Paste text from the OS desktop clipboard at the cursor (Ctrl+V).</summary>
+    public void ExecutePasteFromSystemClipboard()
+    {
+        var text = OsClipboard.Get();
+        if (!string.IsNullOrEmpty(text))
+        {
+            _clipboardText = text;       // keep internal clipboard in sync
+            _editor.Paste(text);
+            SetNeedsDraw();
+        }
+        else
+        {
+            // Fall back to internal clipboard if OS clipboard is unavailable or empty
+            PasteClipboard();
+        }
     }
 
     public void ExecuteGotoTop()    { _editor.MoveToStart(); SetNeedsDraw(); }

@@ -898,6 +898,30 @@ Two-column layout:
 - Shift+Delete cuts to clipfile
 - Column blocks saved with VERTICAL_MAGIC marker
 
+### 6.20 Desktop (OS) Clipboard Integration
+
+MCEdit can exchange text with the desktop environment clipboard (Windows clipboard or X11/Wayland clipboard on Linux):
+
+**Edit menu items:**
+| Menu Item                | Shortcut | Description                                      |
+|--------------------------|----------|--------------------------------------------------|
+| Copy to desktop          | Ctrl+C   | Copy selected text to the OS clipboard           |
+| Cut to desktop           | Ctrl+X   | Cut selected text to the OS clipboard            |
+| Paste from desktop       | Ctrl+V   | Paste text from the OS clipboard at the cursor   |
+
+**Platform support:**
+- **Windows**: Uses the Win32 clipboard API (via Terminal.Gui / clip.exe fallback)
+- **Linux X11**: Requires `xclip` or `xsel` (`sudo apt install xclip`)
+- **Linux Wayland**: Requires `wl-clipboard` (`sudo apt install wl-clipboard`)
+- **macOS**: Uses `pbcopy` / `pbpaste` via Terminal.Gui
+
+**Behaviour:**
+- Ctrl+C / Ctrl+X / Ctrl+V are bound to the OS clipboard (desktop integration)
+- Ctrl+Ins / Shift+Ins / Shift+Del remain bound to the internal clipfile (`mcedit.clip`)
+- The internal clipboard is kept in sync with the OS clipboard on each copy/paste
+- If no OS clipboard tool is available a warning dialog is shown with install instructions
+- If the OS clipboard is empty on paste the internal clipboard is used as fallback
+
 ### 6.16 File Locking
 
 - Editor uses file locking to prevent concurrent editing
