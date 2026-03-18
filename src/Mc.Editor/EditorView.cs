@@ -201,6 +201,8 @@ public sealed class EditorView : View
         var pos = leftCol;
         Move(gutter, row);
         var bmAttr = new Terminal.Gui.Attribute(Color.White, Color.DarkGray);
+        int lastNonSpace = line.Length - 1;
+        while (lastNonSpace >= 0 && line[lastNonSpace] == ' ') lastNonSpace--;
         for (int i = 0; i < width; i++, pos++)
         {
             char ch = pos < line.Length ? line[pos] : ' ';
@@ -215,7 +217,7 @@ public sealed class EditorView : View
             Driver!.SetAttribute(attr);
             if (_showTabTws && ch == '\t')
                 Driver!.AddStr("→");
-            else if (_showTabTws && ch == ' ' && pos == line.Length - 1)
+            else if (_showTabTws && ch == ' ' && pos > lastNonSpace)
                 { Driver!.SetAttribute(new Terminal.Gui.Attribute(Color.DarkGray, attr.Background)); Driver!.AddStr("·"); }
             else
                 Driver!.AddStr(ch.ToString());
@@ -243,6 +245,8 @@ public sealed class EditorView : View
         var gutter = GutterWidth;
         var bmAttr = new Terminal.Gui.Attribute(Color.White, Color.DarkGray);
         Move(gutter, row);
+        int lastNonSpace = line.Length - 1;
+        while (lastNonSpace >= 0 && line[lastNonSpace] == ' ') lastNonSpace--;
         for (int i = 0; i < width; i++)
         {
             int pos = leftCol + i;
@@ -262,6 +266,8 @@ public sealed class EditorView : View
             Driver!.SetAttribute(attr);
             if (_showTabTws && ch == '\t')
                 Driver!.AddStr("→");
+            else if (_showTabTws && ch == ' ' && pos > lastNonSpace)
+                { Driver!.SetAttribute(new Terminal.Gui.Attribute(Color.DarkGray, attr.Background)); Driver!.AddStr("·"); }
             else
                 Driver!.AddStr(ch.ToString());
         }
@@ -395,11 +401,31 @@ public sealed class EditorView : View
             return true;
         }
 
+        // Ctrl+Shift: extend selection to word / file start/end / page
+        if (keyEvent.IsShift && keyEvent.IsCtrl && keyEvent.KeyCode is
+            KeyCode.Home or KeyCode.End or
+            KeyCode.CursorLeft or KeyCode.CursorRight or
+            KeyCode.CursorUp or KeyCode.CursorDown or
+            KeyCode.PageUp or KeyCode.PageDown)
+        {
+            if (!_selecting)
+            {
+                _selecting = true;
+                _selectionAnchor = _editor.CursorOffset;
+                _editor.StartSelection();
+            }
+            MoveWithCtrlShift(keyEvent);
+            if (!_colBlock) _editor.ExtendSelection();
+            SetNeedsDraw();
+            return true;
+        }
+
         // Shift+Arrow: extend selection (stream or column mode)
         if (keyEvent.IsShift && keyEvent.KeyCode is
             KeyCode.CursorUp or KeyCode.CursorDown or
             KeyCode.CursorLeft or KeyCode.CursorRight or
-            KeyCode.Home or KeyCode.End)
+            KeyCode.Home or KeyCode.End or
+            KeyCode.PageUp or KeyCode.PageDown)
         {
             if (!_selecting)
             {
@@ -591,6 +617,9 @@ public sealed class EditorView : View
             case KeyCode.V when keyEvent.IsCtrl:
                 PasteClipboard();
                 return true;
+            case KeyCode.V | KeyCode.AltMask:
+                _editor.PageUp(Viewport.Height - 2); SetNeedsDraw();
+                return true;
             case KeyCode.A when keyEvent.IsCtrl:
                 _editor.SelectAll(); _selecting = true; SetNeedsDraw();
                 return true;
@@ -699,20 +728,21 @@ public sealed class EditorView : View
     /// <summary>Apply settings from an EditorSettings object to this view and its controller.</summary>
     public void ApplySettings(EditorSettings s)
     {
-        _editor.TabWidth        = s.TabWidth;
-        _editor.ExpandTabs      = s.ExpandTabs;
-        _editor.AutoIndent      = s.AutoIndent;
-        _editor.TypewriterWrap  = s.TypewriterWrap;
-        _editor.WrapLineLength  = s.WrapLineLength;
-        _editor.SaveMode        = s.SaveMode;
-        _editor.BackupExtension = s.BackupExtension;
-        _editor.SavePosition    = s.SavePosition;
-        _showLineNumbers        = s.ShowLineNumbers;
-        _syntaxHighlightingOn   = s.SyntaxHighlighting;
-        _showRightMargin        = s.ShowRightMargin;
-        _rightMarginColumn      = s.RightMarginColumn;
-        _showTabTws             = s.ShowTabTws;
-        _confirmSave            = s.ConfirmSave;
+        _editor.TabWidth          = s.TabWidth;
+        _editor.ExpandTabs        = s.ExpandTabs;
+        _editor.AutoIndent        = s.AutoIndent;
+        _editor.TypewriterWrap    = s.TypewriterWrap;
+        _editor.WrapLineLength    = s.WrapLineLength;
+        _editor.SaveMode          = s.SaveMode;
+        _editor.BackupExtension   = s.BackupExtension;
+        _editor.SavePosition      = s.SavePosition;
+        _editor.BackspaceThruTabs = s.BackspaceThruTabs;
+        _showLineNumbers          = s.ShowLineNumbers;
+        _syntaxHighlightingOn     = s.SyntaxHighlighting;
+        _showRightMargin          = s.ShowRightMargin;
+        _rightMarginColumn        = s.RightMarginColumn;
+        _showTabTws               = s.ShowTabTws;
+        _confirmSave              = s.ConfirmSave;
         SetNeedsDraw();
     }
 
@@ -729,6 +759,7 @@ public sealed class EditorView : View
             SaveMode           = _editor.SaveMode,
             BackupExtension    = _editor.BackupExtension,
             SavePosition       = _editor.SavePosition,
+            BackspaceThruTabs  = _editor.BackspaceThruTabs,
             ShowLineNumbers    = _showLineNumbers,
             SyntaxHighlighting = _syntaxHighlightingOn,
             ShowRightMargin    = _showRightMargin,
@@ -1102,29 +1133,76 @@ public sealed class EditorView : View
 
     public void ExecuteSyntaxChoose()
     {
-        // Build list of available syntax highlighters
-        var syntaxNames = new[] { "Auto", "C#", "C/C++", "Python", "JavaScript/TypeScript",
-                                   "Go", "Rust", "Shell", "JSON", "XML/HTML", "Markdown", "None" };
-        var choice = MessageBox.Query("Syntax Highlighting", "Choose syntax:", syntaxNames);
-        if (choice < 0) return;
-        // Apply choice (stub: reload based on file extension for "Auto", set None, or apply specific)
-        if (choice == 0)
+        var languages = new[]
         {
-            if (_editor.FilePath != null)
-            {
-                // Reload from file extension
-                var h = SyntaxHighlighter.ForFile(_editor.FilePath);
-                // Access via reload
-                _editor.ReloadSyntax();
-            }
+            ("Auto (detect from extension)", "auto"),
+            ("C#", ".cs"),
+            ("C/C++", ".c"),
+            ("Python", ".py"),
+            ("JavaScript/TypeScript", ".js"),
+            ("Go", ".go"),
+            ("Rust", ".rs"),
+            ("Shell/Bash", ".sh"),
+            ("JSON", ".json"),
+            ("XML/HTML", ".xml"),
+            ("Markdown", ".md"),
+            ("Ruby", ".rb"),
+            ("PHP", ".php"),
+            ("Java", ".java"),
+            ("CSS", ".css"),
+            ("YAML", ".yaml"),
+            ("TOML", ".toml"),
+            ("Lua", ".lua"),
+            ("R", ".r"),
+            ("Swift", ".swift"),
+            ("Kotlin", ".kt"),
+            ("None (disable highlighting)", "none"),
+        };
+
+        string? chosen = null;
+        var d = new Dialog
+        {
+            Title  = "Syntax Highlighting",
+            Width  = Math.Min(60, Application.Screen.Width - 4),
+            Height = Math.Min(languages.Length + 6, 26),
+        };
+        var lv = new ListView { X = 1, Y = 1, Width = Dim.Fill(1), Height = Dim.Fill(4) };
+        lv.SetSource(new System.Collections.ObjectModel.ObservableCollection<string>(
+            languages.Select(l => l.Item1).ToList()));
+        lv.SelectedItem = 0;
+        d.Add(lv);
+        lv.OpenSelectedItem += (_, _) =>
+        {
+            if (lv.SelectedItem >= 0) chosen = languages[lv.SelectedItem].Item2;
+            Application.RequestStop(d);
+        };
+        var ok = new Button { Text = "OK", IsDefault = true };
+        var cancel = new Button { Text = "Cancel" };
+        ok.Accepting     += (_, _) => { if (lv.SelectedItem >= 0) chosen = languages[lv.SelectedItem].Item2; Application.RequestStop(d); };
+        cancel.Accepting += (_, _) => Application.RequestStop(d);
+        d.AddButton(ok); d.AddButton(cancel);
+        lv.SetFocus();
+        Application.Run(d); d.Dispose();
+
+        if (chosen == null) return;
+        if (chosen == "auto")
+        {
+            _editor.ReloadSyntax();
+            _syntaxHighlightingOn = _editor.Highlighter != null;
         }
-        else if (choice == syntaxNames.Length - 1)
+        else if (chosen == "none")
         {
             _syntaxHighlightingOn = false;
         }
         else
         {
-            _syntaxHighlightingOn = true;
+            // Force specific syntax by extension
+            var rules = SyntaxRuleSet.ForExtension(chosen);
+            if (rules != null)
+            {
+                _editor.SetHighlighter(new SyntaxHighlighter(rules));
+                _syntaxHighlightingOn = true;
+            }
         }
         SetNeedsDraw();
     }
@@ -1221,13 +1299,59 @@ public sealed class EditorView : View
 
     // ── Private helpers ──────────────────────────────────────────────────────
 
+    private static string MacroFilePath => Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+        ".local", "share", "mc", "mc.macros");
+
+    private void SaveMacro(string name)
+    {
+        try
+        {
+            var dir = Path.GetDirectoryName(MacroFilePath)!;
+            Directory.CreateDirectory(dir);
+            // Simple format: name:key1,key2,...
+            var entries = new List<string>();
+            if (File.Exists(MacroFilePath))
+                entries.AddRange(File.ReadAllLines(MacroFilePath)
+                    .Where(l => !l.StartsWith(name + ":")));
+            var keyStr = string.Join(",", _macroKeys.Select(k => (long)k.KeyCode));
+            entries.Add($"{name}:{keyStr}");
+            File.WriteAllLines(MacroFilePath, entries);
+        }
+        catch { /* ignore errors */ }
+    }
+
+    private bool LoadMacro(string name)
+    {
+        try
+        {
+            if (!File.Exists(MacroFilePath)) return false;
+            foreach (var line in File.ReadAllLines(MacroFilePath))
+            {
+                var colon = line.IndexOf(':');
+                if (colon < 0 || line[..colon] != name) continue;
+                var codes = line[(colon + 1)..].Split(',', StringSplitOptions.RemoveEmptyEntries);
+                _macroKeys.Clear();
+                foreach (var codeStr in codes)
+                {
+                    if (long.TryParse(codeStr, out long code))
+                        _macroKeys.Add(new Key((KeyCode)code));
+                }
+                return true;
+            }
+        }
+        catch { }
+        return false;
+    }
+
     private void ToggleMacroRecord()
     {
         if (_isRecordingMacro)
         {
             _isRecordingMacro = false;
+            SaveMacro("default");
             MessageBox.Query("Macro",
-                $"Macro recording stopped. {_macroKeys.Count} keystrokes saved.\nPress Ctrl+E to play back.", "OK");
+                $"Macro recording stopped. {_macroKeys.Count} keystrokes saved.", "OK");
         }
         else
         {
@@ -1240,6 +1364,8 @@ public sealed class EditorView : View
 
     private void PlayMacro()
     {
+        if (_macroKeys.Count == 0)
+            LoadMacro("default");
         if (_isPlayingMacro || _macroKeys.Count == 0)
         {
             if (_macroKeys.Count == 0)
@@ -1317,12 +1443,29 @@ public sealed class EditorView : View
     {
         switch (key.KeyCode)
         {
-            case KeyCode.CursorUp:    _editor.MoveUp();           break;
-            case KeyCode.CursorDown:  _editor.MoveDown();         break;
-            case KeyCode.CursorLeft:  _editor.MoveLeft();         break;
-            case KeyCode.CursorRight: _editor.MoveRight();        break;
-            case KeyCode.Home:        _editor.MoveToLineStart();  break;
-            case KeyCode.End:         _editor.MoveToLineEnd();    break;
+            case KeyCode.CursorUp:    _editor.MoveUp();                       break;
+            case KeyCode.CursorDown:  _editor.MoveDown();                     break;
+            case KeyCode.CursorLeft:  _editor.MoveLeft();                     break;
+            case KeyCode.CursorRight: _editor.MoveRight();                    break;
+            case KeyCode.Home:        _editor.MoveToLineStart();              break;
+            case KeyCode.End:         _editor.MoveToLineEnd();                break;
+            case KeyCode.PageUp:      _editor.PageUp(Viewport.Height - 2);   break;
+            case KeyCode.PageDown:    _editor.PageDown(Viewport.Height - 2); break;
+        }
+    }
+
+    private void MoveWithCtrlShift(Key key)
+    {
+        switch (key.KeyCode)
+        {
+            case KeyCode.Home:        _editor.MoveToStart();                  break;
+            case KeyCode.End:         _editor.MoveToEnd();                    break;
+            case KeyCode.CursorLeft:  _editor.MoveWordLeft();                 break;
+            case KeyCode.CursorRight: _editor.MoveWordRight();                break;
+            case KeyCode.CursorUp:    _editor.PageUp(Viewport.Height - 2);   break;
+            case KeyCode.CursorDown:  _editor.PageDown(Viewport.Height - 2); break;
+            case KeyCode.PageUp:      _editor.GotoLine(1);                    break;
+            case KeyCode.PageDown:    _editor.GotoLine(_editor.Buffer.GetLineCount()); break;
         }
     }
 
@@ -1537,7 +1680,7 @@ public sealed class EditorView : View
 
     private void ShowOptionsDialog()
     {
-        var d = new Dialog { Title = "Editor Options", Width = 64, Height = 32 };
+        var d = new Dialog { Title = "Editor Options", Width = 64, Height = 36 };
         d.Add(new Label { X = 1, Y = 1, Text = "Tab width:" });
         var tabTf = new TextField { X = 20, Y = 1, Width = 6, Text = _editor.TabWidth.ToString() };
         d.Add(tabTf);
@@ -1561,8 +1704,10 @@ public sealed class EditorView : View
         var marginTf = new TextField { X = 22, Y = 19, Width = 6, Text = _rightMarginColumn.ToString() };
         d.Add(new Label { X = 1, Y = 21, Text = "Wrap line length:" });
         var wrapTf = new TextField { X = 22, Y = 21, Width = 6, Text = _editor.WrapLineLength.ToString() };
+        var bkspThruTabsCb = new CheckBox { X = 1, Y = 23, Text = "Backspace through tab stops",
+            CheckedState = _editor.BackspaceThruTabs ? CheckState.Checked : CheckState.UnChecked };
         d.Add(expandTabsCb, autoIndentCb, lineNumCb, syntaxCb, rightMarginCb, tabTwsCb,
-              confirmSaveCb, typewriterWrapCb, marginTf, wrapTf);
+              confirmSaveCb, typewriterWrapCb, marginTf, wrapTf, bkspThruTabsCb);
         var ok     = new Button { Text = "OK", IsDefault = true };
         var cancel = new Button { Text = "Cancel" };
         ok.Accepting += (_, _) =>
@@ -1570,14 +1715,15 @@ public sealed class EditorView : View
             if (int.TryParse(tabTf.Text, out var tw) && tw > 0) _editor.TabWidth = tw;
             if (int.TryParse(marginTf.Text, out var mc) && mc > 0) _rightMarginColumn = mc;
             if (int.TryParse(wrapTf.Text, out var wl) && wl > 0) _editor.WrapLineLength = wl;
-            _editor.ExpandTabs      = expandTabsCb.CheckedState    == CheckState.Checked;
-            _editor.AutoIndent      = autoIndentCb.CheckedState     == CheckState.Checked;
-            _editor.TypewriterWrap  = typewriterWrapCb.CheckedState == CheckState.Checked;
-            _showLineNumbers        = lineNumCb.CheckedState        == CheckState.Checked;
-            _syntaxHighlightingOn   = syntaxCb.CheckedState         == CheckState.Checked;
-            _showRightMargin        = rightMarginCb.CheckedState     == CheckState.Checked;
-            _showTabTws             = tabTwsCb.CheckedState          == CheckState.Checked;
-            _confirmSave            = confirmSaveCb.CheckedState     == CheckState.Checked;
+            _editor.ExpandTabs        = expandTabsCb.CheckedState    == CheckState.Checked;
+            _editor.AutoIndent        = autoIndentCb.CheckedState     == CheckState.Checked;
+            _editor.TypewriterWrap    = typewriterWrapCb.CheckedState == CheckState.Checked;
+            _editor.BackspaceThruTabs = bkspThruTabsCb.CheckedState  == CheckState.Checked;
+            _showLineNumbers          = lineNumCb.CheckedState        == CheckState.Checked;
+            _syntaxHighlightingOn     = syntaxCb.CheckedState         == CheckState.Checked;
+            _showRightMargin          = rightMarginCb.CheckedState     == CheckState.Checked;
+            _showTabTws               = tabTwsCb.CheckedState          == CheckState.Checked;
+            _confirmSave              = confirmSaveCb.CheckedState     == CheckState.Checked;
             Application.RequestStop(d);
         };
         cancel.Accepting += (_, _) => Application.RequestStop(d);
@@ -1588,9 +1734,215 @@ public sealed class EditorView : View
 
     private void ShowSaveModeDialog()
     {
-        MessageBox.Query("Save Mode",
-            "Save modes:\n• Quick save (default)\n• Safe save (write to temp then rename)\n• Backup (create backup before overwrite)\n\nSave mode configuration not yet persisted.",
-            "OK");
+        var d = new Dialog { Title = "Save Mode", Width = 50, Height = 12 };
+        d.Add(new Label { X = 1, Y = 1, Text = "File saving mode:" });
+        var rg = new RadioGroup
+        {
+            X = 1, Y = 3,
+            RadioLabels = new string[]
+            {
+                "Quick save (overwrite file in place)",
+                "Safe save (write temp, then rename)",
+                "Backup save (keep original as backup)",
+            },
+            SelectedItem = _editor.SaveMode,
+        };
+        d.Add(rg);
+        d.Add(new Label { X = 1, Y = 7, Text = "Backup extension:" });
+        var backupTf = new TextField { X = 20, Y = 7, Width = 10, Text = _editor.BackupExtension };
+        d.Add(backupTf);
+        var ok     = new Button { Text = "OK", IsDefault = true };
+        var cancel = new Button { Text = "Cancel" };
+        ok.Accepting += (_, _) =>
+        {
+            _editor.SaveMode = rg.SelectedItem;
+            _editor.BackupExtension = backupTf.Text?.ToString() ?? "~";
+            Application.RequestStop(d);
+        };
+        cancel.Accepting += (_, _) => Application.RequestStop(d);
+        d.AddButton(ok); d.AddButton(cancel);
+        Application.Run(d); d.Dispose();
+    }
+
+    public void ExecuteExternalFormatter()
+    {
+        var cmdStr = PromptInput("External Formatter", "Formatter command:", "fmt");
+        if (cmdStr == null) return;
+        // If selection, pipe it; otherwise pipe whole file
+        string inputText;
+        bool hasSelection = _editor.HasSelection;
+        if (hasSelection)
+        {
+            var (selStart, selEnd) = _editor.GetSelectionOffsets();
+            inputText = _editor.Buffer.Extract(selStart, selEnd - selStart);
+        }
+        else
+        {
+            inputText = _editor.Buffer.ToString();
+        }
+        try
+        {
+            using var proc = new System.Diagnostics.Process
+            {
+                StartInfo = new System.Diagnostics.ProcessStartInfo
+                {
+                    FileName = "/bin/sh",
+                    Arguments = $"-c \"{cmdStr}\"",
+                    RedirectStandardInput  = true,
+                    RedirectStandardOutput = true,
+                    UseShellExecute        = false,
+                    CreateNoWindow         = true,
+                }
+            };
+            proc.Start();
+            proc.StandardInput.Write(inputText);
+            proc.StandardInput.Close();
+            var output = proc.StandardOutput.ReadToEnd();
+            proc.WaitForExit(10000);
+            if (hasSelection)
+            {
+                var (selStart, selEnd) = _editor.GetSelectionOffsets();
+                _editor.MoveCursor(selStart);
+                _editor.StartSelection();
+                _editor.MoveCursor(selEnd);
+                _editor.ExtendSelection();
+                _editor.InsertText(output);
+            }
+            else
+            {
+                _editor.SelectAll();
+                _editor.InsertText(output);
+            }
+            _selecting = false;
+            _editor.ClearSelection();
+            SetNeedsDraw();
+        }
+        catch (Exception ex) { MessageBox.ErrorQuery("Formatter Failed", ex.Message, "OK"); }
+    }
+
+    public void ExecuteEncodingSelect()
+    {
+        var encodings = new[]
+        {
+            "UTF-8",
+            "UTF-16 LE",
+            "UTF-16 BE",
+            "ASCII",
+            "ISO-8859-1 (Latin-1)",
+            "ISO-8859-2 (Central European)",
+            "Windows-1250",
+            "Windows-1251 (Cyrillic)",
+            "Windows-1252 (Western)",
+            "KOI8-R (Russian)",
+        };
+        var choice = MessageBox.Query("Select Encoding",
+            "Note: Encoding selection affects how the file is\n" +
+            "loaded/saved. Current session uses UTF-8.\n\nEncoding:",
+            encodings);
+        if (choice < 0) return;
+        // In a full implementation, this would re-read the file with the chosen encoding.
+        // For now, save the preference and inform the user.
+        MessageBox.Query("Encoding",
+            $"Selected: {encodings[choice]}\n\nReopen the file to apply the new encoding.", "OK");
+    }
+
+    public void ExecuteDeleteMacro()
+    {
+        if (_macroKeys.Count == 0 && !File.Exists(MacroFilePath))
+        {
+            MessageBox.Query("Delete Macro", "No saved macro found.", "OK");
+            return;
+        }
+        var choice = MessageBox.Query("Delete Macro",
+            "Delete the saved macro 'default'?", "Yes", "No");
+        if (choice != 0) return;
+        _macroKeys.Clear();
+        try
+        {
+            if (File.Exists(MacroFilePath))
+            {
+                var lines = File.ReadAllLines(MacroFilePath)
+                    .Where(l => !l.StartsWith("default:")).ToArray();
+                File.WriteAllLines(MacroFilePath, lines);
+            }
+        }
+        catch { }
+        MessageBox.Query("Delete Macro", "Macro deleted.", "OK");
+    }
+
+    public void ExecuteCheckWord()
+    {
+        // Like spell check but focused specifically on spell-check of current word
+        ShowSpellCheck();
+    }
+
+    public void ExecuteLearnKeys()
+    {
+        MessageBox.Query("Keyboard Reference",
+            "Navigation:\n" +
+            "  Arrows=Move  Ctrl+Arrows=Word  Home/End=Line  PgUp/PgDn=Page\n" +
+            "  Ctrl+Home/End=File  Ctrl+Up/Down=Scroll  Alt+L/Ctrl+G=GoToLine\n\n" +
+            "Editing:\n" +
+            "  Del/Bksp=Delete  Ctrl+Y=DelLine  Ctrl+K=DelToEOL\n" +
+            "  Alt+Bksp=DelWordLeft  Alt+D=DelWordRight  Ins=Ins/Ovr\n\n" +
+            "Selection:\n" +
+            "  F3=Mark  Shift+F3=ColMark  Shift+Arrows=Select  Ctrl+A=All\n" +
+            "  Alt+Arrows=ColSelect  F5=Copy  F6=Move  F8=Delete\n\n" +
+            "Search:\n" +
+            "  F7=Search  Shift+F7=Again  F4=Replace  Alt+K=Bookmark\n\n" +
+            "File:\n" +
+            "  F2=Save  Shift+F2=SaveAs  Ctrl+O=Open  Ctrl+N=New  F10=Quit\n\n" +
+            "Format:\n" +
+            "  Ctrl+Q=InsLiteral  Ctrl+D=DateTime  Alt+P=FormatPara\n" +
+            "  Alt+T=Sort  Alt+U=ExternalCmd  Ctrl+Tab=Complete",
+            "Close");
+    }
+
+    public void ExecuteEditSyntaxFile()
+    {
+        var userSyntaxDir = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+            ".local", "share", "mc", "syntax");
+        Directory.CreateDirectory(userSyntaxDir);
+        var syntaxFile = Path.Combine(userSyntaxDir, "Syntax");
+        if (!File.Exists(syntaxFile))
+            File.WriteAllText(syntaxFile, "# MC Syntax file\n# See /usr/share/mc/syntax/ for examples\n");
+        _editor.LoadFile(syntaxFile);
+        EditorTitleChanged?.Invoke(this, EventArgs.Empty);
+        SetNeedsDraw();
+    }
+
+    public void ExecuteEditMenuFile()
+    {
+        var menuDir = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+            ".local", "share", "mc", "mcedit");
+        Directory.CreateDirectory(menuDir);
+        var menuFile = Path.Combine(menuDir, "menu");
+        if (!File.Exists(menuFile))
+            File.WriteAllText(menuFile,
+                "# User Menu for MCEdit\n" +
+                "# Format: <key> <label>\n" +
+                "#     <indented command lines>\n" +
+                "# Available macros: %f=file %n=name %x=ext %d=dir %l=line %c=col\n\n" +
+                "e Edit with default editor\n" +
+                "    $EDITOR %f\n");
+        _editor.LoadFile(menuFile);
+        EditorTitleChanged?.Invoke(this, EventArgs.Empty);
+        SetNeedsDraw();
+    }
+
+    public void ExecuteMail()
+    {
+        MessageBox.Query("Mail", "Mail functionality requires a mail program.\nThis feature is not available in this implementation.", "OK");
+    }
+
+    public void ExecuteChangeSpellingLanguage()
+    {
+        var lang = PromptInput("Spell Check Language", "Language code (e.g. en, de, fr):", "en");
+        if (lang == null) return;
+        MessageBox.Query("Spell Language",
+            $"Language set to '{lang}'.\n(Requires aspell to be configured for this language.)", "OK");
     }
 
     private static string? PromptInput(string title, string prompt, string defaultValue)

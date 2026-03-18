@@ -25,6 +25,7 @@ public sealed class EditorSettings
     public bool SavePosition { get; set; } = true;
     public bool TypewriterWrap { get; set; } = false;
     public int WrapLineLength { get; set; } = 72;
+    public bool BackspaceThruTabs { get; set; } = false;
 
     public static EditorSettings Load()
     {
@@ -58,7 +59,8 @@ public sealed class EditorSettings
                     case "confirm_save":      s.ConfirmSave = val == "true"; break;
                     case "save_position":     s.SavePosition = val != "false"; break;
                     case "typewriter_wrap":   s.TypewriterWrap = val == "true"; break;
-                    case "wrap_line_length":  if (int.TryParse(val, out int wl)) s.WrapLineLength = wl; break;
+                    case "wrap_line_length":      if (int.TryParse(val, out int wl)) s.WrapLineLength = wl; break;
+                    case "backspace_thru_tabs":  s.BackspaceThruTabs = val == "true"; break;
                 }
             }
         }
@@ -94,6 +96,7 @@ public sealed class EditorSettings
                 $"save_position = {SavePosition.ToString().ToLower()}",
                 $"typewriter_wrap = {TypewriterWrap.ToString().ToLower()}",
                 $"wrap_line_length = {WrapLineLength}",
+                $"backspace_thru_tabs = {BackspaceThruTabs.ToString().ToLower()}",
             };
 
             // Remove existing [Editor] section

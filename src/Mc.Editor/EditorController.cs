@@ -38,6 +38,7 @@ public sealed class EditorController
     public int  SaveMode          { get; set; } = 0;  // 0=quick, 1=safe, 2=backup
     public string BackupExtension { get; set; } = "~";
     public bool SavePosition      { get; set; } = true;
+    public bool BackspaceThruTabs { get; set; } = false;
 
     public SyntaxHighlighter? Highlighter { get; private set; }
 
@@ -52,7 +53,8 @@ public sealed class EditorController
         _buffer = new TextBuffer(content);
         if (filePath != null)
         {
-            Highlighter = SyntaxHighlighter.ForFile(filePath);
+            var firstLine = content?.Split('\n').FirstOrDefault() ?? string.Empty;
+            Highlighter = SyntaxHighlighter.ForFile(filePath, firstLine);
             // Restore saved cursor position
             if (SavePosition)
             {
@@ -186,6 +188,31 @@ public sealed class EditorController
     {
         if (HasSelection) { DeleteSelection(); return; }
         if (_cursorOffset == 0) return;
+        if (BackspaceThruTabs && _cursorOffset > 0)
+        {
+            var (_, col) = _buffer.OffsetToLineCol(_cursorOffset);
+            if (col > 0 && col % TabWidth == 0)
+            {
+                // Check if the preceding TabWidth chars are all spaces
+                bool allSpaces = true;
+                for (int i = 1; i <= TabWidth && _cursorOffset - i >= 0; i++)
+                {
+                    if (_buffer[_cursorOffset - i] != ' ') { allSpaces = false; break; }
+                }
+                if (allSpaces)
+                {
+                    for (int i = 0; i < TabWidth; i++)
+                    {
+                        var d = _buffer[_cursorOffset - 1].ToString();
+                        RecordUndo(new DeleteOp(_cursorOffset - 1, d));
+                        _buffer.Delete(_cursorOffset - 1);
+                        _cursorOffset--;
+                    }
+                    Changed?.Invoke(this, EventArgs.Empty);
+                    return;
+                }
+            }
+        }
         var deleted = _buffer[_cursorOffset - 1].ToString();
         RecordUndo(new DeleteOp(_cursorOffset - 1, deleted));
         _buffer.Delete(_cursorOffset - 1);
@@ -466,7 +493,8 @@ public sealed class EditorController
         _selectionEnd = -1;
         _undoStack.Clear();
         _redoStack.Clear();
-        Highlighter = _filePath != null ? SyntaxHighlighter.ForFile(_filePath) : null;
+        var loadFirstLine = content.Split('\n').FirstOrDefault() ?? string.Empty;
+        Highlighter = _filePath != null ? SyntaxHighlighter.ForFile(_filePath, loadFirstLine) : null;
         // Restore saved cursor position
         if (_filePath != null && SavePosition)
         {
@@ -530,6 +558,12 @@ public sealed class EditorController
     public void ReloadSyntax()
     {
         Highlighter = _filePath != null ? SyntaxHighlighter.ForFile(_filePath) : null;
+        Changed?.Invoke(this, EventArgs.Empty);
+    }
+
+    public void SetHighlighter(SyntaxHighlighter? highlighter)
+    {
+        Highlighter = highlighter;
         Changed?.Invoke(this, EventArgs.Empty);
     }
 

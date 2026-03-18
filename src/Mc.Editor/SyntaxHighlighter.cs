@@ -31,10 +31,15 @@ public sealed class SyntaxHighlighter
     /// <summary>The display name of this syntax rule set (e.g. "C#", "Python").</summary>
     public string SyntaxName => _rules.Name;
 
-    public static SyntaxHighlighter? ForFile(string fileName)
+    public static SyntaxHighlighter? ForFile(string fileName, string? firstLine = null)
     {
         var ext = Path.GetExtension(fileName).ToLowerInvariant();
-        return SyntaxRuleSet.ForExtension(ext) is { } rules ? new SyntaxHighlighter(rules) : null;
+        var rules = SyntaxRuleSet.ForExtension(ext);
+        if (rules != null) return new SyntaxHighlighter(rules);
+        // Try shebang/first-line detection
+        if (firstLine != null)
+            rules = SyntaxRuleSet.ForFirstLine(firstLine);
+        return rules != null ? new SyntaxHighlighter(rules) : null;
     }
 
     public IReadOnlyList<SyntaxToken> Tokenize(string line)
@@ -72,6 +77,51 @@ public sealed class SyntaxRuleSet
     public IReadOnlyList<SyntaxRule> Rules { get; init; } = [];
 
     private static readonly RegexOptions RO = RegexOptions.Compiled | RegexOptions.CultureInvariant;
+
+    public static SyntaxRuleSet? ForFirstLine(string firstLine)
+    {
+        if (string.IsNullOrEmpty(firstLine)) return null;
+        var line = firstLine.TrimStart();
+        if (line.StartsWith("#!"))
+        {
+            // Shebang line
+            if (line.Contains("python")) return Python();
+            if (line.Contains("ruby") || line.Contains("irb")) return Ruby();
+            if (line.Contains("node") || line.Contains("js")) return JavaScript();
+            if (line.Contains("lua")) return Lua();
+            if (line.Contains("perl")) return null; // Perl not yet supported
+            if (line.Contains("php")) return Php();
+            if (line.Contains("bash") || line.Contains("sh") || line.Contains("/env sh")) return Shell();
+            if (line.Contains("r ") || line.EndsWith("/R") || line.EndsWith("/Rscript")) return R();
+        }
+        // -*- mode: xxx -*- emacs style
+        var modeMatch = System.Text.RegularExpressions.Regex.Match(line,
+            @"-\*-\s*(?:mode:\s*)?(\w+)\s*-\*-", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+        if (modeMatch.Success)
+        {
+            var mode = modeMatch.Groups[1].Value.ToLowerInvariant();
+            return mode switch
+            {
+                "python" => Python(),
+                "ruby" => Ruby(),
+                "javascript" or "js" => JavaScript(),
+                "c" or "cpp" or "c++" => C(),
+                "java" => Java(),
+                "go" => Go(),
+                "rust" => Rust(),
+                "shell" or "sh" or "bash" => Shell(),
+                "lua" => Lua(),
+                "r" => R(),
+                "swift" => Swift(),
+                "kotlin" => Kotlin(),
+                "yaml" => Yaml(),
+                "toml" => Toml(),
+                "css" => Css(),
+                _ => null,
+            };
+        }
+        return null;
+    }
 
     public static SyntaxRuleSet? ForExtension(string ext) => ext switch
     {
