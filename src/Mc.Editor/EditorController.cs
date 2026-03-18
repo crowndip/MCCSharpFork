@@ -40,6 +40,9 @@ public sealed class EditorController
     public bool SavePosition      { get; set; } = true;
     public bool BackspaceThruTabs { get; set; } = false;
 
+    /// <summary>When true, all editing operations are no-ops.</summary>
+    public bool IsReadOnly { get; set; }
+
     public SyntaxHighlighter? Highlighter { get; private set; }
 
     public event EventHandler? Changed;

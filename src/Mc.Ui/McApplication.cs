@@ -190,6 +190,7 @@ public sealed class McApplication : Toplevel
                     new("Copy tagged name_s",            string.Empty, CopyTaggedNamesToClipboard),
                     null!,
                     new("Open in file _manager",         string.Empty, ShowContextMenu),
+                    new("Open with _default app",        string.Empty, OpenWithDefaultApp),
                     new("_Open with...",                 string.Empty, ShowOpenWith),
                     new("F_ile properties",              string.Empty, ShowProperties),
                     new("_Attributes (chmod)...",        string.Empty, Chmod),
@@ -764,6 +765,85 @@ public sealed class McApplication : Toplevel
 
     // --- File operations ---
 
+    /// <summary>
+    /// If <paramref name="vfsPath"/> refers to a file inside an archive (contains '|'),
+    /// extracts it to a temporary directory and returns the local temp path.
+    /// Otherwise returns <paramref name="vfsPath"/> unchanged and sets <paramref name="tempDir"/> to null.
+    /// The caller is responsible for deleting <paramref name="tempDir"/> when done.
+    /// </summary>
+    private static string? ResolveArchiveEntryToLocalPath(string vfsPath, out string? tempDir)
+    {
+        tempDir = null;
+        var pipeIdx = vfsPath.IndexOf('|');
+        if (pipeIdx < 0) return vfsPath;  // not an archive path
+
+        var archivePath = vfsPath[..pipeIdx];
+        var innerPath   = vfsPath[(pipeIdx + 1)..].TrimStart('/');
+        if (string.IsNullOrEmpty(innerPath)) return null;
+
+        var ext = Path.GetExtension(archivePath).ToLowerInvariant();
+        tempDir = Path.Combine(Path.GetTempPath(), "mc_" + Path.GetRandomFileName());
+        Directory.CreateDirectory(tempDir);
+
+        try
+        {
+            if (ext == ".zip")
+            {
+                // Use built-in ZIP support
+                using var zip = System.IO.Compression.ZipFile.OpenRead(archivePath);
+                var zipEntry  = zip.Entries.FirstOrDefault(e =>
+                    string.Equals(e.FullName.Replace('\\', '/'), innerPath, StringComparison.OrdinalIgnoreCase));
+                if (zipEntry == null)
+                {
+                    Directory.Delete(tempDir, recursive: true);
+                    tempDir = null;
+                    MessageDialog.Error($"File not found inside archive:\n{innerPath}");
+                    return null;
+                }
+                var destFile = Path.Combine(tempDir, Path.GetFileName(innerPath));
+                using (var src = zipEntry.Open())
+                using (var dst = File.Create(destFile))
+                    src.CopyTo(dst);
+                return destFile;
+            }
+            else
+            {
+                // Use 7z CLI for other archive types (7z, tar, tgz, etc.)
+                var psi = new System.Diagnostics.ProcessStartInfo
+                {
+                    FileName               = "7z",
+                    WorkingDirectory       = tempDir,
+                    UseShellExecute        = false,
+                    RedirectStandardOutput = true,
+                    RedirectStandardError  = true,
+                };
+                psi.ArgumentList.Add("e");
+                psi.ArgumentList.Add(archivePath);
+                psi.ArgumentList.Add(innerPath);
+                psi.ArgumentList.Add($"-o{tempDir}");
+                psi.ArgumentList.Add("-y");
+                using var proc = System.Diagnostics.Process.Start(psi);
+                proc?.WaitForExit();
+                var destFile = Path.Combine(tempDir, Path.GetFileName(innerPath));
+                if (!File.Exists(destFile))
+                {
+                    Directory.Delete(tempDir, recursive: true);
+                    tempDir = null;
+                    MessageDialog.Error($"Could not extract file from archive:\n{innerPath}");
+                    return null;
+                }
+                return destFile;
+            }
+        }
+        catch (Exception ex)
+        {
+            try { if (tempDir != null) Directory.Delete(tempDir, recursive: true); } catch { }
+            tempDir = null;
+            MessageDialog.Error($"Error extracting from archive:\n{ex.Message}");
+            return null;
+        }
+    }
+
     private FileEntry? GetCurrentEntry() => GetActivePanel().CurrentEntry;
 
     private void ViewCurrent()
@@ -777,10 +857,19 @@ public sealed class McApplication : Toplevel
             RefreshPanels();
             return;
         }
-        if (_settings.UseInternalViewer)
-            ViewFile(entry.FullPath.Path);
-        else
-            LaunchExternalProgram(_settings.ExternalViewer, entry.FullPath.Path);
+        var path = ResolveArchiveEntryToLocalPath(entry.FullPath.Path, out var tempDir);
+        if (path == null) return;
+        try
+        {
+            if (_settings.UseInternalViewer)
+                ViewFile(path);
+            else
+                LaunchExternalProgram(_settings.ExternalViewer, path);
+        }
+        finally
+        {
+            if (tempDir != null) try { Directory.Delete(tempDir, recursive: true); } catch { }
+        }
     }
 
     /// <summary>
@@ -801,27 +890,9 @@ public sealed class McApplication : Toplevel
         _viewedFiles.Remove(path);
         _viewedFiles.Insert(0, path);
 
-        // Build file list from the active panel for Ctrl+F/Ctrl+B navigation (#5)
-        var panelFiles = _controller.ActivePanel.Entries
-            .Where(e => !e.IsDirectory && !e.IsParentDir)
-            .Select(e => e.FullPath.Path)
-            .ToList();
-        var fileIndex = panelFiles.IndexOf(path);
-
-        var viewerWin = new Window
-        {
-            X = 0, Y = 0,
-            Width = Dim.Fill(),
-            Height = Dim.Fill(),
-            ColorScheme = McTheme.Dialog,
-        };
-        var viewer = new ViewerView(path, panelFiles.Count > 0 ? panelFiles : null, fileIndex);
-        viewer.X = 0; viewer.Y = 0;
-        viewer.Width = Dim.Fill(); viewer.Height = Dim.Fill();
-        viewer.RequestClose += (_, _) => Application.RequestStop(viewerWin);
-        viewerWin.Title = viewer.Title;
-        viewerWin.Add(viewer);
-        Application.Run(viewerWin);
+        var screen = new EditorScreen(path, readOnly: true);
+        Application.Run(screen);
+        screen.Dispose();
     }
 
     /// <summary>Launch an external viewer or editor with the given file path.</summary>
@@ -877,6 +948,7 @@ public sealed class McApplication : Toplevel
     {
         var entry = GetCurrentEntry();
         string? path;
+        string? tempDir = null;
 
         if (entry == null || entry.IsDirectory || entry.IsParentDir)
         {
@@ -889,20 +961,28 @@ public sealed class McApplication : Toplevel
         }
         else
         {
-            path = entry.FullPath.Path;
+            path = ResolveArchiveEntryToLocalPath(entry.FullPath.Path, out tempDir);
+            if (path == null) return;
             _editedFiles.Remove(path); _editedFiles.Insert(0, path);
         }
 
-        if (!_settings.UseInternalEditor)
+        try
         {
-            LaunchExternalProgram(_settings.ExternalEditor, path);
-            return;
-        }
+            if (!_settings.UseInternalEditor)
+            {
+                LaunchExternalProgram(_settings.ExternalEditor, path);
+                return;
+            }
 
-        var screen = new EditorScreen(path);
-        Application.Run(screen);
-        screen.Dispose();
-        RefreshPanels();
+            var screen = new EditorScreen(path, readOnly: tempDir != null);
+            Application.Run(screen);
+            screen.Dispose();
+            RefreshPanels();
+        }
+        finally
+        {
+            if (tempDir != null) try { Directory.Delete(tempDir, recursive: true); } catch { }
+        }
     }
 
     private void CopyFiles()
@@ -2452,6 +2532,37 @@ public sealed class McApplication : Toplevel
         catch (Exception ex)
         {
             MessageDialog.Error($"Could not launch '{app}':\n{ex.Message}");
+        }
+    }
+
+    private void OpenWithDefaultApp()
+    {
+        var entry = GetCurrentEntry();
+        if (entry == null || entry.IsDirectory || entry.IsParentDir)
+        {
+            MessageDialog.Show("Open with default app", "Select a file first.");
+            return;
+        }
+        var path = entry.FullPath.Path;
+        try
+        {
+            if (OperatingSystem.IsWindows())
+            {
+                System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(path)
+                    { UseShellExecute = true });
+            }
+            else if (OperatingSystem.IsMacOS())
+            {
+                ProcessHelper.TryLaunchArgs("open", path);
+            }
+            else
+            {
+                ProcessHelper.TryLaunchArgs("xdg-open", path);
+            }
+        }
+        catch (Exception ex)
+        {
+            MessageDialog.Error($"Could not open file with default app:\n{ex.Message}");
         }
     }
 

@@ -49,6 +49,22 @@ public sealed class EditorView : View
     // Settings
     private bool _confirmSave;
 
+    // Read-only mode
+    private bool _isReadOnly;
+
+    // Hex view/edit mode
+    private bool _hexMode;
+    private byte[] _hexBytes = [];
+    private int _hexCursorByte;
+    private int _hexTopLine;
+    private bool _hexCursorInAscii;
+    private int _hexNibble;
+    private bool _hexModified;
+    private const int HexBytesPerRow = 16;
+
+    // Mouse drag selection
+    private bool _mouseButtonHeld;
+
     // Triple-click tracking
     private DateTime _lastClickTime = DateTime.MinValue;
     private int _lastClickLine = -1;
@@ -75,6 +91,22 @@ public sealed class EditorView : View
         };
         // Mouse support
         MouseClick += OnMouseClicked;
+        MouseWheel += (_, e) => HandleEditorWheelEvent(e);
+    }
+
+    protected override void OnHasFocusChanged(bool newHasFocus, View previousFocused, View newFocused)
+    {
+        base.OnHasFocusChanged(newHasFocus, previousFocused, newFocused);
+        EscSeqUtils.CSI_SetCursorStyle(newHasFocus
+            ? EscSeqUtils.DECSCUSR_Style.BlinkingUnderline
+            : EscSeqUtils.DECSCUSR_Style.UserShape);
+    }
+
+    /// <summary>When true, editing operations are blocked. Used for the internal viewer replacement.</summary>
+    public bool IsReadOnly
+    {
+        get => _isReadOnly;
+        set { _isReadOnly = value; _editor.IsReadOnly = value; SetNeedsDraw(); }
     }
 
     public new string Title => _editor.FilePath != null
@@ -85,17 +117,20 @@ public sealed class EditorView : View
     {
         get
         {
+            if (_hexMode)
+                return $"[HEX{(_hexModified ? "*" : "")}] Offset:{_hexCursorByte:X8} ({_hexCursorByte}) | {(_hexCursorInAscii ? "ASCII" : "HEX")} pane | Tab=switch Ctrl+H=exit";
             var (ln, col) = _editor.CursorPosition;
             char colFlag = _colBlock ? 'C' : '-';
             char modFlag = _editor.IsModified ? 'M' : '-';
             char recFlag = _isRecordingMacro ? 'R' : '-';
             char ovrFlag = !_insertMode ? 'O' : '-';
+            char roFlag  = _isReadOnly ? 'R' : '-';
             var file = _editor.FilePath != null ? Path.GetFileName(_editor.FilePath) : "new";
             var syntaxName = _syntaxHighlightingOn && _editor.Highlighter != null
                 ? $" [{_editor.Highlighter.SyntaxName}]"
                 : string.Empty;
             var total = _editor.Buffer.GetLineCount();
-            return $"[{colFlag}{modFlag}{recFlag}{ovrFlag}] {col + 1} L:[{ln + 1}/{total}] {file}{syntaxName}";
+            return $"[{colFlag}{modFlag}{recFlag}{ovrFlag}{roFlag}] {col + 1} L:[{ln + 1}/{total}] {file}{syntaxName}";
         }
     }
 
@@ -107,6 +142,13 @@ public sealed class EditorView : View
         var viewport = Viewport;
         // Leave 1 row for the status bar at the bottom of this view
         var contentHeight = viewport.Height - 1;
+
+        if (_hexMode)
+        {
+            DrawHexContent(viewport, contentHeight);
+            return false;
+        }
+
         var (cursorLine, cursorCol) = _editor.CursorPosition;
         var gutter = GutterWidth;
 
@@ -295,39 +337,76 @@ public sealed class EditorView : View
 
     private void OnMouseClicked(object? sender, MouseEventArgs e)
     {
-        var viewport = Viewport;
-        var contentHeight = viewport.Height - 1;
-        var gutter = GutterWidth;
-
-        if (e.Flags.HasFlag(MouseFlags.WheeledUp))
+        // Wheel events (Linux routing)
+        if (e.Flags.HasFlag(MouseFlags.WheeledUp) || e.Flags.HasFlag(MouseFlags.WheeledDown))
         {
-            _topLine = Math.Max(0, _topLine - 2);
-            _lockScroll = true;
-            SetNeedsDraw();
-            e.Handled = true;
+            HandleEditorWheelEvent(e);
             return;
         }
-        if (e.Flags.HasFlag(MouseFlags.WheeledDown))
+
+        // Button 1 released: stop drag selection
+        if (e.Flags.HasFlag(MouseFlags.Button1Released))
         {
-            _topLine = Math.Min(Math.Max(0, _editor.Buffer.GetLineCount() - 1), _topLine + 2);
-            _lockScroll = true;
-            SetNeedsDraw();
+            _mouseButtonHeld = false;
             e.Handled = true;
             return;
         }
 
         if (!e.Flags.HasFlag(MouseFlags.Button1Clicked) &&
             !e.Flags.HasFlag(MouseFlags.Button1Pressed) &&
-            !e.Flags.HasFlag(MouseFlags.Button1DoubleClicked))
+            !e.Flags.HasFlag(MouseFlags.Button1DoubleClicked) &&
+            !e.Flags.HasFlag(MouseFlags.ReportMousePosition))
             return;
 
-        // Click-to-position cursor
-        int screenRow = e.Position.Y;
-        int screenCol = e.Position.X - gutter;
-        if (screenRow >= 0 && screenRow < contentHeight && screenCol >= 0)
+        // Mouse drag: extend selection while button is held
+        if (e.Flags.HasFlag(MouseFlags.ReportMousePosition) && _mouseButtonHeld)
         {
-            int targetLine = _topLine + screenRow;
-            int targetCol  = _leftCol + screenCol;
+            ExtendSelectionToMousePos(e);
+            return;
+        }
+
+        var viewport = Viewport;
+        var contentHeight = viewport.Height - 1;
+        var gutter = GutterWidth;
+
+        // Hex mode: click positions hex cursor
+        if (_hexMode)
+        {
+            int screenRow = e.Position.Y;
+            int screenCol = e.Position.X;
+            if (screenRow >= 0 && screenRow < contentHeight)
+            {
+                var byteRow = _hexTopLine + screenRow;
+                // Detect if click is in hex or ASCII pane
+                int asciiStart = 10 + HexBytesPerRow * 3 + 1 + 2;
+                if (screenCol >= asciiStart && screenCol < asciiStart + HexBytesPerRow)
+                {
+                    _hexCursorInAscii = true;
+                    _hexCursorByte = Math.Min(byteRow * HexBytesPerRow + (screenCol - asciiStart), _hexBytes.Length - 1);
+                }
+                else if (screenCol >= 10)
+                {
+                    _hexCursorInAscii = false;
+                    // Find closest byte from hex column
+                    int col = screenCol - 10;
+                    int byteInRow = Math.Min((col / 3), HexBytesPerRow - 1);
+                    _hexCursorByte = Math.Min(byteRow * HexBytesPerRow + byteInRow, _hexBytes.Length - 1);
+                }
+                _hexNibble = 0;
+                SetNeedsDraw();
+                SetFocus();
+                e.Handled = true;
+            }
+            return;
+        }
+
+        // Click-to-position cursor
+        int sRow = e.Position.Y;
+        int sCol = e.Position.X - gutter;
+        if (sRow >= 0 && sRow < contentHeight && sCol >= 0)
+        {
+            int targetLine = _topLine + sRow;
+            int targetCol  = _leftCol + sCol;
             if (targetLine < _editor.Buffer.GetLineCount())
             {
                 var lineText = _editor.Buffer.GetLine(targetLine);
@@ -362,8 +441,10 @@ public sealed class EditorView : View
                 }
                 else if (e.Flags.HasFlag(MouseFlags.Button1Pressed))
                 {
+                    // Start of potential drag: clear current selection
                     _selecting = false;
                     _editor.ClearSelection();
+                    _mouseButtonHeld = true;
                     _lastClickTime = DateTime.MinValue;
                 }
                 SetNeedsDraw();
@@ -373,10 +454,84 @@ public sealed class EditorView : View
         }
     }
 
+    private void ExtendSelectionToMousePos(MouseEventArgs e)
+    {
+        var viewport = Viewport;
+        var contentHeight = viewport.Height - 1;
+        var gutter = GutterWidth;
+        int screenRow = e.Position.Y;
+        int screenCol = e.Position.X - gutter;
+        if (screenRow >= 0 && screenRow < contentHeight && screenCol >= 0)
+        {
+            int targetLine = _topLine + screenRow;
+            int targetCol  = _leftCol + screenCol;
+            if (targetLine < _editor.Buffer.GetLineCount())
+            {
+                var lineText = _editor.Buffer.GetLine(targetLine);
+                targetCol = Math.Min(targetCol, lineText.Length);
+                _editor.MoveCursor(_editor.Buffer.LineColToOffset(targetLine, targetCol));
+                if (!_selecting)
+                {
+                    _selecting = true;
+                    _selectionAnchor = _editor.CursorOffset;
+                    _editor.StartSelection();
+                }
+                else
+                {
+                    _editor.ExtendSelection();
+                }
+                SetNeedsDraw();
+                SetFocus();
+                e.Handled = true;
+            }
+        }
+    }
+
+    private void OnMouseMoved(object? sender, MouseEventArgs e)
+    {
+        if (!_mouseButtonHeld || _hexMode) return;
+        ExtendSelectionToMousePos(e);
+    }
+
+    private void HandleEditorWheelEvent(MouseEventArgs e)
+    {
+        if (e.Flags.HasFlag(MouseFlags.WheeledUp))
+        {
+            if (_hexMode)
+                _hexTopLine = Math.Max(0, _hexTopLine - 3);
+            else
+            {
+                _topLine = Math.Max(0, _topLine - 3);
+                _lockScroll = true;
+            }
+            SetNeedsDraw();
+            e.Handled = true;
+        }
+        else if (e.Flags.HasFlag(MouseFlags.WheeledDown))
+        {
+            if (_hexMode)
+            {
+                var maxLine = Math.Max(0, (_hexBytes.Length + HexBytesPerRow - 1) / HexBytesPerRow - 1);
+                _hexTopLine = Math.Min(maxLine, _hexTopLine + 3);
+            }
+            else
+            {
+                _topLine = Math.Min(Math.Max(0, _editor.Buffer.GetLineCount() - 1), _topLine + 3);
+                _lockScroll = true;
+            }
+            SetNeedsDraw();
+            e.Handled = true;
+        }
+    }
+
     // ── Keyboard ─────────────────────────────────────────────────────────────
 
     protected override bool OnKeyDown(Key keyEvent)
     {
+        // Hex mode: route keys to hex handler
+        if (_hexMode)
+            return HandleHexKey(keyEvent);
+
         // Quote-next: insert any next keystroke literally
         if (_quoteNext)
         {
@@ -486,7 +641,9 @@ public sealed class EditorView : View
                 return true;
 
             case KeyCode.F6:                                ExecuteMoveBlock(); return true;
-            case KeyCode.F8:                                _editor.DeleteLine(); SetNeedsDraw(); return true;
+            case KeyCode.F8:
+                if (!_isReadOnly) { _editor.DeleteLine(); SetNeedsDraw(); }
+                return true;
             case KeyCode.F9:                                // F9 handled by EditorScreen menu bar
                 return base.OnKeyDown(keyEvent);
 
@@ -581,19 +738,27 @@ public sealed class EditorView : View
             case KeyCode.PageDown:                          _editor.PageDown(Viewport.Height - 2); return true;
 
             // ── Deletion ────────────────────────────────────────────────────
-            case KeyCode.Backspace:                         _editor.Backspace(); return true;
-            case KeyCode.Delete:                            _editor.DeleteForward(); return true;
-            case KeyCode.Y when keyEvent.IsCtrl:            _editor.DeleteLine(); return true;
-            case KeyCode.K when keyEvent.IsCtrl:            _editor.DeleteToEndOfLine(); return true;
+            case KeyCode.Backspace:
+                if (!_isReadOnly) _editor.Backspace();
+                return true;
+            case KeyCode.Delete:
+                if (!_isReadOnly) _editor.DeleteForward();
+                return true;
+            case KeyCode.Y when keyEvent.IsCtrl:
+                if (!_isReadOnly) _editor.DeleteLine();
+                return true;
+            case KeyCode.K when keyEvent.IsCtrl:
+                if (!_isReadOnly) _editor.DeleteToEndOfLine();
+                return true;
 
             // Alt+Backspace = delete to word begin
             case KeyCode.Backspace | KeyCode.AltMask:
-                _editor.DeleteToWordBegin();
+                if (!_isReadOnly) _editor.DeleteToWordBegin();
                 return true;
 
             // Alt+D = delete to word end
             case KeyCode.D | KeyCode.AltMask:
-                _editor.DeleteToWordEnd();
+                if (!_isReadOnly) _editor.DeleteToWordEnd();
                 return true;
 
             // ── Clipboard ───────────────────────────────────────────────────
@@ -601,20 +766,21 @@ public sealed class EditorView : View
                 _clipboardText = _editor.Copy(); _selecting = false; _editor.ClearSelection();
                 return true;
             case KeyCode.Insert | KeyCode.ShiftMask:
-                PasteClipboard();
+                if (!_isReadOnly) PasteClipboard();
                 return true;
             case KeyCode.Delete | KeyCode.ShiftMask:
-                _clipboardText = _editor.Copy(); _editor.Cut();
+                _clipboardText = _editor.Copy();
+                if (!_isReadOnly) _editor.Cut();
                 _selecting = false; _editor.ClearSelection();
                 return true;
             case KeyCode.C when keyEvent.IsCtrl:
                 ExecuteCopyToSystemClipboard();
                 return true;
             case KeyCode.X when keyEvent.IsCtrl:
-                ExecuteCutToSystemClipboard();
+                if (!_isReadOnly) ExecuteCutToSystemClipboard();
                 return true;
             case KeyCode.V when keyEvent.IsCtrl:
-                ExecutePasteFromSystemClipboard();
+                if (!_isReadOnly) ExecutePasteFromSystemClipboard();
                 return true;
             case KeyCode.V | KeyCode.AltMask:
                 _editor.PageUp(Viewport.Height - 2); SetNeedsDraw();
@@ -672,6 +838,11 @@ public sealed class EditorView : View
                 _quoteNext = true; SetNeedsDraw();
                 return true;
 
+            // ── Hex view/edit toggle ──────────────────────────────────────────
+            case KeyCode.H when keyEvent.IsCtrl:
+                ToggleHexMode();
+                return true;
+
             // ── Refresh ─────────────────────────────────────────────────────
             case KeyCode.L when keyEvent.IsCtrl:
                 SetNeedsDraw();
@@ -682,40 +853,45 @@ public sealed class EditorView : View
 
             // ── Block shift (Tab/Shift+Tab on selection) ─────────────────────
             case KeyCode.Tab when _selecting:
-                _editor.ShiftBlockRight(_editor.TabWidth); SetNeedsDraw();
+                if (!_isReadOnly) { _editor.ShiftBlockRight(_editor.TabWidth); SetNeedsDraw(); }
                 return true;
 
             default:
                 var rune = keyEvent.AsRune;
                 if (rune.Value >= 32)
                 {
-                    if (_insertMode) _editor.InsertChar((char)rune.Value);
-                    else             _editor.ReplaceChar((char)rune.Value);
+                    if (!_isReadOnly)
+                    {
+                        if (_insertMode) _editor.InsertChar((char)rune.Value);
+                        else             _editor.ReplaceChar((char)rune.Value);
+                    }
                     return true;
                 }
                 if (keyEvent == Key.Enter)
                 {
-                    _editor.InsertNewlineWithIndent();
+                    if (!_isReadOnly) _editor.InsertNewlineWithIndent();
                     return true;
                 }
                 if (keyEvent.KeyCode == (KeyCode.Enter | KeyCode.ShiftMask))
                 {
-                    _editor.InsertChar('\n');
+                    if (!_isReadOnly) _editor.InsertChar('\n');
                     return true;
                 }
                 if (keyEvent == Key.Tab)
                 {
-                    _editor.InsertTab();
+                    if (!_isReadOnly) _editor.InsertTab();
                     return true;
                 }
                 if (keyEvent.KeyCode == (KeyCode.Tab | KeyCode.ShiftMask))
                 {
-                    // Shift+Tab: dedent or move back
-                    if (_selecting)
-                        _editor.ShiftBlockLeft(_editor.TabWidth);
-                    else
-                        _editor.DeleteToWordBegin();
-                    SetNeedsDraw();
+                    if (!_isReadOnly)
+                    {
+                        if (_selecting)
+                            _editor.ShiftBlockLeft(_editor.TabWidth);
+                        else
+                            _editor.DeleteToWordBegin();
+                        SetNeedsDraw();
+                    }
                     return true;
                 }
                 return base.OnKeyDown(keyEvent);
@@ -1986,6 +2162,292 @@ public sealed class EditorView : View
         if (lang == null) return;
         MessageBox.Query("Spell Language",
             $"Language set to '{lang}'.\n(Requires aspell to be configured for this language.)", "OK");
+    }
+
+    // ── Hex view/edit ────────────────────────────────────────────────────────
+
+    private void ToggleHexMode()
+    {
+        if (_hexMode)
+        {
+            if (_hexModified)
+            {
+                var choice = MessageBox.Query("Hex Edit", "Save hex changes to file?", "Yes", "No", "Cancel");
+                if (choice == 2) return;
+                if (choice == 0) SaveHexBytes();
+            }
+            _hexMode = false;
+            _hexModified = false;
+        }
+        else
+        {
+            EnterHexMode();
+        }
+        SetNeedsDraw();
+    }
+
+    private void EnterHexMode()
+    {
+        if (_editor.FilePath != null && File.Exists(_editor.FilePath))
+        {
+            try { _hexBytes = File.ReadAllBytes(_editor.FilePath); }
+            catch { _hexBytes = System.Text.Encoding.UTF8.GetBytes(_editor.Buffer.ToString()); }
+        }
+        else
+        {
+            _hexBytes = System.Text.Encoding.UTF8.GetBytes(_editor.Buffer.ToString());
+        }
+        _hexCursorByte    = 0;
+        _hexTopLine       = 0;
+        _hexCursorInAscii = false;
+        _hexNibble        = 0;
+        _hexModified      = false;
+        _hexMode          = true;
+    }
+
+    private void SaveHexBytes()
+    {
+        if (_editor.FilePath == null) return;
+        try { File.WriteAllBytes(_editor.FilePath, _hexBytes); }
+        catch (Exception ex) { MessageBox.ErrorQuery("Save Failed", ex.Message, "OK"); }
+    }
+
+    private bool HandleHexKey(Key keyEvent)
+    {
+        // Always handle Ctrl+H to exit hex mode
+        if (keyEvent.KeyCode == KeyCode.H && keyEvent.IsCtrl)
+        {
+            ToggleHexMode();
+            return true;
+        }
+
+        // Navigation
+        switch (keyEvent.KeyCode)
+        {
+            case KeyCode.CursorRight:
+                if (_hexCursorByte < _hexBytes.Length - 1) _hexCursorByte++;
+                _hexNibble = 0;
+                SetNeedsDraw();
+                return true;
+            case KeyCode.CursorLeft:
+                if (_hexCursorByte > 0) _hexCursorByte--;
+                _hexNibble = 0;
+                SetNeedsDraw();
+                return true;
+            case KeyCode.CursorDown:
+                _hexCursorByte = Math.Min(_hexBytes.Length - 1, _hexCursorByte + HexBytesPerRow);
+                _hexNibble = 0;
+                SetNeedsDraw();
+                return true;
+            case KeyCode.CursorUp:
+                _hexCursorByte = Math.Max(0, _hexCursorByte - HexBytesPerRow);
+                _hexNibble = 0;
+                SetNeedsDraw();
+                return true;
+            case KeyCode.Home:
+                _hexCursorByte -= _hexCursorByte % HexBytesPerRow;
+                _hexNibble = 0;
+                SetNeedsDraw();
+                return true;
+            case KeyCode.End:
+                _hexCursorByte = Math.Min(_hexBytes.Length - 1,
+                    _hexCursorByte - _hexCursorByte % HexBytesPerRow + HexBytesPerRow - 1);
+                _hexNibble = 0;
+                SetNeedsDraw();
+                return true;
+            case KeyCode.PageDown:
+            {
+                int rows = Math.Max(1, Viewport.Height - 2);
+                _hexCursorByte = Math.Min(_hexBytes.Length - 1, _hexCursorByte + rows * HexBytesPerRow);
+                _hexNibble = 0;
+                SetNeedsDraw();
+                return true;
+            }
+            case KeyCode.PageUp:
+            {
+                int rows = Math.Max(1, Viewport.Height - 2);
+                _hexCursorByte = Math.Max(0, _hexCursorByte - rows * HexBytesPerRow);
+                _hexNibble = 0;
+                SetNeedsDraw();
+                return true;
+            }
+            case KeyCode.Tab:
+                _hexCursorInAscii = !_hexCursorInAscii;
+                _hexNibble = 0;
+                SetNeedsDraw();
+                return true;
+            case KeyCode.F10:
+            case KeyCode.Esc:
+                ToggleHexMode();
+                return true;
+        }
+
+        if (_hexBytes.Length == 0) return true;
+
+        // Hex pane editing: 0-9, a-f
+        if (!_hexCursorInAscii && !_isReadOnly)
+        {
+            var rune = keyEvent.AsRune.Value;
+            int digit = -1;
+            if (rune >= '0' && rune <= '9') digit = rune - '0';
+            else if (rune >= 'a' && rune <= 'f') digit = rune - 'a' + 10;
+            else if (rune >= 'A' && rune <= 'F') digit = rune - 'A' + 10;
+
+            if (digit >= 0 && _hexCursorByte < _hexBytes.Length)
+            {
+                if (_hexNibble == 0)
+                {
+                    _hexBytes[_hexCursorByte] = (byte)((_hexBytes[_hexCursorByte] & 0x0F) | (digit << 4));
+                    _hexNibble = 1;
+                }
+                else
+                {
+                    _hexBytes[_hexCursorByte] = (byte)((_hexBytes[_hexCursorByte] & 0xF0) | digit);
+                    _hexNibble = 0;
+                    if (_hexCursorByte < _hexBytes.Length - 1) _hexCursorByte++;
+                }
+                _hexModified = true;
+                SetNeedsDraw();
+                return true;
+            }
+        }
+
+        // ASCII pane editing
+        if (_hexCursorInAscii && !_isReadOnly)
+        {
+            var rune = keyEvent.AsRune.Value;
+            if (rune >= 32 && rune < 127 && _hexCursorByte < _hexBytes.Length)
+            {
+                _hexBytes[_hexCursorByte] = (byte)rune;
+                _hexModified = true;
+                _hexNibble = 0;
+                if (_hexCursorByte < _hexBytes.Length - 1) _hexCursorByte++;
+                SetNeedsDraw();
+                return true;
+            }
+        }
+
+        return true; // consume all keys in hex mode
+    }
+
+    private void DrawHexContent(System.Drawing.Rectangle viewport, int contentHeight)
+    {
+        if (_hexBytes.Length == 0)
+        {
+            // Empty file
+            for (int row = 0; row < contentHeight; row++)
+            {
+                Move(0, row);
+                Driver!.SetAttribute(ColorScheme!.Normal);
+                Driver!.AddStr(new string(' ', viewport.Width));
+            }
+        }
+        else
+        {
+            var cursorRow = _hexCursorByte / HexBytesPerRow;
+            if (cursorRow < _hexTopLine) _hexTopLine = cursorRow;
+            if (cursorRow >= _hexTopLine + contentHeight) _hexTopLine = cursorRow - contentHeight + 1;
+
+            for (int row = 0; row < contentHeight; row++)
+            {
+                int lineOffset = (_hexTopLine + row) * HexBytesPerRow;
+                Move(0, row);
+                Driver!.SetAttribute(ColorScheme!.Normal);
+                if (lineOffset >= _hexBytes.Length)
+                {
+                    Driver!.AddStr(new string(' ', viewport.Width));
+                    continue;
+                }
+                DrawHexLine(row, lineOffset, viewport.Width);
+            }
+        }
+
+        // Status bar
+        Move(0, contentHeight);
+        Driver!.SetAttribute(new Terminal.Gui.Attribute(Color.Black, Color.Cyan));
+        var status = StatusText;
+        if (status.Length > viewport.Width) status = status[..viewport.Width];
+        Driver!.AddStr(status.PadRight(viewport.Width));
+
+        // Terminal cursor position
+        var curRow = _hexCursorByte / HexBytesPerRow - _hexTopLine;
+        if (curRow >= 0 && curRow < contentHeight)
+        {
+            int byteInRow = _hexCursorByte % HexBytesPerRow;
+            int curCol = _hexCursorInAscii
+                ? HexAsciiStart() + byteInRow
+                : HexByteColumn(byteInRow) + _hexNibble;
+            if (curCol < viewport.Width)
+                Move(curCol, curRow);
+        }
+    }
+
+    // Column of the first hex digit of byte[byteInRow] in a hex line
+    private static int HexByteColumn(int byteInRow)
+        => 10 + byteInRow * 3 + (byteInRow >= HexBytesPerRow / 2 ? 1 : 0);
+
+    // Column where the ASCII section starts
+    private static int HexAsciiStart()
+        => 10 + HexBytesPerRow * 3 + 1 + 2; // offset(10) + bytes(48) + mid-gap(1) + " |"(2) = 61
+
+    private void DrawHexLine(int row, int lineOffset, int viewWidth)
+    {
+        // Build the full line string first
+        var sb = new System.Text.StringBuilder(80);
+        sb.Append($"{lineOffset:X8}: ");
+        for (int i = 0; i < HexBytesPerRow; i++)
+        {
+            int byteOff = lineOffset + i;
+            sb.Append(byteOff < _hexBytes.Length ? $"{_hexBytes[byteOff]:X2} " : "   ");
+            if (i == HexBytesPerRow / 2 - 1) sb.Append(' ');
+        }
+        sb.Append(" |");
+        for (int i = 0; i < HexBytesPerRow; i++)
+        {
+            int byteOff = lineOffset + i;
+            if (byteOff < _hexBytes.Length)
+            {
+                byte b = _hexBytes[byteOff];
+                sb.Append(b is >= 32 and < 127 ? (char)b : '.');
+            }
+            else sb.Append(' ');
+        }
+        sb.Append('|');
+
+        var line = sb.ToString();
+        if (line.Length > viewWidth) line = line[..viewWidth];
+        Driver!.SetAttribute(ColorScheme!.Normal);
+        Driver!.AddStr(line.PadRight(viewWidth));
+
+        // Highlight current byte
+        if (_hexCursorByte >= lineOffset && _hexCursorByte < lineOffset + HexBytesPerRow
+            && _hexCursorByte < _hexBytes.Length)
+        {
+            int byteInRow = _hexCursorByte % HexBytesPerRow;
+
+            // Hex pane highlight
+            int hexCol = HexByteColumn(byteInRow);
+            if (hexCol + 1 < viewWidth)
+            {
+                Move(hexCol, row);
+                Driver!.SetAttribute(_hexCursorInAscii
+                    ? new Terminal.Gui.Attribute(Color.BrightYellow, Color.DarkGray)
+                    : new Terminal.Gui.Attribute(Color.Black, Color.BrightYellow));
+                Driver!.AddStr($"{_hexBytes[_hexCursorByte]:X2}");
+            }
+
+            // ASCII pane highlight
+            int asciiCol = HexAsciiStart() + byteInRow;
+            if (asciiCol < viewWidth)
+            {
+                Move(asciiCol, row);
+                Driver!.SetAttribute(_hexCursorInAscii
+                    ? new Terminal.Gui.Attribute(Color.Black, Color.BrightYellow)
+                    : new Terminal.Gui.Attribute(Color.BrightYellow, Color.DarkGray));
+                byte b = _hexBytes[_hexCursorByte];
+                Driver!.AddStr((b is >= 32 and < 127 ? (char)b : '.').ToString());
+            }
+        }
     }
 
     private static string? PromptInput(string title, string prompt, string defaultValue)

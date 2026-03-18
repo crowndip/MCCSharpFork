@@ -23,7 +23,7 @@ public sealed class EditorScreen : Toplevel
 
     private EditorSettings _settings = new();
 
-    public EditorScreen(string? filePath = null)
+    public EditorScreen(string? filePath = null, bool readOnly = false)
     {
         if (filePath != null && File.Exists(filePath))
             AddToHistory(filePath);
@@ -34,6 +34,7 @@ public sealed class EditorScreen : Toplevel
             Width  = Dim.Fill(),
             Height = Dim.Fill(1),   // leave 1 row at bottom for button bar
         };
+        if (readOnly) _view.IsReadOnly = true;
         _view.RequestClose       += (_, _) => Application.RequestStop(this);
         _view.EditorTitleChanged += (_, _) => { /* title lives in status bar */ };
 

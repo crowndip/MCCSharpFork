@@ -13,7 +13,7 @@ internal class McTextField : TextField
     {
         base.OnHasFocusChanged(newHasFocus, previousFocused, newFocused);
         EscSeqUtils.CSI_SetCursorStyle(newHasFocus
-            ? EscSeqUtils.DECSCUSR_Style.BlinkingBlock
+            ? EscSeqUtils.DECSCUSR_Style.BlinkingUnderline
             : EscSeqUtils.DECSCUSR_Style.UserShape);
     }
 }
