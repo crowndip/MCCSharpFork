@@ -76,9 +76,10 @@ public sealed class RegexSearchProvider : ISearchProvider
 
         var flags = RegexOptions.None;
         if (!options.CaseSensitive) flags |= RegexOptions.IgnoreCase;
-        if (options.EntireLine) flags |= RegexOptions.Singleline;
+        if (options.EntireLine) flags |= RegexOptions.Multiline;
 
-        var pattern = options.WholeWords ? $@"\b{options.Pattern}\b" : options.Pattern;
+        var rawPattern = options.WholeWords ? $@"\b(?:{options.Pattern})\b" : options.Pattern;
+        var pattern = options.EntireLine ? $@"^(?:{rawPattern})$" : rawPattern;
 
         try
         {

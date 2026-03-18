@@ -6,9 +6,12 @@ namespace Mc.Core.KeyBinding;
 /// Maps keyboard keys to named actions.
 /// Equivalent to src/keymap.c and lib/keybind.c
 /// </summary>
+public enum BindingContext { Panel, Editor }
+
 public sealed class KeyBindingManager
 {
-    private readonly Dictionary<string, McAction> _keyToAction = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, McAction> _panelBindings  = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, McAction> _editorBindings = new(StringComparer.Ordinal);
     private readonly Dictionary<McAction, List<string>> _actionToKeys = [];
 
     public KeyBindingManager()
@@ -18,67 +21,82 @@ public sealed class KeyBindingManager
 
     private void LoadDefaults()
     {
-        // Global
-        Bind("F1", McAction.Help);
-        Bind("F2", McAction.UserMenu);
-        Bind("F9", McAction.Menu);
-        Bind("F10", McAction.Quit);
-        Bind("Ctrl+C", McAction.Quit);
-        Bind("Ctrl+O", McAction.Shell);
-        Bind("Ctrl+U", McAction.SwapPanels);
-        Bind("Ctrl+R", McAction.Refresh);
-        Bind("Tab", McAction.SwitchPanel);
-        Bind("Shift+Tab", McAction.SwitchPanel);
+        // Panel / global
+        Bind("F1",  McAction.Help,              BindingContext.Panel);
+        Bind("F2",  McAction.UserMenu,           BindingContext.Panel);
+        Bind("F9",  McAction.Menu,               BindingContext.Panel);
+        Bind("F10", McAction.Quit,               BindingContext.Panel);
+        Bind("Ctrl+C", McAction.Quit,            BindingContext.Panel);
+        Bind("Ctrl+O", McAction.Shell,           BindingContext.Panel);
+        Bind("Ctrl+U", McAction.SwapPanels,      BindingContext.Panel);
+        Bind("Ctrl+R", McAction.Refresh,         BindingContext.Panel);
+        Bind("Tab",        McAction.SwitchPanel, BindingContext.Panel);
+        Bind("Shift+Tab",  McAction.SwitchPanel, BindingContext.Panel);
 
-        // File operations
-        Bind("F3", McAction.View);
-        Bind("F4", McAction.Edit);
-        Bind("F5", McAction.Copy);
-        Bind("F6", McAction.Move);
-        Bind("F7", McAction.MakeDir);
-        Bind("F8", McAction.Delete);
-        Bind("Ctrl+X", McAction.Rename);
-        Bind("Ctrl+L", McAction.Info);
+        // File operations (panel)
+        Bind("F3", McAction.View,    BindingContext.Panel);
+        Bind("F4", McAction.Edit,    BindingContext.Panel);
+        Bind("F5", McAction.Copy,    BindingContext.Panel);
+        Bind("F6", McAction.Move,    BindingContext.Panel);
+        Bind("F7", McAction.MakeDir, BindingContext.Panel);
+        Bind("F8", McAction.Delete,  BindingContext.Panel);
+        Bind("Ctrl+X", McAction.Rename, BindingContext.Panel);
+        Bind("Ctrl+L", McAction.Info,   BindingContext.Panel);
 
-        // Selection
-        Bind("Insert", McAction.Mark);
-        Bind("Plus", McAction.MarkPattern);
-        Bind("Backslash", McAction.UnmarkAll);
-        Bind("Asterisk", McAction.InvertSelection);
+        // Selection (panel)
+        Bind("Insert",    McAction.Mark,             BindingContext.Panel);
+        Bind("Plus",      McAction.MarkPattern,      BindingContext.Panel);
+        Bind("Backslash", McAction.UnmarkAll,        BindingContext.Panel);
+        Bind("Asterisk",  McAction.InvertSelection,  BindingContext.Panel);
 
-        // Navigation
-        Bind("Ctrl+PageUp", McAction.ParentDir);
-        Bind("Ctrl+Home", McAction.RootDir);
-        Bind("Alt+H", McAction.DirHistory);
-        Bind("Backspace", McAction.ParentDir);
+        // Navigation (panel)
+        Bind("Ctrl+PageUp",    McAction.ParentDir,         BindingContext.Panel);
+        Bind("Ctrl+Home",      McAction.RootDir,            BindingContext.Panel);
+        Bind("Alt+H",          McAction.DirHistory,         BindingContext.Panel);
+        Bind("Backspace",      McAction.ParentDir,          BindingContext.Panel);
 
-        // Sort / filter
-        Bind("Ctrl+S", McAction.Sort);
-        Bind("Ctrl+X+F", McAction.Filter);
-        Bind("Ctrl+Backslash", McAction.ToggleShowHidden);
+        // Sort / filter (panel)
+        Bind("Ctrl+S",          McAction.Sort,              BindingContext.Panel);
+        Bind("Ctrl+X+F",        McAction.Filter,            BindingContext.Panel);
+        Bind("Ctrl+Backslash",  McAction.ToggleShowHidden,  BindingContext.Panel);
 
-        // Editor-specific (bound when editor is open)
-        Bind("F2", McAction.Save);
-        Bind("Ctrl+Z", McAction.Undo);
-        Bind("Ctrl+Y", McAction.Redo);
-        Bind("Ctrl+A", McAction.SelectAll);
-        Bind("Ctrl+H", McAction.Replace);
-        Bind("Ctrl+G", McAction.Goto);
-        Bind("F4", McAction.MacroPlay);
+        // Editor-specific
+        Bind("F2",    McAction.Save,      BindingContext.Editor);
+        Bind("Ctrl+Z", McAction.Undo,    BindingContext.Editor);
+        Bind("Ctrl+Y", McAction.Redo,    BindingContext.Editor);
+        Bind("Ctrl+A", McAction.SelectAll, BindingContext.Editor);
+        Bind("Ctrl+H", McAction.Replace,  BindingContext.Editor);
+        Bind("Ctrl+G", McAction.Goto,     BindingContext.Editor);
+        Bind("F4",    McAction.MacroPlay, BindingContext.Editor);
     }
 
-    public void Bind(string keySpec, McAction action)
+    public void Bind(string keySpec, McAction action,
+        BindingContext context = BindingContext.Panel)
     {
-        _keyToAction[keySpec] = action;
+        var map = context == BindingContext.Editor ? _editorBindings : _panelBindings;
+        map[keySpec] = action;
         if (!_actionToKeys.TryGetValue(action, out var keys))
             _actionToKeys[action] = keys = [];
         if (!keys.Contains(keySpec)) keys.Add(keySpec);
     }
 
-    public void Unbind(string keySpec) => _keyToAction.Remove(keySpec);
+    public void Unbind(string keySpec)
+    {
+        _panelBindings.Remove(keySpec);
+        _editorBindings.Remove(keySpec);
+    }
 
+    public bool TryGetAction(string keySpec, out McAction action,
+        BindingContext context = BindingContext.Panel)
+    {
+        var map = context == BindingContext.Editor ? _editorBindings : _panelBindings;
+        return map.TryGetValue(keySpec, out action);
+    }
+
+    // Legacy overload for backwards compatibility
     public bool TryGetAction(string keySpec, out McAction action)
-        => _keyToAction.TryGetValue(keySpec, out action);
+        => _panelBindings.TryGetValue(keySpec, out action) ||
+           _editorBindings.TryGetValue(keySpec, out action);
 
     public IReadOnlyList<string> GetKeys(McAction action)
         => _actionToKeys.TryGetValue(action, out var k) ? k.AsReadOnly() : [];
@@ -95,7 +113,9 @@ public sealed class KeyBindingManager
 
     public void SaveToConfig(McConfig config)
     {
-        foreach (var (key, action) in _keyToAction)
+        foreach (var (key, action) in _panelBindings)
             config.Set("Keybindings", key, action.ToString());
+        foreach (var (key, action) in _editorBindings)
+            config.Set("Keybindings", "editor:" + key, action.ToString());
     }
 }

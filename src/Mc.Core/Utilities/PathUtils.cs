@@ -7,6 +7,7 @@ public static class PathUtils
 {
     public static string GetDisplayPath(string path, int maxLength)
     {
+        if (maxLength < 4) maxLength = 4;
         if (path.Length <= maxLength) return path;
         // Truncate from the left, keeping the end: "...path/to/file"
         return "..." + path[^(maxLength - 3)..];

@@ -102,10 +102,11 @@ public sealed class SfsVfsProvider : IVfsProvider
         {
             using var proc = new System.Diagnostics.Process
             {
-                StartInfo = new System.Diagnostics.ProcessStartInfo("/bin/sh", $"-c {ShellQuote(cmd)}")
+                StartInfo = new System.Diagnostics.ProcessStartInfo("/bin/sh")
                 {
                     UseShellExecute = false,
                     CreateNoWindow  = true,
+                    ArgumentList    = { "-c", cmd },
                 },
             };
             proc.Start();

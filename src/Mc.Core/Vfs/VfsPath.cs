@@ -60,8 +60,8 @@ public sealed class VfsPath : IEquatable<VfsPath>
             raw = raw[..encIdx];
         }
 
-        // Try to parse as URI
-        if (Uri.TryCreate(raw, UriKind.Absolute, out var uri))
+        // Try to parse as URI (but reject single-letter "schemes" which are Windows drive letters)
+        if (Uri.TryCreate(raw, UriKind.Absolute, out var uri) && uri.Scheme.Length > 1)
         {
             var scheme = uri.Scheme;
             if (scheme == "file")

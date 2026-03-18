@@ -31,7 +31,7 @@ public sealed class ViewerController : IDisposable
 
     // Search
     public SearchOptions LastSearch { get; set; } = new();
-    private long _lastSearchOffset;
+    private long _lastSearchOffset = -1;
 
     // Last found match for highlighting (#15)
     public long LastMatchOffset { get; private set; } = -1;

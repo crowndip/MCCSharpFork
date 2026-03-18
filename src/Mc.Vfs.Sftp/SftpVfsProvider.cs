@@ -159,8 +159,12 @@ public sealed class SftpVfsProvider : IVfsProvider, IDisposable
     private SftpClient GetClient(VfsPath path)
     {
         var key = $"{path.User}@{path.Host}:{path.Port ?? 22}";
-        if (_connections.TryGetValue(key, out var existing) && existing.IsConnected)
-            return existing;
+        if (_connections.TryGetValue(key, out var existing))
+        {
+            if (existing.IsConnected) return existing;
+            existing.Dispose();
+            _connections.Remove(key);
+        }
 
         ConnectionInfo connInfo;
         if (!string.IsNullOrEmpty(path.Password))

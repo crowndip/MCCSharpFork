@@ -82,11 +82,10 @@ public static class ChecksumDialog
         {
             try
             {
-                using var stream = File.OpenRead(filePath);
-
-                var md5Hash    = MD5.HashData(ReadFully(filePath));
-                var sha1Hash   = SHA1.HashData(ReadFully(filePath));
-                var sha256Hash = SHA256.HashData(ReadFully(filePath));
+                var data = ReadFully(filePath);
+                var md5Hash    = MD5.HashData(data);
+                var sha1Hash   = SHA1.HashData(data);
+                var sha256Hash = SHA256.HashData(data);
 
                 Application.Invoke(() =>
                 {

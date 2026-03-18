@@ -200,12 +200,20 @@ public sealed class TarVfsProvider : IVfsProvider
     {
         var raw = File.OpenRead(archivePath);
         var ext = System.IO.Path.GetExtension(archivePath).ToLowerInvariant();
-        return ext switch
+        try
         {
-            ".gz" or ".tgz" => new GZipStream(raw, CompressionMode.Decompress),
-            ".bz2" or ".tbz2" => throw new NotSupportedException(
-                $"bz2 decompression is not natively supported. Use a .tar.gz archive or extract '{archivePath}' with 7z first."),
-            _ => raw,
-        };
+            return ext switch
+            {
+                ".gz" or ".tgz" => new GZipStream(raw, CompressionMode.Decompress),
+                ".bz2" or ".tbz2" => throw new NotSupportedException(
+                    $"bz2 decompression is not natively supported. Use a .tar.gz archive or extract '{archivePath}' with 7z first."),
+                _ => raw,
+            };
+        }
+        catch
+        {
+            raw.Dispose();
+            throw;
+        }
     }
 }

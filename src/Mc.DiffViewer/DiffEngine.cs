@@ -23,10 +23,13 @@ public static class DiffEngine
     private enum EditOp { Equal, Insert, Delete, Replace }
     private record Edit(EditOp Op, int LeftIdx, int RightIdx);
 
+    private const int MaxDiffLines = 5000;
+
     private static List<Edit> ComputeEditScript(string[] left, string[] right)
     {
         // Standard LCS-based diff using dynamic programming
-        int n = left.Length, m = right.Length;
+        int n = Math.Min(left.Length,  MaxDiffLines);
+        int m = Math.Min(right.Length, MaxDiffLines);
         var dp = new int[n + 1, m + 1];
 
         for (int i = 0; i <= n; i++) dp[i, 0] = i;
@@ -67,7 +70,7 @@ public static class DiffEngine
     private static IReadOnlyList<DiffLine> BuildDiffLines(string[] left, string[] right, List<Edit> edits)
     {
         var result = new List<DiffLine>(edits.Count);
-        int leftLine = 1, rightLine = 1;
+        int leftLine = 0, rightLine = 0;
 
         // Merge adjacent deletes/inserts into replace
         var merged = MergeEdits(edits);

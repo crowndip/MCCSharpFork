@@ -79,6 +79,7 @@ public sealed class ButtonBarView : View
 
         int totalWidth = viewport.Width;
         int count      = _buttons.Length;
+        if (count == 0) return true;
         int baseWidth  = totalWidth / count;
         int remainder  = totalWidth % count; // extra pixels distributed to last button (#35)
         int x = 0;

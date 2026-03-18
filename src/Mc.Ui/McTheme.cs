@@ -399,6 +399,8 @@ public static class McTheme
         PanelArchive     = new Terminal.Gui.Attribute(arFg, pBg);
         PanelDevice      = new Terminal.Gui.Attribute(dvFg, pBg);   // #27
         PanelSpecialFile = new Terminal.Gui.Attribute(spFg, pBg);   // #27
+        var (shFg, _)  = Pair("panel", "header-sorted", hdFg, pBg);
+        PanelHeaderSorted = new Terminal.Gui.Attribute(shFg, pBg);
 
         Colors.ColorSchemes["Base"]   = Panel;
         Colors.ColorSchemes["Dialog"] = Dialog;

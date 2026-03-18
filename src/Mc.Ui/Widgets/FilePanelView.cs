@@ -604,8 +604,8 @@ public sealed class FilePanelView : View
         var marker = entry.IsMarked ? "*" : " ";
         string name = entry.IsParentDir ? ".." : entry.Name; // no prefix chars (#1, #2)
         if (ShowExecutableSuffix && entry.IsExecutable && !entry.IsDirectory) name += "*"; // #36
-        int nameWidth = width - 1;
-        if (name.Length > nameWidth) name = name[..(nameWidth - 1)] + "~";
+        int nameWidth = Math.Max(1, width - 1);
+        if (name.Length > nameWidth) name = nameWidth > 1 ? name[..(nameWidth - 1)] + "~" : name[..1];
         return marker + name.PadRight(nameWidth);
     }
 

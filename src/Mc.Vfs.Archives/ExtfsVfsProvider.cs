@@ -84,7 +84,7 @@ public sealed class ExtfsVfsProvider : IVfsProvider
 
     public bool DirectoryExists(VfsPath path)
     {
-        try { return ListDirectory(path).Count >= 0; }
+        try { return ListDirectory(path).Count > 0; }
         catch { return false; }
     }
 
@@ -94,11 +94,11 @@ public sealed class ExtfsVfsProvider : IVfsProvider
         var script = FindScript(ext);
         if (script == null) return false;
         var listing = RunScript(script, "list", archive);
-        var wantName = inner.TrimStart('/');
+        var wantName = inner.Trim('/');
         foreach (var line in listing.Split('\n'))
         {
             var (entry, ok) = ParseLsLine(line, archive, path);
-            if (ok && entry.Name == wantName) return true;
+            if (ok && entry.Name.Trim('/') == wantName) return true;
         }
         return false;
     }
@@ -175,7 +175,10 @@ public sealed class ExtfsVfsProvider : IVfsProvider
         using var proc = new System.Diagnostics.Process { StartInfo = psi };
         proc.Start();
         var output = proc.StandardOutput.ReadToEnd();
-        proc.WaitForExit(30_000);
+        if (!proc.WaitForExit(30_000))
+        {
+            try { proc.Kill(); } catch { }
+        }
         return output;
     }
 

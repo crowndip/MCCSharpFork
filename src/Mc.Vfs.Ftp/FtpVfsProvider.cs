@@ -73,7 +73,13 @@ public sealed class FtpVfsProvider : IVfsProvider
     {
         var request = CreateRequest(path, WebRequestMethods.Ftp.DownloadFile);
         var response = (FtpWebResponse)request.GetResponse();
-        return response.GetResponseStream();
+        // Copy to MemoryStream so the FtpWebResponse can be properly disposed.
+        var ms = new System.IO.MemoryStream();
+        using (response)
+        using (var rs = response.GetResponseStream())
+            rs.CopyTo(ms);
+        ms.Position = 0;
+        return ms;
     }
 
     public Stream OpenWrite(VfsPath path)

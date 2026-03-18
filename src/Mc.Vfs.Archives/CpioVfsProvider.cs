@@ -55,7 +55,7 @@ public sealed class CpioVfsProvider : IVfsProvider
             seen.Add(childName);
 
             bool isDir      = slash >= 0 || e.IsDirectory;
-            var  childInner = (inner == "/" ? "/" : inner) + childName;
+            var  childInner = (inner == "/" ? "/" : inner + "/") + childName;
 
             entries.Add(new VfsDirEntry
             {
@@ -212,6 +212,7 @@ public sealed class CpioVfsProvider : IVfsProvider
         {
             if (buf[i] == 0x1F && buf[i + 1] == 0x8B) // gzip
             {
+                raw.Dispose(); // no longer needed; payload is buffered
                 var ms = new MemoryStream(buf, i, n - i);
                 return new System.IO.Compression.GZipStream(ms, System.IO.Compression.CompressionMode.Decompress);
             }

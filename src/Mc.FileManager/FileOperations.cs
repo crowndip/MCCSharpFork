@@ -67,7 +67,9 @@ public sealed class FileOperations
         //   - existing dir  → place each source INSIDE it (dest/srcname)
         //   - non-dir, single source → use destination as the exact target path (rename)
         //   - non-dir, multiple sources → create the directory then place inside it
-        bool destIsExistingDir = Directory.Exists(destination.Path);
+        bool destIsExistingDir;
+        try { var s = _vfs.Stat(destination); destIsExistingDir = s.IsDirectory; }
+        catch { destIsExistingDir = false; }
 
         for (int i = 0; i < filteredSources.Count; i++)
         {
@@ -151,7 +153,9 @@ public sealed class FileOperations
 
         // Matches original MC move_file_file() logic:
         // existing dir → place each file INSIDE it; non-dir + single source → exact rename target.
-        bool destIsExistingDir = Directory.Exists(destination.Path);
+        bool destIsExistingDir;
+        try { var s = _vfs.Stat(destination); destIsExistingDir = s.IsDirectory; }
+        catch { destIsExistingDir = false; }
 
         for (int i = 0; i < sources.Count; i++)
         {
@@ -213,22 +217,24 @@ public sealed class FileOperations
     {
         var prog = new OperationProgress { TotalFiles = targets.Count };
 
-        for (int i = 0; i < targets.Count; i++)
+        await Task.Run(() =>
         {
-            ct.ThrowIfCancellationRequested();
-            var target = targets[i];
-            var stat = _vfs.Stat(target);
-            prog.CurrentFile = stat.Name;
-            prog.FilesDone = i;
-            progress?.Report(prog);
+            for (int i = 0; i < targets.Count; i++)
+            {
+                ct.ThrowIfCancellationRequested();
+                var target = targets[i];
+                var stat = _vfs.Stat(target);
+                prog.CurrentFile = stat.Name;
+                prog.FilesDone = i;
+                progress?.Report(prog);
 
-            if (stat.IsDirectory)
-                _vfs.DeleteDirectory(target, recursive: true);
-            else
-                _vfs.DeleteFile(target);
-        }
+                if (stat.IsDirectory)
+                    _vfs.DeleteDirectory(target, recursive: true);
+                else
+                    _vfs.DeleteFile(target);
+            }
+        }, ct);
 
-        await Task.CompletedTask;
         return OperationResult.Success;
     }
 

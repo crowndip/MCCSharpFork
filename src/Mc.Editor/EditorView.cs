@@ -261,7 +261,11 @@ public sealed class EditorView : View
                 attr = ColorScheme!.Normal;
             Driver!.SetAttribute(attr);
             if (_showTabTws && ch == '\t')
-                Driver!.AddStr("→");
+            {
+                int tabW = _editor.TabWidth - (pos % _editor.TabWidth);
+                Driver!.AddStr("→" + new string(' ', Math.Min(tabW - 1, width - i - 1)));
+                i += tabW - 1; pos += tabW - 1;
+            }
             else if (_showTabTws && ch == ' ' && pos > lastNonSpace)
                 { Driver!.SetAttribute(new Terminal.Gui.Attribute(Color.DarkGray, attr.Background)); Driver!.AddStr("·"); }
             else
@@ -310,7 +314,11 @@ public sealed class EditorView : View
             }
             Driver!.SetAttribute(attr);
             if (_showTabTws && ch == '\t')
-                Driver!.AddStr("→");
+            {
+                int tabW = _editor.TabWidth - (pos % _editor.TabWidth);
+                Driver!.AddStr("→" + new string(' ', Math.Min(tabW - 1, width - i - 1)));
+                i += tabW - 1; pos += tabW - 1;
+            }
             else if (_showTabTws && ch == ' ' && pos > lastNonSpace)
                 { Driver!.SetAttribute(new Terminal.Gui.Attribute(Color.DarkGray, attr.Background)); Driver!.AddStr("·"); }
             else
@@ -1301,25 +1309,24 @@ public sealed class EditorView : View
         {
             var (selStart, selEnd) = _editor.GetSelectionOffsets();
             var blockText = _editor.Buffer.Extract(selStart, selEnd - selStart);
-            using var proc = new System.Diagnostics.Process
+            var sortPsi = new System.Diagnostics.ProcessStartInfo("/bin/sh")
             {
-                StartInfo = new System.Diagnostics.ProcessStartInfo
-                {
-                    FileName = "/bin/sh",
-                    Arguments = $"-c \"{cmdStr}\"",
-                    RedirectStandardInput  = true,
-                    RedirectStandardOutput = true,
-                    UseShellExecute        = false,
-                    CreateNoWindow         = true,
-                }
+                RedirectStandardInput  = true,
+                RedirectStandardOutput = true,
+                UseShellExecute        = false,
+                CreateNoWindow         = true,
             };
+            sortPsi.ArgumentList.Add("-c");
+            sortPsi.ArgumentList.Add(cmdStr);
+            using var proc = new System.Diagnostics.Process { StartInfo = sortPsi };
             proc.Start();
             proc.StandardInput.Write(blockText);
             proc.StandardInput.Close();
             var sorted = proc.StandardOutput.ReadToEnd();
             proc.WaitForExit(5000);
-            _editor.StartSelection();
             _editor.MoveCursor(selStart);
+            _editor.StartSelection();
+            _editor.MoveCursor(selEnd);
             _editor.ExtendSelection();
             _editor.InsertText(sorted);
             _selecting = false; _editor.ClearSelection();
@@ -1334,17 +1341,15 @@ public sealed class EditorView : View
         if (cmdStr == null) return;
         try
         {
-            using var proc = new System.Diagnostics.Process
+            var extPsi = new System.Diagnostics.ProcessStartInfo("/bin/sh")
             {
-                StartInfo = new System.Diagnostics.ProcessStartInfo
-                {
-                    FileName = "/bin/sh",
-                    Arguments = $"-c \"{cmdStr}\"",
-                    RedirectStandardOutput = true,
-                    UseShellExecute        = false,
-                    CreateNoWindow         = true,
-                }
+                RedirectStandardOutput = true,
+                UseShellExecute        = false,
+                CreateNoWindow         = true,
             };
+            extPsi.ArgumentList.Add("-c");
+            extPsi.ArgumentList.Add(cmdStr);
+            using var proc = new System.Diagnostics.Process { StartInfo = extPsi };
             proc.Start();
             var output = proc.StandardOutput.ReadToEnd();
             proc.WaitForExit(10000);
@@ -1468,11 +1473,11 @@ public sealed class EditorView : View
         var cmd = ExpandMacros(entries[choice].Command);
         try
         {
-            using var proc = new System.Diagnostics.Process
-            {
-                StartInfo = new System.Diagnostics.ProcessStartInfo("/bin/sh", $"-c \"{cmd}\"")
-                { UseShellExecute = false, CreateNoWindow = false }
-            };
+            var _psi = new System.Diagnostics.ProcessStartInfo("/bin/sh")
+                { UseShellExecute = false, CreateNoWindow = false };
+            _psi.ArgumentList.Add("-c");
+            _psi.ArgumentList.Add(cmd);
+            using var proc = new System.Diagnostics.Process { StartInfo = _psi };
             proc.Start();
             proc.WaitForExit(30000);
         }
@@ -2004,18 +2009,16 @@ public sealed class EditorView : View
         }
         try
         {
-            using var proc = new System.Diagnostics.Process
+            var fmtPsi = new System.Diagnostics.ProcessStartInfo("/bin/sh")
             {
-                StartInfo = new System.Diagnostics.ProcessStartInfo
-                {
-                    FileName = "/bin/sh",
-                    Arguments = $"-c \"{cmdStr}\"",
-                    RedirectStandardInput  = true,
-                    RedirectStandardOutput = true,
-                    UseShellExecute        = false,
-                    CreateNoWindow         = true,
-                }
+                RedirectStandardInput  = true,
+                RedirectStandardOutput = true,
+                UseShellExecute        = false,
+                CreateNoWindow         = true,
             };
+            fmtPsi.ArgumentList.Add("-c");
+            fmtPsi.ArgumentList.Add(cmdStr);
+            using var proc = new System.Diagnostics.Process { StartInfo = fmtPsi };
             proc.Start();
             proc.StandardInput.Write(inputText);
             proc.StandardInput.Close();

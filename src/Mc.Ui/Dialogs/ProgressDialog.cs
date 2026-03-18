@@ -85,7 +85,7 @@ public sealed class ProgressDialog : IProgress<OperationProgress>, IDisposable
 
     public void Dispose()
     {
-        _cts.Dispose();
         Close();
+        _cts.Dispose();
     }
 }

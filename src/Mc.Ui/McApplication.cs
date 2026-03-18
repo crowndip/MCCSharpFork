@@ -389,14 +389,14 @@ public sealed class McApplication : Toplevel
             case KeyCode.T when keyEvent.IsCtrl: OpenTerminalHere(); return true;
             case KeyCode.Insert: GetActivePanel().ToggleMark(); return true;
 
+            // Ctrl+Shift+Enter → paste full path to command line (#37) — must be before Ctrl+Enter
+            case KeyCode.Enter when keyEvent.IsCtrl && keyEvent.IsShift:
+                PastePathToCommandLine();
+                return true;
+
             // Ctrl+Enter → paste filename to command line (#8)
             case KeyCode.Enter when keyEvent.IsCtrl:
                 PasteFilenameToCommandLine();
-                return true;
-
-            // Ctrl+Shift+Enter → paste full path to command line (#37)
-            case KeyCode.Enter when keyEvent.IsCtrl && keyEvent.IsShift:
-                PastePathToCommandLine();
                 return true;
 
             // Alt+. handled in default clause below (#11)
@@ -2421,12 +2421,11 @@ public sealed class McApplication : Toplevel
 
     private void OnCommandEntered(object? sender, string command)
     {
-        var psi = new System.Diagnostics.ProcessStartInfo
-        {
-            FileName = OperatingSystem.IsWindows() ? "cmd" : "/bin/sh",
-            Arguments = OperatingSystem.IsWindows() ? $"/c {command}" : $"-c \"{command}\"",
-            UseShellExecute = false,
-        };
+        var shell = OperatingSystem.IsWindows() ? "cmd" : "/bin/sh";
+        var flag  = OperatingSystem.IsWindows() ? "/c" : "-c";
+        var psi = new System.Diagnostics.ProcessStartInfo(shell) { UseShellExecute = false };
+        psi.ArgumentList.Add(flag);
+        psi.ArgumentList.Add(command);
         using var proc = System.Diagnostics.Process.Start(psi);
         proc?.WaitForExit();
         RefreshPanels();
@@ -2559,29 +2558,44 @@ public sealed class McApplication : Toplevel
         var localPath = ResolveArchiveEntryToLocalPath(entry.FullPath.Path, out tempDir);
         if (localPath == null) return;
         var path = localPath;
+        bool ok = false;
         try
         {
             if (OperatingSystem.IsWindows())
             {
                 System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(path)
                     { UseShellExecute = true });
+                ok = true;
             }
             else if (OperatingSystem.IsMacOS())
             {
-                ProcessHelper.TryLaunchArgs("open", path);
+                ok = ProcessHelper.TryLaunchArgs("open", path);
             }
             else
             {
-                ProcessHelper.TryLaunchArgs("xdg-open", path);
+                ok = ProcessHelper.TryLaunchArgs("xdg-open", path);
             }
         }
         catch (Exception ex)
         {
             MessageDialog.Error($"Could not open file with default app:\n{ex.Message}");
         }
-        finally
+
+        if (!ok && tempDir != null)
         {
-            if (tempDir != null) Directory.Delete(tempDir, recursive: true);
+            try { Directory.Delete(tempDir, recursive: true); } catch { }
+            return;
+        }
+
+        // Delay cleanup so the external app has time to open the file before the temp dir is removed
+        if (tempDir != null)
+        {
+            var capturedDir = tempDir;
+            Task.Run(async () =>
+            {
+                await Task.Delay(TimeSpan.FromMinutes(5));
+                try { Directory.Delete(capturedDir, recursive: true); } catch { }
+            });
         }
     }
 
@@ -4092,7 +4106,7 @@ public sealed class McApplication : Toplevel
                 input, rx,
                 System.Text.RegularExpressions.RegexOptions.IgnoreCase);
         }
-        catch { return true; }
+        catch { return false; }
     }
 
     /// <summary>
@@ -4108,12 +4122,10 @@ public sealed class McApplication : Toplevel
         var tmpScript = Path.Combine(Path.GetTempPath(), $"mc-menu-{Guid.NewGuid():N}.sh");
         try
         {
-            File.WriteAllText(tmpScript, $"#!/bin/sh\ncd \"{_controller.ActivePanel.CurrentPath.Path}\"\n{command}\n");
-            var psi = new System.Diagnostics.ProcessStartInfo("/bin/sh")
-            {
-                Arguments       = tmpScript,
-                UseShellExecute = false,
-            };
+            var safePath = _controller.ActivePanel.CurrentPath.Path.Replace("'", "'\\''");
+            File.WriteAllText(tmpScript, $"#!/bin/sh\ncd '{safePath}'\n{command}\n");
+            var psi = new System.Diagnostics.ProcessStartInfo("/bin/sh") { UseShellExecute = false };
+            psi.ArgumentList.Add(tmpScript);
             using var proc = System.Diagnostics.Process.Start(psi);
             proc?.WaitForExit();
         }
@@ -4529,6 +4541,7 @@ public sealed class McApplication : Toplevel
         d.AddButton(removeFinished);
         d.AddButton(close);
         Application.Run(d);
+        d.Dispose();
     }
 
     // --- Not-yet-implemented stub ---

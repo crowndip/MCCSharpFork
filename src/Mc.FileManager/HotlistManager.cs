@@ -236,10 +236,3 @@ public sealed class HotlistManager
     }
 }
 
-file static class ConfigPaths
-{
-    public static string HotlistFile =>
-        Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
-            "mc", "hotlist");
-}

@@ -26,7 +26,7 @@ public sealed class EditorController
     public bool IsModified => _buffer.IsModified;
     public int CursorOffset => _cursorOffset;
     public (int Line, int Column) CursorPosition => _buffer.OffsetToLineCol(_cursorOffset);
-    public bool HasSelection => _selectionStart >= 0 && _selectionEnd > _selectionStart;
+    public bool HasSelection => _selectionStart >= 0 && _selectionEnd >= 0 && _selectionStart != _selectionEnd;
 
     // Editor display options (from McSettings) (#23 #42)
     public bool ShowLineNumbers   { get; set; }
@@ -118,6 +118,7 @@ public sealed class EditorController
 
     public void InsertChar(char ch)
     {
+        if (IsReadOnly) return;
         DeleteSelection();
         RecordUndo(new InsertOp(_cursorOffset, ch.ToString()));
         _buffer.Insert(_cursorOffset, ch);
@@ -128,6 +129,7 @@ public sealed class EditorController
 
     public void InsertText(string text)
     {
+        if (IsReadOnly) return;
         DeleteSelection();
         RecordUndo(new InsertOp(_cursorOffset, text));
         _buffer.Insert(_cursorOffset, text);
@@ -138,6 +140,7 @@ public sealed class EditorController
     /// <summary>Overwrite mode: replace the character under the cursor. (#22)</summary>
     public void ReplaceChar(char ch)
     {
+        if (IsReadOnly) return;
         if (_cursorOffset < _buffer.Length && _buffer[_cursorOffset] != '\n')
         {
             var old = _buffer[_cursorOffset].ToString();
@@ -149,6 +152,7 @@ public sealed class EditorController
         else
         {
             InsertChar(ch);
+            return;
         }
         Changed?.Invoke(this, EventArgs.Empty);
     }
@@ -161,14 +165,20 @@ public sealed class EditorController
             InsertChar('\n');
             return;
         }
+        if (IsReadOnly) return;
         var (line, _) = _buffer.OffsetToLineCol(_cursorOffset);
         var lineText  = _buffer.GetLine(line);
         int indent    = 0;
         while (indent < lineText.Length && (lineText[indent] == ' ' || lineText[indent] == '\t'))
             indent++;
         var whitespace = lineText[..indent];
-        InsertChar('\n');
-        InsertText(whitespace);
+        DeleteSelection();
+        var insertText = "\n" + whitespace;
+        RecordUndo(new InsertOp(_cursorOffset, insertText));
+        _buffer.Insert(_cursorOffset, insertText);
+        _cursorOffset += insertText.Length;
+        if (TypewriterWrap) CheckTypewriterWrap();
+        Changed?.Invoke(this, EventArgs.Empty);
     }
 
     /// <summary>Insert tab as spaces when ExpandTabs is on, otherwise literal tab. (#42)</summary>
@@ -188,6 +198,7 @@ public sealed class EditorController
 
     public void Backspace()
     {
+        if (IsReadOnly) return;
         if (HasSelection) { DeleteSelection(); return; }
         if (_cursorOffset == 0) return;
         if (BackspaceThruTabs && _cursorOffset > 0)
@@ -203,7 +214,7 @@ public sealed class EditorController
                 }
                 if (allSpaces)
                 {
-                    for (int i = 0; i < TabWidth; i++)
+                    for (int i = 0; i < Math.Min(TabWidth, _cursorOffset); i++)
                     {
                         var d = _buffer[_cursorOffset - 1].ToString();
                         RecordUndo(new DeleteOp(_cursorOffset - 1, d));
@@ -224,6 +235,7 @@ public sealed class EditorController
 
     public void DeleteForward()
     {
+        if (IsReadOnly) return;
         if (HasSelection) { DeleteSelection(); return; }
         if (_cursorOffset >= _buffer.Length) return;
         var deleted = _buffer[_cursorOffset].ToString();
@@ -234,6 +246,7 @@ public sealed class EditorController
 
     public void DeleteLine()
     {
+        if (IsReadOnly) return;
         MoveToLineStart();
         int start = _cursorOffset;
         MoveToLineEnd();
@@ -386,8 +399,9 @@ public sealed class EditorController
 
     public string Copy()
     {
-        if (!HasSelection) return string.Empty;
-        return _buffer.Extract(_selectionStart, _selectionEnd - _selectionStart);
+        var (start, end) = GetSelectionOffsets();
+        if (start < 0) return string.Empty;
+        return _buffer.Extract(start, end - start);
     }
 
     public void Cut()
@@ -432,8 +446,8 @@ public sealed class EditorController
         SearchResult result;
         if (opts.Backward)
         {
-            // Search backward: look for last occurrence before _lastSearchOffset
-            int searchFrom = _lastSearchOffset > 0 ? _lastSearchOffset : text.Length;
+            // Search backward: look for last occurrence before cursor (or end of file on first search)
+            int searchFrom = _lastSearchOffset > 0 ? _lastSearchOffset : _cursorOffset;
             result = provider.Search(text, opts, searchFrom);
             if (!result.Found && searchFrom < text.Length)
             {
@@ -465,6 +479,7 @@ public sealed class EditorController
     /// <summary>Find the next occurrence and replace only that one match.</summary>
     public bool ReplaceNext(SearchOptions opts)
     {
+        if (IsReadOnly) return false;
         var result = FindNext(opts);
         if (!result.Found) return false;
         var replacement = opts.Replacement ?? string.Empty;
@@ -481,6 +496,7 @@ public sealed class EditorController
 
     public int ReplaceAll(SearchOptions opts)
     {
+        if (IsReadOnly) return 0;
         if (string.IsNullOrEmpty(opts.Pattern)) return 0;
         var text = _buffer.ToString();
         var provider = opts.Type switch
@@ -491,7 +507,16 @@ public sealed class EditorController
         var newText = provider.ReplaceAll(text, opts);
         if (newText == text) return 0;
 
-        var countBefore = CountOccurrences(text, opts.Pattern);
+        // Count matches using the same provider to respect regex/case/word settings
+        int countBefore = 0;
+        int countPos = 0;
+        while (true)
+        {
+            var r = provider.Search(text, opts, countPos);
+            if (!r.Found) break;
+            countBefore++;
+            countPos = (int)r.Offset + Math.Max(1, r.Length);
+        }
         _buffer.Replace(0, _buffer.Length, newText);
         Changed?.Invoke(this, EventArgs.Empty);
         return countBefore;
@@ -881,9 +906,8 @@ public sealed class EditorController
         int endOff = _buffer.LineColToOffset(paraEnd, 0) + lastLineText.Length;
         var oldText = _buffer.Extract(startOff, endOff - startOff);
         var newText = string.Join("\n", resultLines);
-        RecordUndo(new DeleteOp(startOff, oldText));
+        RecordUndo(new CompositeOp(new DeleteOp(startOff, oldText), new InsertOp(startOff, newText)));
         _buffer.Delete(startOff, endOff - startOff);
-        RecordUndo(new InsertOp(startOff, newText));
         _buffer.Insert(startOff, newText);
         _cursorOffset = startOff;
         Changed?.Invoke(this, EventArgs.Empty);
@@ -918,7 +942,13 @@ internal sealed class DeleteOp : EditOperation
 internal sealed class CompositeOp : EditOperation
 {
     private readonly EditOperation[] _ops;
-    public CompositeOp(params EditOperation[] ops) { _ops = ops; }
+    public CompositeOp(params EditOperation[] ops)
+    {
+        _ops = ops;
+        // Cursor after Undo = position of first sub-op; after Redo = end of last sub-op.
+        // Store first-op offset so Undo() sets cursor correctly (Redo uses last op end).
+        if (ops.Length > 0) { Offset = ops[0].Offset; Text = ops[^1].Text; }
+    }
     public override void Undo(TextBuffer b) { for (int i = _ops.Length - 1; i >= 0; i--) _ops[i].Undo(b); }
     public override void Redo(TextBuffer b) { foreach (var op in _ops) op.Redo(b); }
 }

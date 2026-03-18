@@ -414,7 +414,10 @@ public sealed class CommandLineView : View
     {
         _currentDirectory = dir;
         var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
-        var display = dir.StartsWith(home, StringComparison.OrdinalIgnoreCase)
+        var pathComparison = OperatingSystem.IsWindows()
+            ? StringComparison.OrdinalIgnoreCase
+            : StringComparison.Ordinal;
+        var display = dir.StartsWith(home, pathComparison)
             ? "~" + dir[home.Length..]
             : dir;
         var sep   = System.IO.Path.DirectorySeparatorChar;
