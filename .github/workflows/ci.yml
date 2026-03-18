@@ -104,6 +104,33 @@ jobs:
           mv dist/windows/mc.exe dist/mc-win-x64.exe
           chmod +x dist/mc-linux-x64
 
+      - name: Build .deb package
+        run: |
+          VERSION="${{ github.ref_name }}"
+          VERSION="${VERSION#v}"   # strip leading 'v'
+          PKG="mc_${VERSION}_amd64"
+
+          mkdir -p "${PKG}/usr/bin"
+          mkdir -p "${PKG}/DEBIAN"
+
+          cp dist/mc-linux-x64 "${PKG}/usr/bin/mc"
+          chmod +x "${PKG}/usr/bin/mc"
+
+          cat > "${PKG}/DEBIAN/control" <<EOF
+          Package: mc
+          Version: ${VERSION}
+          Architecture: amd64
+          Maintainer: crowndip <crowndip@users.noreply.github.com>
+          Homepage: ${{ github.server_url }}/${{ github.repository }}
+          Description: Midnight Commander for .NET
+           A full C# / .NET 8 rewrite of GNU Midnight Commander,
+           built on Terminal.Gui v2. Self-contained — no runtime required.
+          EOF
+
+          dpkg-deb --build --root-owner-group "${PKG}"
+          mv "${PKG}.deb" "dist/mc_${VERSION}_amd64.deb"
+          echo "DEB_NAME=mc_${VERSION}_amd64.deb" >> "$GITHUB_ENV"
+
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
@@ -114,6 +141,7 @@ jobs:
           files: |
             dist/mc-linux-x64
             dist/mc-win-x64.exe
+            dist/${{ env.DEB_NAME }}
           body: |
             ## Midnight Commander for .NET ${{ github.ref_name }}
 
@@ -123,20 +151,31 @@ jobs:
 
             | Platform | File |
             |----------|------|
-            | Linux x64 (self-contained) | `mc-linux-x64` |
+            | Linux x64 — raw binary | `mc-linux-x64` |
+            | Linux x64 — Debian/Ubuntu package | `${{ env.DEB_NAME }}` |
             | Windows 11 x64 (self-contained) | `mc-win-x64.exe` |
 
-            Both binaries are self-contained — no .NET runtime installation required.
+            All binaries are self-contained — no .NET runtime installation required.
 
-            ### Quick start
+            ### Install on Ubuntu / Debian
 
-            **Linux / macOS**
+            ```bash
+            wget https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/${{ env.DEB_NAME }}
+            sudo dpkg -i ${{ env.DEB_NAME }}
+            mc
+            ```
+
+            To upgrade later, repeat the same steps with the new `.deb`.
+
+            ### Install on Linux (raw binary)
+
             ```bash
             chmod +x mc-linux-x64
             ./mc-linux-x64
             ```
 
-            **Windows**
+            ### Install on Windows
+
             ```
             mc-win-x64.exe
             ```
