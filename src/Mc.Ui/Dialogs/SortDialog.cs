@@ -82,6 +82,7 @@ public static class SortDialog
         cancel.Accepting += (_, _) => Application.RequestStop(d);
         d.AddButton(ok); d.AddButton(cancel);
         Application.Run(d);
+        d.Dispose();
         return result;
     }
 }

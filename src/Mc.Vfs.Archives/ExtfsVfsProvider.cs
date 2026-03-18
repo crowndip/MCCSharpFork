@@ -109,10 +109,10 @@ public sealed class ExtfsVfsProvider : IVfsProvider
         var script = FindScript(ext)
             ?? throw new NotSupportedException($"No extfs script for extension '.{ext}'");
 
-        var tmp = Path.GetTempFileName();
+        var tmp = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
         try
         {
-            RunScript(script, $"copyout {ShellQuote(archive)} {ShellQuote(inner.TrimStart('/'))} {ShellQuote(tmp)}");
+            RunScript(script, "copyout", archive, inner.TrimStart('/'), tmp);
             var data = File.ReadAllBytes(tmp);
             return new MemoryStream(data);
         }
@@ -160,26 +160,24 @@ public sealed class ExtfsVfsProvider : IVfsProvider
     // -----------------------------------------------------------------------
 
     /// <summary>Run an extfs script command and return stdout as a string.</summary>
-    private static string RunScript(string script, string command, string? archive = null)
+    private static string RunScript(string script, string command, params string[] extraArgs)
     {
-        var args = archive == null ? command : $"{command} {ShellQuote(archive)}";
-        using var proc = new System.Diagnostics.Process
+        var psi = new System.Diagnostics.ProcessStartInfo(script)
         {
-            StartInfo = new System.Diagnostics.ProcessStartInfo("/bin/sh", $"-c {ShellQuote(script)} {args}")
-            {
-                RedirectStandardOutput = true,
-                RedirectStandardError  = false,
-                UseShellExecute        = false,
-                CreateNoWindow         = true,
-            },
+            RedirectStandardOutput = true,
+            RedirectStandardError  = false,
+            UseShellExecute        = false,
+            CreateNoWindow         = true,
         };
+        psi.ArgumentList.Add(command);
+        foreach (var a in extraArgs) psi.ArgumentList.Add(a);
+
+        using var proc = new System.Diagnostics.Process { StartInfo = psi };
         proc.Start();
         var output = proc.StandardOutput.ReadToEnd();
         proc.WaitForExit(30_000);
         return output;
     }
-
-    private static string ShellQuote(string s) => "'" + s.Replace("'", "'\\''") + "'";
 
     /// <summary>
     /// Parse the ls-l style listing produced by an extfs "list" command.

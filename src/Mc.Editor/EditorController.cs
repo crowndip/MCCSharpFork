@@ -141,9 +141,8 @@ public sealed class EditorController
         if (_cursorOffset < _buffer.Length && _buffer[_cursorOffset] != '\n')
         {
             var old = _buffer[_cursorOffset].ToString();
-            RecordUndo(new DeleteOp(_cursorOffset, old));
+            RecordUndo(new CompositeOp(new DeleteOp(_cursorOffset, old), new InsertOp(_cursorOffset, ch.ToString())));
             _buffer.Delete(_cursorOffset);
-            RecordUndo(new InsertOp(_cursorOffset, ch.ToString()));
             _buffer.Insert(_cursorOffset, ch);
             _cursorOffset++;
         }
@@ -364,8 +363,6 @@ public sealed class EditorController
             if (lineText.Length <= atCol)
             {
                 // Pad the line with spaces, then insert
-                insOff    = _buffer.LineColToOffset(ln, lineText.Length) + (atCol - lineText.Length);
-                insertion = new string(' ', atCol - lineText.Length) + rows[i];
                 insOff    = _buffer.LineColToOffset(ln, lineText.Length);
                 insertion = new string(' ', atCol - lineText.Length) + rows[i];
             }
@@ -463,6 +460,23 @@ public sealed class EditorController
         }
         LastSearch = opts;
         return result;
+    }
+
+    /// <summary>Find the next occurrence and replace only that one match.</summary>
+    public bool ReplaceNext(SearchOptions opts)
+    {
+        var result = FindNext(opts);
+        if (!result.Found) return false;
+        var replacement = opts.Replacement ?? string.Empty;
+        var offset = (int)result.Offset;
+        RecordUndo(new CompositeOp(
+            new DeleteOp(offset, _buffer.Extract(offset, result.Length)),
+            new InsertOp(offset, replacement)));
+        _buffer.Delete(offset, result.Length);
+        _buffer.Insert(offset, replacement);
+        _cursorOffset = offset + replacement.Length;
+        Changed?.Invoke(this, EventArgs.Empty);
+        return true;
     }
 
     public int ReplaceAll(SearchOptions opts)
@@ -750,11 +764,12 @@ public sealed class EditorController
             if (lineText[i] == ' ' || lineText[i] == '\t') { wrapAt = i; break; }
         }
         if (wrapAt < 0) return; // No space found, don't wrap
-        // Replace the space at wrapAt with a newline
+        // Replace the space at wrapAt with a newline (single composite undo step)
         int spaceOffset = _buffer.LineColToOffset(line, wrapAt);
-        RecordUndo(new DeleteOp(spaceOffset, _buffer[spaceOffset].ToString()));
+        RecordUndo(new CompositeOp(
+            new DeleteOp(spaceOffset, _buffer[spaceOffset].ToString()),
+            new InsertOp(spaceOffset, "\n")));
         _buffer.Delete(spaceOffset);
-        RecordUndo(new InsertOp(spaceOffset, "\n"));
         _buffer.Insert(spaceOffset, '\n');
         // The buffer handles offset adjustments internally
     }
@@ -897,4 +912,13 @@ internal sealed class DeleteOp : EditOperation
     public DeleteOp(int offset, string text) { Offset = offset; Text = text; }
     public override void Undo(TextBuffer b) => b.Insert(Offset, Text);
     public override void Redo(TextBuffer b) => b.Delete(Offset, Text.Length);
+}
+
+/// <summary>Groups multiple operations that undo/redo as a single step.</summary>
+internal sealed class CompositeOp : EditOperation
+{
+    private readonly EditOperation[] _ops;
+    public CompositeOp(params EditOperation[] ops) { _ops = ops; }
+    public override void Undo(TextBuffer b) { for (int i = _ops.Length - 1; i >= 0; i--) _ops[i].Undo(b); }
+    public override void Redo(TextBuffer b) { foreach (var op in _ops) op.Redo(b); }
 }

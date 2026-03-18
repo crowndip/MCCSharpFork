@@ -46,6 +46,7 @@ public static class InputDialog
         d.AddButton(cancel);
         input.SetFocus();
         Application.Run(d);
+        d.Dispose();
         return result;
     }
 }

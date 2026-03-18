@@ -97,9 +97,12 @@ public sealed class EditorView : View
     protected override void OnHasFocusChanged(bool newHasFocus, View previousFocused, View newFocused)
     {
         base.OnHasFocusChanged(newHasFocus, previousFocused, newFocused);
-        EscSeqUtils.CSI_SetCursorStyle(newHasFocus
-            ? EscSeqUtils.DECSCUSR_Style.BlinkingUnderline
-            : EscSeqUtils.DECSCUSR_Style.UserShape);
+        // Only set cursor style on gaining focus; on blur, reset only if the new focus target
+        // will not set its own style (i.e., is not another EditorView).
+        if (newHasFocus)
+            EscSeqUtils.CSI_SetCursorStyle(EscSeqUtils.DECSCUSR_Style.BlinkingUnderline);
+        else if (newFocused is not EditorView)
+            EscSeqUtils.CSI_SetCursorStyle(EscSeqUtils.DECSCUSR_Style.UserShape);
     }
 
     /// <summary>When true, editing operations are blocked. Used for the internal viewer replacement.</summary>
@@ -209,7 +212,7 @@ public sealed class EditorView : View
             if (_showRightMargin)
             {
                 int marginScreenCol = gutter + _rightMarginColumn - _leftCol;
-                if (marginScreenCol >= gutter && marginScreenCol < viewport.Width)
+                if (marginScreenCol >= 0 && marginScreenCol < viewport.Width)
                 {
                     Move(marginScreenCol, row);
                     Driver!.SetAttribute(new Terminal.Gui.Attribute(Color.DarkGray, Color.Black));
@@ -275,7 +278,7 @@ public sealed class EditorView : View
             int bot   = Math.Max(_colBlockAnchorLine, curLine);
             int left  = Math.Min(_colBlockAnchorCol,  curCol);
             int right = Math.Max(_colBlockAnchorCol,  curCol);
-            return lineNo >= top && lineNo <= bot && col >= left && col < right;
+            return lineNo >= top && lineNo <= bot && col >= left && col <= right;
         }
         var (selStart, selEnd) = _editor.GetSelectionOffsets();
         return selStart >= 0 && charOffset >= selStart && charOffset < selEnd;
@@ -469,11 +472,12 @@ public sealed class EditorView : View
             {
                 var lineText = _editor.Buffer.GetLine(targetLine);
                 targetCol = Math.Min(targetCol, lineText.Length);
+                var anchorOffset = _editor.CursorOffset; // save before move for correct drag-anchor
                 _editor.MoveCursor(_editor.Buffer.LineColToOffset(targetLine, targetCol));
                 if (!_selecting)
                 {
                     _selecting = true;
-                    _selectionAnchor = _editor.CursorOffset;
+                    _selectionAnchor = anchorOffset;
                     _editor.StartSelection();
                 }
                 else
@@ -1786,9 +1790,8 @@ public sealed class EditorView : View
         if (string.IsNullOrEmpty(_editor.LastSearch.Pattern) ||
             string.IsNullOrEmpty(_editor.LastSearch.Replacement))
         { ShowFindReplace(); return; }
-        var result = _editor.FindNext(_editor.LastSearch);
-        if (!result.Found) MessageBox.Query("Replace", "No more occurrences.", "OK");
-        else { _editor.ReplaceAll(_editor.LastSearch); MessageBox.Query("Replace", "Replacement applied.", "OK"); }
+        var replaced = _editor.ReplaceNext(_editor.LastSearch);
+        if (!replaced) MessageBox.Query("Replace", "No more occurrences.", "OK");
         SetNeedsDraw();
     }
 
@@ -2221,7 +2224,9 @@ public sealed class EditorView : View
             return true;
         }
 
-        // Navigation
+        // Navigation — guard all index arithmetic against empty file
+        if (_hexBytes.Length == 0) return true;
+
         switch (keyEvent.KeyCode)
         {
             case KeyCode.CursorRight:
@@ -2281,8 +2286,6 @@ public sealed class EditorView : View
                 ToggleHexMode();
                 return true;
         }
-
-        if (_hexBytes.Length == 0) return true;
 
         // Hex pane editing: 0-9, a-f
         if (!_hexCursorInAscii && !_isReadOnly)

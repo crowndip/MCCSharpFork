@@ -95,6 +95,7 @@ public static class DirSizeDialog
 
         Application.Run(d);
         cts.Cancel();
+        cts.Dispose();
         d.Dispose();
     }
 

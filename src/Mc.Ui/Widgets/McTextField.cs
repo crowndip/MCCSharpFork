@@ -12,8 +12,9 @@ internal class McTextField : TextField
     protected override void OnHasFocusChanged(bool newHasFocus, View previousFocused, View newFocused)
     {
         base.OnHasFocusChanged(newHasFocus, previousFocused, newFocused);
-        EscSeqUtils.CSI_SetCursorStyle(newHasFocus
-            ? EscSeqUtils.DECSCUSR_Style.BlinkingUnderline
-            : EscSeqUtils.DECSCUSR_Style.UserShape);
+        if (newHasFocus)
+            EscSeqUtils.CSI_SetCursorStyle(EscSeqUtils.DECSCUSR_Style.BlinkingUnderline);
+        else if (newFocused is not McTextField && newFocused is not Mc.Editor.EditorView)
+            EscSeqUtils.CSI_SetCursorStyle(EscSeqUtils.DECSCUSR_Style.UserShape);
     }
 }

@@ -127,9 +127,20 @@ public sealed class HotlistManager
 
     private void Save()
     {
-        Directory.CreateDirectory(Path.GetDirectoryName(ConfigPaths.HotlistFile)!);
-        using var writer = new StreamWriter(ConfigPaths.HotlistFile);
-        WriteGroup(writer, Root, 0);
+        var configDir = Path.GetDirectoryName(ConfigPaths.HotlistFile)!;
+        Directory.CreateDirectory(configDir);
+        var tmp = Path.Combine(configDir, Path.GetRandomFileName());
+        try
+        {
+            using (var writer = new StreamWriter(tmp))
+                WriteGroup(writer, Root, 0);
+            File.Move(tmp, ConfigPaths.HotlistFile, overwrite: true);
+        }
+        catch
+        {
+            try { File.Delete(tmp); } catch { }
+            throw;
+        }
     }
 
     private static void WriteGroup(StreamWriter w, HotlistGroup group, int depth)

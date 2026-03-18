@@ -20,11 +20,12 @@ internal static class ClipboardHelper
         // Fallback for Linux: try wl-copy, xclip, xsel in order
         if (!OperatingSystem.IsLinux()) return false;
 
+        // All three tools read clipboard text from stdin
         string[][] tools =
         [
-            ["wl-copy",   text],
-            ["xclip",     "-selection", "clipboard"],
-            ["xsel",      "--clipboard", "--input"],
+            ["wl-copy"],
+            ["xclip",  "-selection", "clipboard"],
+            ["xsel",   "--clipboard", "--input"],
         ];
 
         foreach (var args in tools)
@@ -35,39 +36,19 @@ internal static class ClipboardHelper
                 {
                     FileName  = args[0],
                     UseShellExecute = false,
-                    RedirectStandardInput = args.Length > 1,
+                    RedirectStandardInput = true,
                 };
-                // For tools that read from stdin (xclip, xsel), pass text via stdin
-                if (args.Length > 1)
-                    foreach (var a in args[1..]) psi.ArgumentList.Add(a);
+                foreach (var a in args[1..]) psi.ArgumentList.Add(a);
 
                 using var proc = System.Diagnostics.Process.Start(psi);
                 if (proc == null) continue;
-                if (psi.RedirectStandardInput)
-                {
-                    proc.StandardInput.Write(text);
-                    proc.StandardInput.Close();
-                }
-                proc.WaitForExit(2000);
+                proc.StandardInput.Write(text);
+                proc.StandardInput.Close();
+                proc.WaitForExit(5000);
                 if (proc.ExitCode == 0) return true;
             }
             catch { /* try next */ }
         }
-
-        // wl-copy takes text as argument
-        try
-        {
-            var psi = new System.Diagnostics.ProcessStartInfo
-            {
-                FileName = "wl-copy",
-                UseShellExecute = false,
-            };
-            psi.ArgumentList.Add(text);
-            using var proc = System.Diagnostics.Process.Start(psi);
-            proc?.WaitForExit(2000);
-            if (proc?.ExitCode == 0) return true;
-        }
-        catch { }
 
         return false;
     }

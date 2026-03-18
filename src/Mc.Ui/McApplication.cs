@@ -822,7 +822,15 @@ public sealed class McApplication : Toplevel
                 psi.ArgumentList.Add(innerPath);
                 psi.ArgumentList.Add($"-o{tempDir}");
                 psi.ArgumentList.Add("-y");
-                using var proc = System.Diagnostics.Process.Start(psi);
+                System.Diagnostics.Process? proc;
+                try { proc = System.Diagnostics.Process.Start(psi); }
+                catch (System.ComponentModel.Win32Exception)
+                {
+                    Directory.Delete(tempDir, recursive: true);
+                    tempDir = null;
+                    MessageDialog.Error("7z is not installed. Install p7zip-full to open this archive type.");
+                    return null;
+                }
                 proc?.WaitForExit();
                 var destFile = Path.Combine(tempDir, Path.GetFileName(innerPath));
                 if (!File.Exists(destFile))
@@ -1662,6 +1670,7 @@ public sealed class McApplication : Toplevel
 
         Application.Run(d);
         cts.Cancel();  // stop search if dialog closed via Esc
+        cts.Dispose();
         d.Dispose();
         afterClose?.Invoke();
 
@@ -1723,6 +1732,7 @@ public sealed class McApplication : Toplevel
         win.Title = diff.Title;
         win.Add(diff);
         Application.Run(win);
+        win.Dispose();
     }
 
     private void LaunchShell()
@@ -2527,7 +2537,7 @@ public sealed class McApplication : Toplevel
                 psi.FileName = app;
             }
             psi.ArgumentList.Add(entry.FullPath.Path);
-            System.Diagnostics.Process.Start(psi);
+            using var _ = System.Diagnostics.Process.Start(psi);
         }
         catch (Exception ex)
         {
@@ -2543,7 +2553,12 @@ public sealed class McApplication : Toplevel
             MessageDialog.Show("Open with default app", "Select a file first.");
             return;
         }
-        var path = entry.FullPath.Path;
+
+        // For archive entries, extract to temp first
+        string? tempDir = null;
+        var localPath = ResolveArchiveEntryToLocalPath(entry.FullPath.Path, out tempDir);
+        if (localPath == null) return;
+        var path = localPath;
         try
         {
             if (OperatingSystem.IsWindows())
@@ -2563,6 +2578,10 @@ public sealed class McApplication : Toplevel
         catch (Exception ex)
         {
             MessageDialog.Error($"Could not open file with default app:\n{ex.Message}");
+        }
+        finally
+        {
+            if (tempDir != null) Directory.Delete(tempDir, recursive: true);
         }
     }
 

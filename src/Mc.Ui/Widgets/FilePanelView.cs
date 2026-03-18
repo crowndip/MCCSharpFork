@@ -285,7 +285,10 @@ public sealed class FilePanelView : View
     {
         if (_quickSearchActive)
         {
-            _statusText = $" Quick search: {_quickSearch}_";
+            var maxQueryLen = Math.Max(1, Viewport.Width - 17); // " Quick search: " (16 chars) + "_"
+            var displayQuery = _quickSearch.Length > maxQueryLen
+                ? _quickSearch[^maxQueryLen..] : _quickSearch;
+            _statusText = $" Quick search: {displayQuery}_";
             return;
         }
 

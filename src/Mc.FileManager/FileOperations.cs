@@ -17,6 +17,7 @@ public sealed class OperationProgress
     public long TotalBytes { get; set; }
     public int FilesDone { get; set; }
     public int TotalFiles { get; set; }
+    public int ErrorCount { get; set; }
     public double Percent => TotalBytes > 0 ? (double)BytesDone / TotalBytes * 100 : 0;
 }
 
@@ -125,7 +126,7 @@ public sealed class FileOperations
                     {
                         var action = conflictCallback != null
                             ? conflictCallback(stat.Name, destPath.Path)
-                            : OverwriteAction.Overwrite;
+                            : OverwriteAction.Skip;
                         if (action == OverwriteAction.Skip) continue;
                         if (action == OverwriteAction.SkipAll) { skipAll = true; continue; }
                         if (action == OverwriteAction.OverwriteAll) overwriteAll = true;
@@ -189,12 +190,14 @@ public sealed class FileOperations
                 if (stat.IsDirectory)
                 {
                     await CopyDirectoryAsync(src, destPath, onConflict, null, false, false, false, false, prog, progress, ct);
-                    _vfs.DeleteDirectory(src, recursive: true);
+                    try { _vfs.DeleteDirectory(src, recursive: true); }
+                    catch { /* Source deletion failed after copy; leave original in place */ }
                 }
                 else
                 {
                     await CopySingleFileAsync(src, destPath, stat.Size, false, false, prog, progress, ct);
-                    _vfs.DeleteFile(src);
+                    try { _vfs.DeleteFile(src); }
+                    catch { /* Source deletion failed after copy; leave original in place */ }
                 }
             }
             prog.BytesDone += stat.Size;
@@ -267,7 +270,7 @@ public sealed class FileOperations
                 var linkTarget = stableSymlinks
                     ? MakeRelativeSymlinkTarget(entry.SymlinkTarget, dest.Path)
                     : entry.SymlinkTarget;
-                try { _vfs.CreateSymlink(VfsPath.FromLocal(linkTarget), childDest); } catch { }
+                try { _vfs.CreateSymlink(VfsPath.FromLocal(linkTarget), childDest); } catch { prog.ErrorCount++; }
             }
             else if (entry.IsDirectory)
                 await CopyDirectoryAsync(childSrc, childDest, onConflict, conflictCallback, preserveAttributes, followSymlinks, stableSymlinks, preserveExt2Attributes, prog, progress, ct);
@@ -286,6 +289,9 @@ public sealed class FileOperations
         CancellationToken ct)
     {
         const int BufferSize = 64 * 1024;
+        // Note: TOCTOU — destExists was checked above; concurrent filesystem changes could
+        // cause OpenWrite to overwrite or create a file that appeared between the two calls.
+        // Acceptable for an interactive file manager; atomic rename would require temp-file dance.
         using var srcStream = _vfs.OpenRead(src);
         using var dstStream = _vfs.OpenWrite(dest);
 

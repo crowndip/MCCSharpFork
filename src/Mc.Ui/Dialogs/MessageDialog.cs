@@ -19,6 +19,7 @@ public static class MessageDialog
         ok.Accepting += (_, _) => Application.RequestStop(d);
         d.AddButton(ok);
         Application.Run(d);
+        d.Dispose();
     }
 
     public static bool Confirm(string title, string message, string yesText = "Yes", string noText = "No")
@@ -42,6 +43,7 @@ public static class MessageDialog
         d.AddButton(yes);
         d.AddButton(no);
         Application.Run(d);
+        d.Dispose();
         return result;
     }
 

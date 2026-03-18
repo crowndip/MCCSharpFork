@@ -16,7 +16,7 @@ internal static class ProcessHelper
                 Arguments       = $"-c \"{command.Replace("\"", "\\\"")}\"",
                 UseShellExecute = false,
             };
-            System.Diagnostics.Process.Start(psi);
+            using var proc = System.Diagnostics.Process.Start(psi);
         }
         catch { }
     }
@@ -32,7 +32,7 @@ internal static class ProcessHelper
                 UseShellExecute = false,
             };
             foreach (var a in args) psi.ArgumentList.Add(a);
-            var proc = System.Diagnostics.Process.Start(psi);
+            using var proc = System.Diagnostics.Process.Start(psi);
             return proc != null;
         }
         catch

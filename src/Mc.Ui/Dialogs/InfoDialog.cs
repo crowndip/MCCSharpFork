@@ -40,5 +40,6 @@ public static class InfoDialog
         ok.Accepting += (_, _) => Application.RequestStop(d);
         d.AddButton(ok);
         Application.Run(d);
+        d.Dispose();
     }
 }

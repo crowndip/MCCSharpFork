@@ -55,35 +55,44 @@ public sealed class TarVfsProvider : IVfsProvider
         using var stream = OpenArchiveStream(archive);
         using var reader = new TarReader(stream, leaveOpen: false);
 
-        while (reader.GetNextEntry() is { } entry)
+        while (true)
         {
-            var entryPath = "/" + entry.Name.TrimStart('/');
-            if (!entryPath.StartsWith(inner + "/", StringComparison.Ordinal)) continue;
+            TarEntry? entry;
+            try { entry = reader.GetNextEntry(); }
+            catch { break; } // corrupted entry — stop reading
+            if (entry == null) break;
 
-            var rel = entryPath[(inner.Length + 1)..].TrimStart('/');
-            if (string.IsNullOrEmpty(rel)) continue;
-
-            // Only direct children
-            var slash = rel.IndexOf('/');
-            var childName = slash >= 0 ? rel[..slash] : rel;
-            if (seen.Contains(childName)) continue;
-            seen.Add(childName);
-
-            bool isDir = slash >= 0 || entry.EntryType == TarEntryType.Directory;
-            var childInner = inner + "/" + childName;
-            entries.Add(new VfsDirEntry
+            try
             {
-                Name = childName,
-                FullPath = new VfsPath("tar", null, null, null, null, archive + "|" + childInner),
-                Size = isDir ? 0 : entry.Length,
-                IsDirectory = isDir,
-                ModificationTime = entry.ModificationTime.LocalDateTime,
-                Permissions = entry.Mode,
-                OwnerUid = entry.Uid,
-                OwnerGid = entry.Gid,
-                OwnerName = (entry as PosixTarEntry)?.UserName,
-                GroupName = (entry as PosixTarEntry)?.GroupName,
-            });
+                var entryPath = "/" + entry.Name.TrimStart('/');
+                if (!entryPath.StartsWith(inner + "/", StringComparison.Ordinal)) continue;
+
+                var rel = entryPath[(inner.Length + 1)..].TrimStart('/');
+                if (string.IsNullOrEmpty(rel)) continue;
+
+                // Only direct children
+                var slash = rel.IndexOf('/');
+                var childName = slash >= 0 ? rel[..slash] : rel;
+                if (seen.Contains(childName)) continue;
+                seen.Add(childName);
+
+                bool isDir = slash >= 0 || entry.EntryType == TarEntryType.Directory;
+                var childInner = inner + "/" + childName;
+                entries.Add(new VfsDirEntry
+                {
+                    Name = childName,
+                    FullPath = new VfsPath("tar", null, null, null, null, archive + "|" + childInner),
+                    Size = isDir ? 0 : entry.Length,
+                    IsDirectory = isDir,
+                    ModificationTime = entry.ModificationTime.LocalDateTime,
+                    Permissions = entry.Mode,
+                    OwnerUid = entry.Uid,
+                    OwnerGid = entry.Gid,
+                    OwnerName = (entry as PosixTarEntry)?.UserName,
+                    GroupName = (entry as PosixTarEntry)?.GroupName,
+                });
+            }
+            catch { /* skip corrupted entry */ }
         }
 
         return entries;
@@ -194,7 +203,8 @@ public sealed class TarVfsProvider : IVfsProvider
         return ext switch
         {
             ".gz" or ".tgz" => new GZipStream(raw, CompressionMode.Decompress),
-            ".bz2" or ".tbz2" => new BrotliStream(raw, CompressionMode.Decompress), // Note: bz2 not natively in .NET; using Brotli as placeholder
+            ".bz2" or ".tbz2" => throw new NotSupportedException(
+                $"bz2 decompression is not natively supported. Use a .tar.gz archive or extract '{archivePath}' with 7z first."),
             _ => raw,
         };
     }

@@ -166,6 +166,7 @@ public static class HotlistDialog
 
         RefreshList();
         Application.Run(d);
+        d.Dispose();
         return selected;
     }
 }
