@@ -899,20 +899,9 @@ public sealed class McApplication : Toplevel
             return;
         }
 
-        var editorWin = new Window
-        {
-            X = 0, Y = 0,
-            Width = Dim.Fill(),
-            Height = Dim.Fill(),
-            ColorScheme = McTheme.Dialog,
-        };
-        var editor = new EditorView(path);
-        editor.X = 0; editor.Y = 0;
-        editor.Width = Dim.Fill(); editor.Height = Dim.Fill();
-        editor.RequestClose += (_, _) => Application.RequestStop(editorWin);
-        editorWin.Title = editor.Title;
-        editorWin.Add(editor);
-        Application.Run(editorWin);
+        var screen = new EditorScreen(path);
+        Application.Run(screen);
+        screen.Dispose();
         RefreshPanels();
     }
 
@@ -3497,20 +3486,9 @@ public sealed class McApplication : Toplevel
         try { if (!File.Exists(path)) File.WriteAllText(path, string.Empty); }
         catch (Exception ex) { MessageDialog.Error(ex.Message); return; }
 
-        var editorWin = new Window
-        {
-            X = 0, Y = 0,
-            Width = Dim.Fill(),
-            Height = Dim.Fill(),
-            ColorScheme = McTheme.Dialog,
-        };
-        var editor = new EditorView(path);
-        editor.X = 0; editor.Y = 0;
-        editor.Width = Dim.Fill(); editor.Height = Dim.Fill();
-        editor.RequestClose += (_, _) => Application.RequestStop(editorWin);
-        editorWin.Title = editor.Title;
-        editorWin.Add(editor);
-        Application.Run(editorWin);
+        var screen = new EditorScreen(path);
+        Application.Run(screen);
+        screen.Dispose();
     }
 
     private static void ShowStatus(string message)
@@ -3857,19 +3835,9 @@ public sealed class McApplication : Toplevel
     /// <summary>Opens a file in the internal editor without refreshing history.</summary>
     private void EditFileDirectly(string path)
     {
-        var editorWin = new Window
-        {
-            X = 0, Y = 0,
-            Width = Dim.Fill(), Height = Dim.Fill(),
-            ColorScheme = McTheme.Dialog,
-        };
-        var editor = new EditorView(path);
-        editor.X = 0; editor.Y = 0;
-        editor.Width = Dim.Fill(); editor.Height = Dim.Fill();
-        editor.RequestClose += (_, _) => Application.RequestStop(editorWin);
-        editorWin.Title = editor.Title;
-        editorWin.Add(editor);
-        Application.Run(editorWin);
+        var screen = new EditorScreen(path);
+        Application.Run(screen);
+        screen.Dispose();
     }
 
     /// <summary>
@@ -4196,12 +4164,8 @@ public sealed class McApplication : Toplevel
             if (dir != null) _controller.NavigateTo(VfsPath.FromLocal(dir));
             RefreshPanels();
             // Open in editor
-            var editorWin = new Window { X = 0, Y = 0, Width = Dim.Fill(), Height = Dim.Fill(), ColorScheme = McTheme.Dialog };
-            var editor = new Mc.Editor.EditorView(chosen.Value.Path);
-            editor.X = 0; editor.Y = 0; editor.Width = Dim.Fill(); editor.Height = Dim.Fill();
-            editor.RequestClose += (_, _) => Application.RequestStop(editorWin);
-            editorWin.Title = editor.Title; editorWin.Add(editor);
-            Application.Run(editorWin); editorWin.Dispose();
+            var screen = new Mc.Editor.EditorScreen(chosen.Value.Path);
+            Application.Run(screen); screen.Dispose();
         }
         else
         {

@@ -415,15 +415,21 @@ public sealed class EditorController
     /// <summary>Load a new file into the editor, replacing current content. (#10)</summary>
     public void LoadFile(string path)
     {
-        _filePath = path;
-        var content = File.Exists(path) ? File.ReadAllText(path) : string.Empty;
+        _filePath = string.IsNullOrEmpty(path) ? null : path;
+        var content = (_filePath != null && File.Exists(_filePath)) ? File.ReadAllText(_filePath) : string.Empty;
         _buffer.SetContent(content);
         _cursorOffset = 0;
         _selectionStart = -1;
         _selectionEnd = -1;
         _undoStack.Clear();
         _redoStack.Clear();
-        Highlighter = SyntaxHighlighter.ForFile(path);
+        Highlighter = _filePath != null ? SyntaxHighlighter.ForFile(_filePath) : null;
+        Changed?.Invoke(this, EventArgs.Empty);
+    }
+
+    public void ReloadSyntax()
+    {
+        Highlighter = _filePath != null ? SyntaxHighlighter.ForFile(_filePath) : null;
         Changed?.Invoke(this, EventArgs.Empty);
     }
 
@@ -484,6 +490,197 @@ public sealed class EditorController
             count++; idx++;
         }
         return count;
+    }
+
+    // --- Bookmarks (Alt+K / Alt+J / Alt+I / Alt+O) ---
+
+    private readonly SortedSet<int> _bookmarks = new();
+
+    public bool HasBookmarkAt(int line) => _bookmarks.Contains(line);
+    public IEnumerable<int> Bookmarks => _bookmarks;
+
+    public void ToggleBookmark()
+    {
+        var (line, _) = _buffer.OffsetToLineCol(_cursorOffset);
+        if (!_bookmarks.Remove(line))
+            _bookmarks.Add(line);
+        Changed?.Invoke(this, EventArgs.Empty);
+    }
+
+    public void NextBookmark()
+    {
+        var (curLine, _) = _buffer.OffsetToLineCol(_cursorOffset);
+        var after = _bookmarks.GetViewBetween(curLine + 1, int.MaxValue);
+        int target = after.Count > 0 ? after.Min : (_bookmarks.Count > 0 ? _bookmarks.Min : -1);
+        if (target >= 0) { _cursorOffset = _buffer.LineColToOffset(target, 0); Changed?.Invoke(this, EventArgs.Empty); }
+    }
+
+    public void PrevBookmark()
+    {
+        var (curLine, _) = _buffer.OffsetToLineCol(_cursorOffset);
+        var before = _bookmarks.GetViewBetween(0, curLine > 0 ? curLine - 1 : 0);
+        int target = (curLine > 0 && before.Count > 0) ? before.Max : (_bookmarks.Count > 0 ? _bookmarks.Max : -1);
+        if (target >= 0) { _cursorOffset = _buffer.LineColToOffset(target, 0); Changed?.Invoke(this, EventArgs.Empty); }
+    }
+
+    public void FlushBookmarks()
+    {
+        _bookmarks.Clear();
+        Changed?.Invoke(this, EventArgs.Empty);
+    }
+
+    // --- Delete-word operations (Alt+Backspace / Alt+D) ---
+
+    public void DeleteToWordBegin()
+    {
+        int end = _cursorOffset;
+        while (_cursorOffset > 0 && !IsWordChar(_buffer[_cursorOffset - 1]))
+            _cursorOffset--;
+        while (_cursorOffset > 0 && IsWordChar(_buffer[_cursorOffset - 1]))
+            _cursorOffset--;
+        int start = _cursorOffset;
+        if (start < end)
+        {
+            var deleted = _buffer.Extract(start, end - start);
+            RecordUndo(new DeleteOp(start, deleted));
+            _buffer.Delete(start, end - start);
+            Changed?.Invoke(this, EventArgs.Empty);
+        }
+    }
+
+    public void DeleteToWordEnd()
+    {
+        int start = _cursorOffset;
+        while (_cursorOffset < _buffer.Length && !IsWordChar(_buffer[_cursorOffset]))
+            _cursorOffset++;
+        while (_cursorOffset < _buffer.Length && IsWordChar(_buffer[_cursorOffset]))
+            _cursorOffset++;
+        int end = _cursorOffset;
+        if (end > start)
+        {
+            var deleted = _buffer.Extract(start, end - start);
+            _cursorOffset = start;
+            RecordUndo(new DeleteOp(start, deleted));
+            _buffer.Delete(start, end - start);
+            Changed?.Invoke(this, EventArgs.Empty);
+        }
+    }
+
+    private static bool IsWordChar(char c) => char.IsLetterOrDigit(c) || c == '_';
+
+    // --- Insert / Save block ---
+
+    public void InsertFile(string path)
+    {
+        var content = File.ReadAllText(path);
+        InsertText(content);
+    }
+
+    public void SaveBlock(string path)
+    {
+        var (start, end) = GetSelectionOffsets();
+        if (start < 0) return;
+        var block = _buffer.Extract(start, end - start);
+        File.WriteAllText(path, block);
+    }
+
+    // --- Block indentation (Tab / Shift+Tab on selection) ---
+
+    public void ShiftBlockRight(int tabWidth)
+    {
+        if (!HasSelection) return;
+        var (selStart, selEnd) = GetSelectionOffsets();
+        var (startLine, _) = _buffer.OffsetToLineCol(selStart);
+        var (endLine, endCol) = _buffer.OffsetToLineCol(selEnd);
+        if (endCol == 0 && endLine > startLine) endLine--;
+        for (int ln = endLine; ln >= startLine; ln--)
+        {
+            int lineOff = _buffer.LineColToOffset(ln, 0);
+            string indent = new string(' ', tabWidth);
+            RecordUndo(new InsertOp(lineOff, indent));
+            _buffer.Insert(lineOff, indent);
+        }
+        Changed?.Invoke(this, EventArgs.Empty);
+    }
+
+    public void ShiftBlockLeft(int tabWidth)
+    {
+        if (!HasSelection) return;
+        var (selStart, selEnd) = GetSelectionOffsets();
+        var (startLine, _) = _buffer.OffsetToLineCol(selStart);
+        var (endLine, endCol) = _buffer.OffsetToLineCol(selEnd);
+        if (endCol == 0 && endLine > startLine) endLine--;
+        for (int ln = endLine; ln >= startLine; ln--)
+        {
+            var lineText = _buffer.GetLine(ln);
+            int spaces = 0;
+            while (spaces < tabWidth && spaces < lineText.Length &&
+                   (lineText[spaces] == ' ' || lineText[spaces] == '\t'))
+                spaces++;
+            if (spaces > 0)
+            {
+                int lineOff = _buffer.LineColToOffset(ln, 0);
+                var deleted = _buffer.Extract(lineOff, spaces);
+                RecordUndo(new DeleteOp(lineOff, deleted));
+                _buffer.Delete(lineOff, spaces);
+            }
+        }
+        Changed?.Invoke(this, EventArgs.Empty);
+    }
+
+    // --- Paragraph formatting (Alt+P) ---
+
+    public void FormatParagraph(int wrapWidth = 72)
+    {
+        var (curLine, _) = _buffer.OffsetToLineCol(_cursorOffset);
+        int lineCount = _buffer.GetLineCount();
+
+        int paraStart = curLine;
+        while (paraStart > 0 && !string.IsNullOrWhiteSpace(_buffer.GetLine(paraStart - 1)))
+            paraStart--;
+        int paraEnd = curLine;
+        while (paraEnd < lineCount - 1 && !string.IsNullOrWhiteSpace(_buffer.GetLine(paraEnd + 1)))
+            paraEnd++;
+
+        var firstLine = paraStart < lineCount ? _buffer.GetLine(paraStart) : string.Empty;
+        int indentLen = 0;
+        while (indentLen < firstLine.Length && (firstLine[indentLen] == ' ' || firstLine[indentLen] == '\t'))
+            indentLen++;
+        var indent = indentLen > 0 ? firstLine[..indentLen] : string.Empty;
+
+        var paraLines = Enumerable.Range(paraStart, paraEnd - paraStart + 1)
+            .Select(ln => ln < lineCount ? _buffer.GetLine(ln).TrimEnd() : string.Empty)
+            .ToList();
+        var words = string.Join(" ", paraLines.Select(l => l.Trim()))
+            .Split(' ', StringSplitOptions.RemoveEmptyEntries);
+
+        var resultLines = new List<string>();
+        var current = new System.Text.StringBuilder(indent);
+        foreach (var word in words)
+        {
+            int addLen = (current.Length == indent.Length ? 0 : 1) + word.Length;
+            if (current.Length + addLen > wrapWidth && current.Length > indent.Length)
+            {
+                resultLines.Add(current.ToString());
+                current.Clear(); current.Append(indent);
+            }
+            if (current.Length > indent.Length) current.Append(' ');
+            current.Append(word);
+        }
+        if (current.Length > indent.Length) resultLines.Add(current.ToString());
+        if (resultLines.Count == 0) return;
+
+        int startOff = _buffer.LineColToOffset(paraStart, 0);
+        var lastLineText = paraEnd < lineCount ? _buffer.GetLine(paraEnd) : string.Empty;
+        int endOff = _buffer.LineColToOffset(paraEnd, 0) + lastLineText.Length;
+        var oldText = _buffer.Extract(startOff, endOff - startOff);
+        var newText = string.Join("\n", resultLines);
+        RecordUndo(new DeleteOp(startOff, oldText));
+        _buffer.Delete(startOff, endOff - startOff);
+        RecordUndo(new InsertOp(startOff, newText));
+        _buffer.Insert(startOff, newText);
+        _cursorOffset = startOff;
+        Changed?.Invoke(this, EventArgs.Empty);
     }
 }
 
