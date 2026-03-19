@@ -105,6 +105,41 @@ public sealed class EditorView : View
             EscSeqUtils.CSI_SetCursorStyle(EscSeqUtils.DECSCUSR_Style.UserShape);
     }
 
+    /// <summary>
+    /// Tells Terminal.Gui where to place and show the hardware cursor after every redraw.
+    /// Without this override the base returns null, which causes the Windows Console driver
+    /// (cmd.exe / ConHost) to hide the cursor — making it invisible to the user.
+    /// ANSI terminals also benefit because the cursor is guaranteed to reappear after each
+    /// redraw regardless of escape-sequence support.
+    /// </summary>
+    public override System.Drawing.Point? PositionCursor()
+    {
+        int contentHeight = Viewport.Height - 1;
+        if (contentHeight <= 0) return null;
+
+        if (_hexMode)
+        {
+            var curRow = _hexCursorByte / HexBytesPerRow - _hexTopLine;
+            if (curRow < 0 || curRow >= contentHeight) return null;
+            int byteInRow = _hexCursorByte % HexBytesPerRow;
+            int curCol    = _hexCursorInAscii
+                ? HexAsciiStart() + byteInRow
+                : HexByteColumn(byteInRow) + _hexNibble;
+            if (curCol >= Viewport.Width) return null;
+            Move(curCol, curRow);
+            return new System.Drawing.Point(curCol, curRow);
+        }
+
+        var (cursorLine, cursorCol) = _editor.CursorPosition;
+        int gutter      = GutterWidth;
+        var screenLine  = cursorLine  - _topLine;
+        var screenCol   = gutter + cursorCol - _leftCol;
+        if (screenLine < 0 || screenLine >= contentHeight) return null;
+        if (screenCol  < gutter || screenCol >= Viewport.Width) return null;
+        Move(screenCol, screenLine);
+        return new System.Drawing.Point(screenCol, screenLine);
+    }
+
     /// <summary>When true, editing operations are blocked. Used for the internal viewer replacement.</summary>
     public bool IsReadOnly
     {
