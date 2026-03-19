@@ -13,7 +13,7 @@ namespace Mc.Ui.Tests;
 /// Tests for every top-level menu and every menu item in McApplication.
 /// The menu structure mirrors the original GNU Midnight Commander exactly,
 /// with the addition of our custom Tools menu.
-/// Order: Left | File | Command | Tools | Options | Right
+/// Order: Left | File | Command | Favorites | Drives | Compression | Tools | Options | Right
 /// </summary>
 [Collection("TUI Tests")]
 public sealed class McApplicationMenuTests
@@ -62,16 +62,19 @@ public sealed class McApplicationMenuTests
     // ==================================================================
 
     [Fact]
-    public void MenuBar_HasExactlySixTopLevelMenus()
-        => Assert.Equal(6, GetMenuBar().Menus.Length);
+    public void MenuBar_HasExactlyNineTopLevelMenus()
+        => Assert.Equal(9, GetMenuBar().Menus.Length);
 
     [Theory]
     [InlineData(0, "Left")]
     [InlineData(1, "File")]
     [InlineData(2, "Command")]
-    [InlineData(3, "Tools")]
-    [InlineData(4, "Options")]
-    [InlineData(5, "Right")]
+    [InlineData(3, "Favorites")]
+    [InlineData(4, "Drives")]
+    [InlineData(5, "Compression")]
+    [InlineData(6, "Tools")]
+    [InlineData(7, "Options")]
+    [InlineData(8, "Right")]
     public void TopLevel_Menu_TitleIsCorrect(int index, string expected)
         => Assert.Contains(expected, Title(GetMenu(index)));
 
@@ -227,7 +230,7 @@ public sealed class McApplicationMenuTests
     }
 
     // ==================================================================
-    // TOOLS MENU  (index 3) — custom addition for this .NET port
+    // TOOLS MENU  (index 6) — custom addition for this .NET port
     // ==================================================================
 
     [Theory]
@@ -242,7 +245,7 @@ public sealed class McApplicationMenuTests
     [InlineData("Compare with diff tool")]
     public void ToolsMenu_MenuItem_IsVisible(string partialTitle)
     {
-        var items = Items(GetMenu(3));
+        var items = Items(GetMenu(6));
         Assert.Contains(items, i => Title(i).Contains(partialTitle));
     }
 
@@ -258,19 +261,19 @@ public sealed class McApplicationMenuTests
     [InlineData("Compare with diff tool")]
     public void ToolsMenu_MenuItem_IsClickable(string partialTitle)
     {
-        var item = Items(GetMenu(3)).First(i => Title(i).Contains(partialTitle));
+        var item = Items(GetMenu(6)).First(i => Title(i).Contains(partialTitle));
         Assert.NotNull(item.Action);
     }
 
     [Fact]
     public void ToolsMenu_OpenTerminalHere_HasCtrlTShortcut()
     {
-        var item = Items(GetMenu(3)).First(i => Title(i).Contains("Open terminal here"));
+        var item = Items(GetMenu(6)).First(i => Title(i).Contains("Open terminal here"));
         Assert.Equal("Ctrl+T", item.Help);
     }
 
     // ==================================================================
-    // OPTIONS MENU  (index 4)
+    // OPTIONS MENU  (index 7)
     // ==================================================================
 
     [Theory]
@@ -285,7 +288,7 @@ public sealed class McApplicationMenuTests
     [InlineData("About")]
     public void OptionsMenu_MenuItem_IsVisible(string partialTitle)
     {
-        var items = Items(GetMenu(4));
+        var items = Items(GetMenu(7));
         Assert.Contains(items, i => Title(i).Contains(partialTitle));
     }
 
@@ -297,12 +300,12 @@ public sealed class McApplicationMenuTests
     [InlineData("About")]
     public void OptionsMenu_MenuItem_IsClickable(string partialTitle)
     {
-        var item = Items(GetMenu(4)).First(i => Title(i).Contains(partialTitle));
+        var item = Items(GetMenu(7)).First(i => Title(i).Contains(partialTitle));
         Assert.NotNull(item.Action);
     }
 
     // ==================================================================
-    // RIGHT PANEL MENU  (index 5) — identical structure to Left
+    // RIGHT PANEL MENU  (index 8) — identical structure to Left
     // ==================================================================
 
     [Theory]
@@ -319,7 +322,7 @@ public sealed class McApplicationMenuTests
     [InlineData("Rescan")]
     public void RightPanel_MenuItem_IsVisible(string partialTitle)
     {
-        var items = Items(GetMenu(5));
+        var items = Items(GetMenu(8));
         Assert.Contains(items, i => Title(i).Contains(partialTitle));
     }
 
@@ -329,14 +332,14 @@ public sealed class McApplicationMenuTests
     [InlineData("Rescan")]
     public void RightPanel_MenuItem_IsClickable(string partialTitle)
     {
-        var item = Items(GetMenu(5)).First(i => Title(i).Contains(partialTitle));
+        var item = Items(GetMenu(8)).First(i => Title(i).Contains(partialTitle));
         Assert.NotNull(item.Action);
     }
 
     [Fact]
     public void RightPanel_Rescan_HasCtrlRShortcut()
     {
-        var item = Items(GetMenu(5)).First(i => Title(i).Contains("Rescan"));
+        var item = Items(GetMenu(8)).First(i => Title(i).Contains("Rescan"));
         Assert.Equal("Ctrl+R", item.Help);
     }
 
@@ -354,7 +357,7 @@ public sealed class McApplicationMenuTests
     [Fact]
     public void RightPanel_Rescan_ExecutesWithoutException()
     {
-        var item = Items(GetMenu(5)).First(i => Title(i).Contains("Rescan"));
+        var item = Items(GetMenu(8)).First(i => Title(i).Contains("Rescan"));
         Assert.Null(Record.Exception(() => item.Action!.Invoke()));
     }
 
@@ -368,7 +371,7 @@ public sealed class McApplicationMenuTests
     [Fact]
     public void Options_SaveSetup_ExecutesWithoutException()
     {
-        var item = Items(GetMenu(4)).First(i => Title(i).Contains("Save setup"));
+        var item = Items(GetMenu(7)).First(i => Title(i).Contains("Save setup"));
         var ex = Record.Exception(() => item.Action!.Invoke());
         Assert.True(ex is null || ex is DirectoryNotFoundException or IOException
                     or ArgumentException or ArgumentNullException,

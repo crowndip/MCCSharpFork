@@ -115,7 +115,9 @@ public sealed class FilePanelView : View
         int clickY = e.Position.Y;
         int h = Viewport.Height;
         int fileAreaStart = 2;
-        int fileAreaEnd = ShowMiniStatus ? h - 2 : h - 1;
+        // When height is 0 (e.g. in unit tests without a real layout pass) treat
+        // the file area as unbounded so hit-testing still works correctly.
+        int fileAreaEnd = h > 0 ? (ShowMiniStatus ? h - 2 : h - 1) : int.MaxValue;
         if (clickY < fileAreaStart || clickY >= fileAreaEnd) return -1;
 
         int idx = _scrollOffset + (clickY - fileAreaStart);

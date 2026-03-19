@@ -49,7 +49,8 @@ public sealed class FileOperationsTests
         var destStream = new MemoryStream();
 
         var entry = MakeFileEntry("file.txt", srcContent.Length);
-        mock.Setup(p => p.Stat(It.IsAny<VfsPath>())).Returns(entry);
+        mock.Setup(p => p.Stat(It.Is<VfsPath>(v => v.Path == "/src/file.txt"))).Returns(entry);
+        mock.Setup(p => p.Stat(It.Is<VfsPath>(v => v.Path != "/src/file.txt"))).Throws<FileNotFoundException>();
         mock.Setup(p => p.OpenRead(It.IsAny<VfsPath>())).Returns(new MemoryStream(srcContent));
         mock.Setup(p => p.OpenWrite(It.IsAny<VfsPath>())).Returns(destStream);
 
@@ -197,7 +198,8 @@ public sealed class FileOperationsTests
         var capturedDestPath = string.Empty;
 
         var entry = MakeFileEntry("file.txt", 5);
-        mock.Setup(p => p.Stat(It.IsAny<VfsPath>())).Returns(entry);
+        mock.Setup(p => p.Stat(It.Is<VfsPath>(v => v.Path == "/src/file.txt"))).Returns(entry);
+        mock.Setup(p => p.Stat(It.Is<VfsPath>(v => v.Path != "/src/file.txt"))).Throws<FileNotFoundException>();
         mock.Setup(p => p.OpenRead(It.IsAny<VfsPath>())).Returns(new MemoryStream(new byte[5]));
         mock.Setup(p => p.OpenWrite(It.IsAny<VfsPath>()))
             .Callback<VfsPath>(p => capturedDestPath = p.Path)
@@ -234,7 +236,7 @@ public sealed class FileOperationsTests
         m1.Setup(p => p.Stat(It.Is<VfsPath>(v => v.Path == "/src/file.txt")))
           .Callback(() => srcStatCountWithout++)
           .Returns(entry);
-        m1.Setup(p => p.Stat(It.Is<VfsPath>(v => v.Path != "/src/file.txt"))).Returns(entry);
+        m1.Setup(p => p.Stat(It.Is<VfsPath>(v => v.Path != "/src/file.txt"))).Throws<FileNotFoundException>();
         m1.Setup(p => p.OpenRead(It.IsAny<VfsPath>())).Returns(() => new MemoryStream(new byte[10]));
         m1.Setup(p => p.OpenWrite(It.IsAny<VfsPath>())).Returns(() => new MemoryStream());
         var reg1 = new VfsRegistry();
@@ -250,7 +252,7 @@ public sealed class FileOperationsTests
         m2.Setup(p => p.Stat(It.Is<VfsPath>(v => v.Path == "/src/file.txt")))
           .Callback(() => srcStatCountWith++)
           .Returns(entry);
-        m2.Setup(p => p.Stat(It.Is<VfsPath>(v => v.Path != "/src/file.txt"))).Returns(entry);
+        m2.Setup(p => p.Stat(It.Is<VfsPath>(v => v.Path != "/src/file.txt"))).Throws<FileNotFoundException>();
         m2.Setup(p => p.OpenRead(It.IsAny<VfsPath>())).Returns(() => new MemoryStream(new byte[10]));
         m2.Setup(p => p.OpenWrite(It.IsAny<VfsPath>())).Returns(() => new MemoryStream());
         var reg2 = new VfsRegistry();
