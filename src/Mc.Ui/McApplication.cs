@@ -771,7 +771,7 @@ public sealed class McApplication : Toplevel
     /// Otherwise returns <paramref name="vfsPath"/> unchanged and sets <paramref name="tempDir"/> to null.
     /// The caller is responsible for deleting <paramref name="tempDir"/> when done.
     /// </summary>
-    private static string? ResolveArchiveEntryToLocalPath(string vfsPath, out string? tempDir)
+    private string? ResolveArchiveEntryToLocalPath(string vfsPath, out string? tempDir)
     {
         tempDir = null;
         var pipeIdx = vfsPath.IndexOf('|');
@@ -809,9 +809,17 @@ public sealed class McApplication : Toplevel
             else
             {
                 // Use 7z CLI for other archive types (7z, tar, tgz, etc.)
+                var sevenZipExe = ResolveSevenZip();
+                if (sevenZipExe == null)
+                {
+                    Directory.Delete(tempDir, recursive: true);
+                    tempDir = null;
+                    MessageDialog.Error("7-Zip executable not found.\nSet the path in Options → Configuration → 7-Zip provider.");
+                    return null;
+                }
                 var psi = new System.Diagnostics.ProcessStartInfo
                 {
-                    FileName               = "7z",
+                    FileName               = sevenZipExe,
                     WorkingDirectory       = tempDir,
                     UseShellExecute        = false,
                     RedirectStandardOutput = true,
@@ -828,7 +836,7 @@ public sealed class McApplication : Toplevel
                 {
                     Directory.Delete(tempDir, recursive: true);
                     tempDir = null;
-                    MessageDialog.Error("7z is not installed. Install p7zip-full to open this archive type.");
+                    MessageDialog.Error($"Failed to launch 7-Zip ({sevenZipExe}).\nCheck the path in Options → Configuration → 7-Zip provider.");
                     return null;
                 }
                 proc?.WaitForExit();
