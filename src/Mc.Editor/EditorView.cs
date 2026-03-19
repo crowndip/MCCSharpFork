@@ -615,8 +615,15 @@ public sealed class EditorView : View
             return true;
         }
 
+        // Strip modifier masks from the base key code so that cursor/navigation keys are
+        // matched correctly on all platforms.  On Windows ConHost, Terminal.Gui's
+        // WindowsDriver ORs ShiftMask (and sometimes CtrlMask) into KeyCode for
+        // cursor/navigation keys, while on ANSI terminals it does not.  Stripping the
+        // masks here makes the three blocks below work uniformly on all drivers.
+        var bareCode = keyEvent.KeyCode & ~(KeyCode.ShiftMask | KeyCode.CtrlMask | KeyCode.AltMask);
+
         // Ctrl+Shift: extend selection to word / file start/end / page
-        if (keyEvent.IsShift && keyEvent.IsCtrl && keyEvent.KeyCode is
+        if (keyEvent.IsShift && keyEvent.IsCtrl && bareCode is
             KeyCode.Home or KeyCode.End or
             KeyCode.CursorLeft or KeyCode.CursorRight or
             KeyCode.CursorUp or KeyCode.CursorDown or
@@ -635,7 +642,7 @@ public sealed class EditorView : View
         }
 
         // Shift+Arrow: extend selection (stream or column mode)
-        if (keyEvent.IsShift && keyEvent.KeyCode is
+        if (keyEvent.IsShift && bareCode is
             KeyCode.CursorUp or KeyCode.CursorDown or
             KeyCode.CursorLeft or KeyCode.CursorRight or
             KeyCode.Home or KeyCode.End or
@@ -655,7 +662,7 @@ public sealed class EditorView : View
         }
 
         // Any non-shift move cancels selection
-        if (_selecting && keyEvent.KeyCode is
+        if (_selecting && bareCode is
             KeyCode.CursorUp or KeyCode.CursorDown or
             KeyCode.CursorLeft or KeyCode.CursorRight or
             KeyCode.Home or KeyCode.End or
@@ -1717,7 +1724,9 @@ public sealed class EditorView : View
 
     private void MoveWithShift(Key key)
     {
-        switch (key.KeyCode)
+        // Strip modifier masks so the cases match regardless of whether the driver
+        // encodes the Shift modifier inside KeyCode or only in Key.IsShift.
+        switch (key.KeyCode & ~(KeyCode.ShiftMask | KeyCode.CtrlMask | KeyCode.AltMask))
         {
             case KeyCode.CursorUp:    _editor.MoveUp();                       break;
             case KeyCode.CursorDown:  _editor.MoveDown();                     break;
@@ -1732,7 +1741,7 @@ public sealed class EditorView : View
 
     private void MoveWithCtrlShift(Key key)
     {
-        switch (key.KeyCode)
+        switch (key.KeyCode & ~(KeyCode.ShiftMask | KeyCode.CtrlMask | KeyCode.AltMask))
         {
             case KeyCode.Home:        _editor.MoveToStart();                  break;
             case KeyCode.End:         _editor.MoveToEnd();                    break;
