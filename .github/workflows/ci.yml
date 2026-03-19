@@ -28,7 +28,7 @@ jobs:
         run: dotnet build MidnightCommander.sln --no-restore -c Release
 
       - name: Run tests
-        run: dotnet test MidnightCommander.sln --no-build -c Release --logger "console;verbosity=normal"
+        run: dotnet test MidnightCommander.sln --no-build -c Release --logger "console;verbosity=normal" --blame-hang-timeout 60s
 
   publish:
     name: Publish self-contained (${{ matrix.rid }})
