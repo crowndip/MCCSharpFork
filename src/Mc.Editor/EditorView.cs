@@ -298,7 +298,8 @@ public sealed class EditorView : View
         for (int i = 0; i < width; i++, pos++)
         {
             char ch = pos < line.Length ? line[pos] : ' ';
-            bool inSel = IsInSelection(row + _topLine, pos, lineStartOffset + pos);
+            int effectiveOffset = pos < line.Length ? lineStartOffset + pos : lineStartOffset + line.Length;
+            bool inSel = IsInSelection(row + _topLine, pos, effectiveOffset);
             Terminal.Gui.Attribute attr;
             if (inSel)
                 attr = new Terminal.Gui.Attribute(Color.Black, Color.Cyan);
@@ -348,7 +349,8 @@ public sealed class EditorView : View
             int pos = leftCol + i;
             int charOffset = lineStartOffset + pos;
             char ch = pos < line.Length ? line[pos] : ' ';
-            bool inSel = IsInSelection(row + _topLine, pos, charOffset);
+            int effectiveOffset = pos < line.Length ? charOffset : lineStartOffset + line.Length;
+            bool inSel = IsInSelection(row + _topLine, pos, effectiveOffset);
             Terminal.Gui.Attribute attr;
             if (inSel)
                 attr = new Terminal.Gui.Attribute(Color.Black, Color.Cyan);
