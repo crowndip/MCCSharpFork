@@ -7,7 +7,7 @@ namespace Mc.Editor;
 /// A gap buffer keeps a "gap" at the cursor position so insertions/deletions
 /// near the cursor are O(1). Equivalent to editbuffer.c in the original C codebase.
 /// </summary>
-public sealed class TextBuffer
+public sealed class TextBuffer : ITextBuffer
 {
     private char[] _buf;
     private int _gapStart;    // index of first gap char
@@ -39,6 +39,7 @@ public sealed class TextBuffer
         }
     }
 
+    // GetText() is the ITextBuffer implementation; ToString() is kept for string interop.
     public string GetText() => ToString();
 
     public override string ToString()
@@ -49,14 +50,14 @@ public sealed class TextBuffer
         return sb.ToString();
     }
 
-    public string GetLine(int lineNumber)
+    public string GetLine(long lineNumber)
     {
         var text = ToString();
         var lines = text.Split('\n');
-        return lineNumber >= 0 && lineNumber < lines.Length ? lines[lineNumber] : string.Empty;
+        return lineNumber >= 0 && lineNumber < lines.Length ? lines[(int)lineNumber] : string.Empty;
     }
 
-    public int GetLineCount()
+    public long GetLineCount()
     {
         int count = 1;
         for (int i = 0; i < Length; i++)
@@ -64,7 +65,7 @@ public sealed class TextBuffer
         return count;
     }
 
-    public (int Line, int Column) OffsetToLineCol(int offset)
+    public (long Line, int Column) OffsetToLineCol(int offset)
     {
         int line = 0, col = 0;
         for (int i = 0; i < offset && i < Length; i++)
@@ -75,7 +76,7 @@ public sealed class TextBuffer
         return (line, col);
     }
 
-    public int LineColToOffset(int line, int col)
+    public int LineColToOffset(long line, int col)
     {
         int currentLine = 0, offset = 0;
         while (offset < Length && currentLine < line)

@@ -11,7 +11,7 @@ namespace Mc.Editor;
 public sealed class EditorView : View
 {
     private readonly EditorController _editor;
-    private int _topLine;
+    private long _topLine;
     private int _leftCol;
     private bool _insertMode = true;
     private string? _clipboardText;
@@ -23,7 +23,7 @@ public sealed class EditorView : View
 
     // Column / rectangular block mode (Alt+B)
     private bool _colBlock;
-    private int  _colBlockAnchorLine;
+    private long _colBlockAnchorLine;
     private int  _colBlockAnchorCol;
 
     // Syntax-highlighting toggle
@@ -69,7 +69,7 @@ public sealed class EditorView : View
     private DateTime _lastClickTime = DateTime.MinValue;
     private int _lastClickLine = -1;
 
-    // Line-number gutter width
+    // Line-number gutter width (GetLineCount returns long)
     private int GutterWidth => _showLineNumbers ? _editor.Buffer.GetLineCount().ToString().Length + 1 : 0;
 
     public event EventHandler? RequestClose;
@@ -145,9 +145,10 @@ public sealed class EditorView : View
 
         var (cursorLine, cursorCol) = _editor.CursorPosition;
         int gutter      = GutterWidth;
-        var screenLine  = cursorLine  - _topLine;
+        long screenLineLong = cursorLine - _topLine;
+        if (screenLineLong < 0 || screenLineLong >= contentHeight) return null;
+        int screenLine  = (int)screenLineLong;
         var screenCol   = gutter + cursorCol - _leftCol;
-        if (screenLine < 0 || screenLine >= contentHeight) return null;
         if (screenCol  < gutter || screenCol >= Viewport.Width) return null;
         Move(screenCol, screenLine);
         return new System.Drawing.Point(screenCol, screenLine);
@@ -181,7 +182,8 @@ public sealed class EditorView : View
                 ? $" [{_editor.Highlighter.SyntaxName}]"
                 : string.Empty;
             var total = _editor.Buffer.GetLineCount();
-            return $"[{colFlag}{modFlag}{recFlag}{ovrFlag}{roFlag}] {col + 1} L:[{ln + 1}/{total}] {file}{syntaxName}";
+            var largeFlag = _editor.IsLargeFile ? " [LARGE-VIEW]" : string.Empty;
+            return $"[{colFlag}{modFlag}{recFlag}{ovrFlag}{roFlag}] {col + 1} L:[{ln + 1}/{total}] {file}{syntaxName}{largeFlag}";
         }
     }
 
@@ -215,9 +217,11 @@ public sealed class EditorView : View
         if (cursorCol >= _leftCol + textWidth) _leftCol = cursorCol - textWidth + 1;
         if (_leftCol < 0) _leftCol = 0;
 
+        long totalLines = _editor.Buffer.GetLineCount();
+
         for (int row = 0; row < contentHeight; row++)
         {
-            int lineNo = _topLine + row;
+            long lineNo = _topLine + row;
             Move(0, row);
 
             // Line-number gutter
@@ -225,15 +229,15 @@ public sealed class EditorView : View
             {
                 var bookmarkAttr = new Terminal.Gui.Attribute(Color.BrightYellow, Color.DarkGray);
                 var gutterAttr   = new Terminal.Gui.Attribute(Color.Gray, Color.Black);
-                Driver!.SetAttribute(lineNo < _editor.Buffer.GetLineCount() && _editor.HasBookmarkAt(lineNo)
+                Driver!.SetAttribute(lineNo < totalLines && _editor.HasBookmarkAt(lineNo)
                     ? bookmarkAttr : gutterAttr);
-                if (lineNo < _editor.Buffer.GetLineCount())
+                if (lineNo < totalLines)
                     Driver!.AddStr((lineNo + 1).ToString().PadLeft(gutter - 1) + " ");
                 else
                     Driver!.AddStr(new string(' ', gutter));
             }
 
-            if (lineNo >= _editor.Buffer.GetLineCount())
+            if (lineNo >= totalLines)
             {
                 Driver!.SetAttribute(ColorScheme!.Normal);
                 Driver!.AddStr(new string(' ', textWidth));
@@ -277,12 +281,12 @@ public sealed class EditorView : View
         Driver!.AddStr(status.PadRight(viewport.Width));
 
         // Position the terminal cursor
-        var screenLine = cursorLine - _topLine;
-        var screenCol  = gutter + cursorCol - _leftCol;
-        if (screenLine >= 0 && screenLine < contentHeight &&
-            screenCol >= gutter && screenCol < viewport.Width)
+        long screenLineLong2 = cursorLine - _topLine;
+        var screenCol2 = gutter + cursorCol - _leftCol;
+        if (screenLineLong2 >= 0 && screenLineLong2 < contentHeight &&
+            screenCol2 >= gutter && screenCol2 < viewport.Width)
         {
-            Move(screenCol, screenLine);
+            Move(screenCol2, (int)screenLineLong2);
         }
         return false;
     }
@@ -300,7 +304,7 @@ public sealed class EditorView : View
         {
             char ch = pos < line.Length ? line[pos] : ' ';
             int effectiveOffset = pos < line.Length ? lineStartOffset + pos : lineStartOffset + line.Length;
-            bool inSel = IsInSelection(row + _topLine, pos, effectiveOffset);
+            bool inSel = IsInSelection(_topLine + row, pos, effectiveOffset);
             Terminal.Gui.Attribute attr;
             if (inSel)
                 attr = new Terminal.Gui.Attribute(Color.Black, Color.Cyan);
@@ -322,15 +326,15 @@ public sealed class EditorView : View
         }
     }
 
-    private bool IsInSelection(int lineNo, int col, int charOffset)
+    private bool IsInSelection(long lineNo, int col, int charOffset)
     {
         if (_colBlock && _selecting)
         {
             var (curLine, curCol) = _editor.CursorPosition;
-            int top   = Math.Min(_colBlockAnchorLine, curLine);
-            int bot   = Math.Max(_colBlockAnchorLine, curLine);
-            int left  = Math.Min(_colBlockAnchorCol,  curCol);
-            int right = Math.Max(_colBlockAnchorCol,  curCol);
+            long top   = Math.Min(_colBlockAnchorLine, curLine);
+            long bot   = Math.Max(_colBlockAnchorLine, curLine);
+            int left   = Math.Min(_colBlockAnchorCol,  curCol);
+            int right  = Math.Max(_colBlockAnchorCol,  curCol);
             return lineNo >= top && lineNo <= bot && col >= left && col <= right;
         }
         var (selStart, selEnd) = _editor.GetSelectionOffsets();
@@ -351,7 +355,7 @@ public sealed class EditorView : View
             int charOffset = lineStartOffset + pos;
             char ch = pos < line.Length ? line[pos] : ' ';
             int effectiveOffset = pos < line.Length ? charOffset : lineStartOffset + line.Length;
-            bool inSel = IsInSelection(row + _topLine, pos, effectiveOffset);
+            bool inSel = IsInSelection(_topLine + row, pos, effectiveOffset);
             Terminal.Gui.Attribute attr;
             if (inSel)
                 attr = new Terminal.Gui.Attribute(Color.Black, Color.Cyan);
@@ -458,8 +462,8 @@ public sealed class EditorView : View
         int sCol = e.Position.X - gutter;
         if (sRow >= 0 && sRow < contentHeight && sCol >= 0)
         {
-            int targetLine = _topLine + sRow;
-            int targetCol  = _leftCol + sCol;
+            long targetLine = _topLine + sRow;
+            int targetCol   = _leftCol + sCol;
             if (targetLine < _editor.Buffer.GetLineCount())
             {
                 var lineText = _editor.Buffer.GetLine(targetLine);
@@ -470,7 +474,7 @@ public sealed class EditorView : View
                 {
                     // Check for triple-click: second click within 400ms on same line
                     var now = DateTime.UtcNow;
-                    if ((now - _lastClickTime).TotalMilliseconds <= 400 && _lastClickLine == targetLine)
+                    if ((now - _lastClickTime).TotalMilliseconds <= 400 && _lastClickLine == (int)Math.Min(targetLine, int.MaxValue))
                     {
                         // Triple-click: select entire line
                         _editor.MoveToLineStart();
@@ -489,7 +493,7 @@ public sealed class EditorView : View
                         _editor.ExtendSelection();
                         _selecting = true;
                         _lastClickTime = now;
-                        _lastClickLine = targetLine;
+                        _lastClickLine = (int)Math.Min(targetLine, int.MaxValue);
                     }
                 }
                 else if (e.Flags.HasFlag(MouseFlags.Button1Pressed))
@@ -517,8 +521,8 @@ public sealed class EditorView : View
         int screenCol = e.Position.X - gutter;
         if (screenRow >= 0 && screenRow < contentHeight && screenCol >= 0)
         {
-            int targetLine = _topLine + screenRow;
-            int targetCol  = _leftCol + screenCol;
+            long targetLine = _topLine + screenRow;
+            int targetCol   = _leftCol + screenCol;
             if (targetLine < _editor.Buffer.GetLineCount())
             {
                 var lineText = _editor.Buffer.GetLine(targetLine);
@@ -562,7 +566,7 @@ public sealed class EditorView : View
             }
             else
             {
-                _topLine = Math.Min(Math.Max(0, _editor.Buffer.GetLineCount() - 1), _topLine + 3);
+                _topLine = Math.Min(Math.Max(0L, _editor.Buffer.GetLineCount() - 1), _topLine + 3);
                 _lockScroll = true;
             }
             SetNeedsDraw();
@@ -764,7 +768,7 @@ public sealed class EditorView : View
                 SetNeedsDraw();
                 return true;
             case KeyCode.CursorDown when keyEvent.IsCtrl:
-                _topLine = Math.Min(Math.Max(0, _editor.Buffer.GetLineCount() - 1), _topLine + 1);
+                _topLine = Math.Min(Math.Max(0L, _editor.Buffer.GetLineCount() - 1), _topLine + 1);
                 _lockScroll = true;
                 SetNeedsDraw();
                 return true;
@@ -995,6 +999,47 @@ public sealed class EditorView : View
             ShowTabTws         = _showTabTws,
             ConfirmSave        = _confirmSave,
         };
+    }
+
+    /// <summary>
+    /// For large files: prompt the user and load the full file into memory for editing.
+    /// </summary>
+    public void ExecuteLoadFullFile()
+    {
+        if (!_editor.IsLargeFile) return;
+        var info = new FileInfo(_editor.FilePath!);
+        var sizeMb = info.Length / (1024 * 1024);
+        var choice = MessageBox.Query("Large File",
+            $"This file is {sizeMb} MB. Loading it fully will use that much RAM.\n" +
+            "The editor will become editable but may be slow on very large files.\n\n" +
+            "Load the full file for editing?",
+            "Load", "Cancel");
+        if (choice != 0) return;
+        try
+        {
+            _editor.LoadFullFile();
+            _isReadOnly = false;
+            EditorTitleChanged?.Invoke(this, EventArgs.Empty);
+            SetNeedsDraw();
+        }
+        catch (Exception ex) { MessageBox.ErrorQuery("Load Failed", ex.Message, "OK"); }
+    }
+
+    /// <summary>
+    /// Get full buffer text for operations that need it (word complete, bracket match, etc.).
+    /// Returns null and shows a message if the file is too large to load at once.
+    /// </summary>
+    private string? GetBufferTextSafe()
+    {
+        if (_editor.IsLargeFile)
+        {
+            MessageBox.Query("Not Available",
+                "This operation is not available for large files.\n" +
+                "Use Command > Load Full File to enable editing and all features.",
+                "OK");
+            return null;
+        }
+        return _editor.Buffer.GetText();
     }
 
     public void ExecuteSave()
@@ -1651,7 +1696,8 @@ public sealed class EditorView : View
 
     private void WordComplete()
     {
-        var text   = _editor.Buffer.ToString();
+        var text   = GetBufferTextSafe();
+        if (text == null) return;
         var cursor = _editor.CursorOffset;
         var wordStart = cursor;
         while (wordStart > 0 && (char.IsLetterOrDigit(text[wordStart - 1]) || text[wordStart - 1] == '_'))
@@ -1846,7 +1892,8 @@ public sealed class EditorView : View
 
     private void ShowSpellCheck()
     {
-        var text   = _editor.Buffer.ToString();
+        var text   = GetBufferTextSafe();
+        if (text == null) return;
         var cursor = _editor.CursorOffset;
         int ws = cursor; while (ws > 0 && char.IsLetter(text[ws - 1])) ws--;
         int we = cursor; while (we < text.Length && char.IsLetter(text[we])) we++;
@@ -1912,7 +1959,8 @@ public sealed class EditorView : View
 
     private void GoToMatchingBracket()
     {
-        var text = _editor.Buffer.ToString();
+        var text = GetBufferTextSafe();
+        if (text == null) return;
         var pos  = _editor.CursorOffset;
         if (pos >= text.Length) return;
         var ch = text[pos];
@@ -2049,7 +2097,7 @@ public sealed class EditorView : View
         }
         else
         {
-            inputText = _editor.Buffer.ToString();
+            inputText = _editor.Buffer.GetText();
         }
         try
         {
@@ -2245,11 +2293,11 @@ public sealed class EditorView : View
         if (_editor.FilePath != null && File.Exists(_editor.FilePath))
         {
             try { _hexBytes = File.ReadAllBytes(_editor.FilePath); }
-            catch { _hexBytes = System.Text.Encoding.UTF8.GetBytes(_editor.Buffer.ToString()); }
+            catch { _hexBytes = System.Text.Encoding.UTF8.GetBytes(_editor.Buffer.GetText()); }
         }
         else
         {
-            _hexBytes = System.Text.Encoding.UTF8.GetBytes(_editor.Buffer.ToString());
+            _hexBytes = System.Text.Encoding.UTF8.GetBytes(_editor.Buffer.GetText());
         }
         _hexCursorByte    = 0;
         _hexTopLine       = 0;

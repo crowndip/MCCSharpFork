@@ -131,6 +131,8 @@ public sealed class EditorScreen : Toplevel
                 null!,
                 new MenuItem("_Refresh screen",       "Ctrl+L",   () => _view.ExecuteRefresh()),
                 null!,
+                new MenuItem("_Load full file for editing…", string.Empty, () => _view.ExecuteLoadFullFile()),
+                null!,
                 new MenuItem("Start/Stop macro _record", "Ctrl+R",() => _view.ExecuteStartStopMacro()),
                 null!,
                 new MenuItem("_Spell check word",    "Ctrl+F5",   () => _view.ExecuteSpellCheck()),

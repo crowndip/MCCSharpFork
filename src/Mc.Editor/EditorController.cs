@@ -9,7 +9,7 @@ namespace Mc.Editor;
 /// </summary>
 public sealed class EditorController
 {
-    private readonly TextBuffer _buffer;
+    private ITextBuffer _buffer;
     private readonly Stack<EditOperation> _undoStack = new();
     private readonly Stack<EditOperation> _redoStack = new();
     private string? _filePath;
@@ -19,13 +19,18 @@ public sealed class EditorController
 
     // Search state (persists between F7 presses)
     public SearchOptions LastSearch { get; set; } = new();
-    private int _lastSearchOffset;
+    private int  _lastSearchOffset;      // window-relative (or absolute for TextBuffer)
+    private long _lastAbsSearchOffset;   // absolute file char offset (LargeFileBuffer only)
 
-    public TextBuffer Buffer => _buffer;
+    /// <summary>File size threshold above which large-file mode is used (10 MB).</summary>
+    public const long LargeFileThresholdBytes = LargeFileBuffer.LargeFileThresholdBytes;
+
+    public ITextBuffer Buffer => _buffer;
     public string? FilePath => _filePath;
     public bool IsModified => _buffer.IsModified;
+    public bool IsLargeFile => _buffer is LargeFileBuffer;
     public int CursorOffset => _cursorOffset;
-    public (int Line, int Column) CursorPosition => _buffer.OffsetToLineCol(_cursorOffset);
+    public (long Line, int Column) CursorPosition => _buffer.OffsetToLineCol(_cursorOffset);
     public bool HasSelection => _selectionStart >= 0 && _selectionEnd >= 0 && _selectionStart != _selectionEnd;
 
     // Editor display options (from McSettings) (#23 #42)
@@ -50,15 +55,26 @@ public sealed class EditorController
     public EditorController(string? filePath = null)
     {
         _filePath = filePath;
-        string? content = null;
         if (filePath != null && File.Exists(filePath))
-            content = File.ReadAllText(filePath);
-        _buffer = new TextBuffer(content);
-        if (filePath != null)
         {
-            var firstLine = content?.Split('\n').FirstOrDefault() ?? string.Empty;
+            var info = new FileInfo(filePath);
+            if (info.Length > LargeFileThresholdBytes)
+            {
+                _buffer = LargeFileBuffer.Open(filePath);
+                IsReadOnly = true; // view-only until user chooses to load fully
+                Highlighter = SyntaxHighlighter.ForFile(filePath);
+                if (SavePosition)
+                {
+                    var (line, col) = LoadFilePosition(filePath);
+                    _cursorOffset = _buffer.LineColToOffset(
+                        Math.Min(line, _buffer.GetLineCount() - 1), col);
+                }
+                return;
+            }
+            var content = File.ReadAllText(filePath);
+            _buffer = new TextBuffer(content);
+            var firstLine = content.Split('\n').FirstOrDefault() ?? string.Empty;
             Highlighter = SyntaxHighlighter.ForFile(filePath, firstLine);
-            // Restore saved cursor position
             if (SavePosition)
             {
                 var (line, col) = LoadFilePosition(filePath);
@@ -66,6 +82,31 @@ public sealed class EditorController
                     Math.Min(line, _buffer.GetLineCount() - 1), col);
             }
         }
+        else
+        {
+            _buffer = new TextBuffer(null);
+            if (filePath != null)
+                Highlighter = SyntaxHighlighter.ForFile(filePath);
+        }
+    }
+
+    /// <summary>
+    /// Load the full file content into memory so the file can be edited.
+    /// Converts from large-file view mode to an in-memory gap buffer.
+    /// </summary>
+    public void LoadFullFile()
+    {
+        if (_buffer is not LargeFileBuffer || _filePath == null) return;
+        var content = File.ReadAllText(_filePath);
+        var savedOffset = _cursorOffset;
+        _buffer = new TextBuffer(content);
+        IsReadOnly = false;
+        _cursorOffset = Math.Clamp(savedOffset, 0, _buffer.Length);
+        _undoStack.Clear();
+        _redoStack.Clear();
+        var firstLine = content.Split('\n').FirstOrDefault() ?? string.Empty;
+        Highlighter = SyntaxHighlighter.ForFile(_filePath, firstLine);
+        Changed?.Invoke(this, EventArgs.Empty);
     }
 
     // --- Cursor movement ---
@@ -92,8 +133,8 @@ public sealed class EditorController
             _cursorOffset++;
     }
 
-    public void MoveToStart() => _cursorOffset = 0;
-    public void MoveToEnd() => _cursorOffset = _buffer.Length;
+    public void MoveToStart() => _cursorOffset = _buffer.LineColToOffset(0, 0);
+    public void MoveToEnd()   => _cursorOffset = _buffer.LineColToOffset(_buffer.GetLineCount() - 1, 0);
 
     public void MoveWordRight()
     {
@@ -311,14 +352,14 @@ public sealed class EditorController
     /// Copy a rectangular block defined by two (line, col) corners.
     /// Returns one string per line; lines shorter than the rectangle are padded with spaces.
     /// </summary>
-    public string[] CopyColumnBlock(int line1, int col1, int line2, int col2)
+    public string[] CopyColumnBlock(long line1, int col1, long line2, int col2)
     {
-        int top    = Math.Min(line1, line2);
-        int bot    = Math.Max(line1, line2);
+        long top   = Math.Min(line1, line2);
+        long bot   = Math.Max(line1, line2);
         int left   = Math.Min(col1,  col2);
         int right  = Math.Max(col1,  col2);
         var result = new List<string>();
-        for (int ln = top; ln <= bot; ln++)
+        for (long ln = top; ln <= bot; ln++)
         {
             var lineText = ln < _buffer.GetLineCount() ? _buffer.GetLine(ln) : string.Empty;
             var seg = lineText.Length <= left
@@ -335,13 +376,13 @@ public sealed class EditorController
     /// Delete a rectangular block defined by two (line, col) corners.
     /// Each affected line has the column range removed.
     /// </summary>
-    public void DeleteColumnBlock(int line1, int col1, int line2, int col2)
+    public void DeleteColumnBlock(long line1, int col1, long line2, int col2)
     {
-        int top   = Math.Min(line1, line2);
-        int bot   = Math.Max(line1, line2);
+        long top  = Math.Min(line1, line2);
+        long bot  = Math.Max(line1, line2);
         int left  = Math.Min(col1,  col2);
         int right = Math.Max(col1,  col2);
-        for (int ln = bot; ln >= top; ln--)
+        for (long ln = bot; ln >= top; ln--)
         {
             if (ln >= _buffer.GetLineCount()) continue;
             var lineText = _buffer.GetLine(ln);
@@ -361,11 +402,11 @@ public sealed class EditorController
     /// Paste a column block (array of row strings) at the given (line, col) position.
     /// Each row is inserted at the given column of consecutive lines.
     /// </summary>
-    public void PasteColumnBlock(string[] rows, int atLine, int atCol)
+    public void PasteColumnBlock(string[] rows, long atLine, int atCol)
     {
         for (int i = rows.Length - 1; i >= 0; i--)
         {
-            int ln = atLine + i;
+            long ln = atLine + i;
             // Ensure line exists
             while (_buffer.GetLineCount() <= ln)
                 InsertTextAt(_buffer.Length, "\n");
@@ -436,7 +477,6 @@ public sealed class EditorController
 
     public SearchResult FindNext(SearchOptions opts)
     {
-        var text = _buffer.ToString();
         var provider = opts.Type switch
         {
             SearchType.Regex => (ISearchProvider)new RegexSearchProvider(),
@@ -444,34 +484,61 @@ public sealed class EditorController
         };
 
         SearchResult result;
-        if (opts.Backward)
+
+        if (_buffer is LargeFileBuffer lfb)
         {
-            // Search backward: look for last occurrence before cursor (or end of file on first search)
-            int searchFrom = _lastSearchOffset > 0 ? _lastSearchOffset : _cursorOffset;
-            result = provider.Search(text, opts, searchFrom);
-            if (!result.Found && searchFrom < text.Length)
+            // Streaming search for large files: track absolute char offsets.
+            long cursorAbs = lfb.AbsoluteChar(_cursorOffset);
+            if (opts.Backward)
             {
-                // Wrap around: try from end of file
-                result = provider.Search(text, opts, text.Length);
+                long searchFrom = _lastAbsSearchOffset > 0 ? _lastAbsSearchOffset : cursorAbs;
+                result = lfb.StreamSearch(provider, opts, searchFrom);
+                if (!result.Found)
+                    result = lfb.StreamSearch(provider, opts, lfb.AbsoluteChar(_buffer.Length));
+            }
+            else
+            {
+                result = lfb.StreamSearch(provider, opts, _lastAbsSearchOffset + 1);
+                if (!result.Found && _lastAbsSearchOffset > 0)
+                    result = lfb.StreamSearch(provider, opts, 0);
+            }
+
+            if (result.Found)
+            {
+                _lastAbsSearchOffset = result.Offset;
+                int windowOffset = lfb.SeekToAbsChar(result.Offset);
+                _lastSearchOffset = windowOffset;
+                _cursorOffset     = windowOffset;
+                _selectionStart   = windowOffset;
+                _selectionEnd     = windowOffset + result.Length;
             }
         }
         else
         {
-            result = provider.Search(text, opts, _lastSearchOffset + 1);
-            if (!result.Found && _lastSearchOffset > 0)
+            var text = _buffer.GetText();
+            if (opts.Backward)
             {
-                // Wrap around: try from the beginning
-                result = provider.Search(text, opts, 0);
+                int searchFrom = _lastSearchOffset > 0 ? _lastSearchOffset : _cursorOffset;
+                result = provider.Search(text, opts, searchFrom);
+                if (!result.Found && searchFrom < text.Length)
+                    result = provider.Search(text, opts, text.Length);
+            }
+            else
+            {
+                result = provider.Search(text, opts, _lastSearchOffset + 1);
+                if (!result.Found && _lastSearchOffset > 0)
+                    result = provider.Search(text, opts, 0);
+            }
+
+            if (result.Found)
+            {
+                _lastSearchOffset = (int)result.Offset;
+                MoveCursor((int)result.Offset);
+                _selectionStart = (int)result.Offset;
+                _selectionEnd = (int)result.Offset + result.Length;
             }
         }
 
-        if (result.Found)
-        {
-            _lastSearchOffset = (int)result.Offset;
-            MoveCursor((int)result.Offset);
-            _selectionStart = (int)result.Offset;
-            _selectionEnd = (int)result.Offset + result.Length;
-        }
         LastSearch = opts;
         return result;
     }
@@ -498,7 +565,7 @@ public sealed class EditorController
     {
         if (IsReadOnly) return 0;
         if (string.IsNullOrEmpty(opts.Pattern)) return 0;
-        var text = _buffer.ToString();
+        var text = _buffer.GetText();
         var provider = opts.Type switch
         {
             SearchType.Regex => (ISearchProvider)new RegexSearchProvider(),
@@ -528,21 +595,52 @@ public sealed class EditorController
     public void LoadFile(string path)
     {
         _filePath = string.IsNullOrEmpty(path) ? null : path;
-        var content = (_filePath != null && File.Exists(_filePath)) ? File.ReadAllText(_filePath) : string.Empty;
-        _buffer.SetContent(content);
         _cursorOffset = 0;
         _selectionStart = -1;
         _selectionEnd = -1;
         _undoStack.Clear();
         _redoStack.Clear();
-        var loadFirstLine = content.Split('\n').FirstOrDefault() ?? string.Empty;
-        Highlighter = _filePath != null ? SyntaxHighlighter.ForFile(_filePath, loadFirstLine) : null;
-        // Restore saved cursor position
-        if (_filePath != null && SavePosition)
+
+        if (_filePath != null && File.Exists(_filePath))
         {
-            var (line, col) = LoadFilePosition(_filePath);
-            _cursorOffset = _buffer.LineColToOffset(
-                Math.Min(line, _buffer.GetLineCount() - 1), col);
+            var info = new FileInfo(_filePath);
+            if (info.Length > LargeFileThresholdBytes)
+            {
+                _buffer = LargeFileBuffer.Open(_filePath);
+                IsReadOnly = true;
+                Highlighter = SyntaxHighlighter.ForFile(_filePath);
+                if (SavePosition)
+                {
+                    var (line, col) = LoadFilePosition(_filePath);
+                    _cursorOffset = _buffer.LineColToOffset(
+                        Math.Min(line, _buffer.GetLineCount() - 1), col);
+                }
+                Changed?.Invoke(this, EventArgs.Empty);
+                return;
+            }
+            var content = File.ReadAllText(_filePath);
+            if (_buffer is TextBuffer tb)
+                tb.SetContent(content);
+            else
+                _buffer = new TextBuffer(content);
+            IsReadOnly = false;
+            var loadFirstLine = content.Split('\n').FirstOrDefault() ?? string.Empty;
+            Highlighter = SyntaxHighlighter.ForFile(_filePath, loadFirstLine);
+            if (SavePosition)
+            {
+                var (line, col) = LoadFilePosition(_filePath);
+                _cursorOffset = _buffer.LineColToOffset(
+                    Math.Min(line, _buffer.GetLineCount() - 1), col);
+            }
+        }
+        else
+        {
+            if (_buffer is TextBuffer tb2)
+                tb2.SetContent(string.Empty);
+            else
+                _buffer = new TextBuffer(null);
+            IsReadOnly = false;
+            Highlighter = _filePath != null ? SyntaxHighlighter.ForFile(_filePath) : null;
         }
         Changed?.Invoke(this, EventArgs.Empty);
     }
@@ -557,7 +655,7 @@ public sealed class EditorController
         }
     }
 
-    public static (int Line, int Col) LoadFilePosition(string filePath)
+    public static (long Line, int Col) LoadFilePosition(string filePath)
     {
         var posFile = GetPosFilePath();
         if (!File.Exists(posFile)) return (0, 0);
@@ -567,7 +665,7 @@ public sealed class EditorController
             {
                 var parts = line.Split('\t');
                 if (parts.Length >= 3 && parts[0] == filePath)
-                    if (int.TryParse(parts[1], out int l) && int.TryParse(parts[2], out int c))
+                    if (long.TryParse(parts[1], out long l) && int.TryParse(parts[2], out int c))
                         return (l, c);
             }
         }
@@ -575,7 +673,7 @@ public sealed class EditorController
         return (0, 0);
     }
 
-    public static void SaveFilePosition(string filePath, int line, int col)
+    public static void SaveFilePosition(string filePath, long line, int col)
     {
         var posFile = GetPosFilePath();
         var dir = Path.GetDirectoryName(posFile)!;
@@ -644,7 +742,7 @@ public sealed class EditorController
     /// <summary>Save the buffer content with a specific line ending to a file.</summary>
     public void SaveAsWithLineEnding(string path, string lineEnding)
     {
-        var content = _buffer.ToString();
+        var content = _buffer.GetText();
         // Normalize to LF first, then convert
         content = content.Replace("\r\n", "\n").Replace("\r", "\n");
         if (lineEnding != "\n")
@@ -656,7 +754,7 @@ public sealed class EditorController
 
     // --- Goto ---
 
-    public void GotoLine(int line)
+    public void GotoLine(long line)
     {
         var offset = _buffer.LineColToOffset(line - 1, 0);
         MoveCursor(offset);
@@ -686,7 +784,7 @@ public sealed class EditorController
     private void MoveVertical(int lines)
     {
         var (line, col) = _buffer.OffsetToLineCol(_cursorOffset);
-        var newLine = Math.Clamp(line + lines, 0, _buffer.GetLineCount() - 1);
+        var newLine = Math.Clamp(line + lines, 0L, _buffer.GetLineCount() - 1);
         _cursorOffset = _buffer.LineColToOffset(newLine, col);
     }
 
@@ -702,10 +800,10 @@ public sealed class EditorController
 
     // --- Bookmarks (Alt+K / Alt+J / Alt+I / Alt+O) ---
 
-    private readonly SortedSet<int> _bookmarks = new();
+    private readonly SortedSet<long> _bookmarks = new();
 
-    public bool HasBookmarkAt(int line) => _bookmarks.Contains(line);
-    public IEnumerable<int> Bookmarks => _bookmarks;
+    public bool HasBookmarkAt(long line) => _bookmarks.Contains(line);
+    public IEnumerable<long> Bookmarks => _bookmarks;
 
     public void ToggleBookmark()
     {
@@ -718,8 +816,8 @@ public sealed class EditorController
     public void NextBookmark()
     {
         var (curLine, _) = _buffer.OffsetToLineCol(_cursorOffset);
-        var after = _bookmarks.GetViewBetween(curLine + 1, int.MaxValue);
-        int target = after.Count > 0 ? after.Min : (_bookmarks.Count > 0 ? _bookmarks.Min : -1);
+        var after = _bookmarks.GetViewBetween(curLine + 1, long.MaxValue);
+        long target = after.Count > 0 ? after.Min : (_bookmarks.Count > 0 ? _bookmarks.Min : -1L);
         if (target >= 0) { _cursorOffset = _buffer.LineColToOffset(target, 0); Changed?.Invoke(this, EventArgs.Empty); }
     }
 
@@ -727,7 +825,7 @@ public sealed class EditorController
     {
         var (curLine, _) = _buffer.OffsetToLineCol(_cursorOffset);
         var before = _bookmarks.GetViewBetween(0, curLine > 0 ? curLine - 1 : 0);
-        int target = (curLine > 0 && before.Count > 0) ? before.Max : (_bookmarks.Count > 0 ? _bookmarks.Max : -1);
+        long target = (curLine > 0 && before.Count > 0) ? before.Max : (_bookmarks.Count > 0 ? _bookmarks.Max : -1L);
         if (target >= 0) { _cursorOffset = _buffer.LineColToOffset(target, 0); Changed?.Invoke(this, EventArgs.Empty); }
     }
 
@@ -824,7 +922,7 @@ public sealed class EditorController
         var (startLine, _) = _buffer.OffsetToLineCol(selStart);
         var (endLine, endCol) = _buffer.OffsetToLineCol(selEnd);
         if (endCol == 0 && endLine > startLine) endLine--;
-        for (int ln = endLine; ln >= startLine; ln--)
+        for (long ln = endLine; ln >= startLine; ln--)
         {
             int lineOff = _buffer.LineColToOffset(ln, 0);
             string indent = new string(' ', tabWidth);
@@ -841,7 +939,7 @@ public sealed class EditorController
         var (startLine, _) = _buffer.OffsetToLineCol(selStart);
         var (endLine, endCol) = _buffer.OffsetToLineCol(selEnd);
         if (endCol == 0 && endLine > startLine) endLine--;
-        for (int ln = endLine; ln >= startLine; ln--)
+        for (long ln = endLine; ln >= startLine; ln--)
         {
             var lineText = _buffer.GetLine(ln);
             int spaces = 0;
@@ -864,12 +962,12 @@ public sealed class EditorController
     public void FormatParagraph(int wrapWidth = 72)
     {
         var (curLine, _) = _buffer.OffsetToLineCol(_cursorOffset);
-        int lineCount = _buffer.GetLineCount();
+        long lineCount = _buffer.GetLineCount();
 
-        int paraStart = curLine;
+        long paraStart = curLine;
         while (paraStart > 0 && !string.IsNullOrWhiteSpace(_buffer.GetLine(paraStart - 1)))
             paraStart--;
-        int paraEnd = curLine;
+        long paraEnd = curLine;
         while (paraEnd < lineCount - 1 && !string.IsNullOrWhiteSpace(_buffer.GetLine(paraEnd + 1)))
             paraEnd++;
 
@@ -879,9 +977,10 @@ public sealed class EditorController
             indentLen++;
         var indent = indentLen > 0 ? firstLine[..indentLen] : string.Empty;
 
-        var paraLines = Enumerable.Range(paraStart, paraEnd - paraStart + 1)
-            .Select(ln => ln < lineCount ? _buffer.GetLine(ln).TrimEnd() : string.Empty)
-            .ToList();
+        // Build list of lines in the paragraph range
+        var paraLines = new List<string>();
+        for (long ln = paraStart; ln <= paraEnd; ln++)
+            paraLines.Add(ln < lineCount ? _buffer.GetLine(ln).TrimEnd() : string.Empty);
         var words = string.Join(" ", paraLines.Select(l => l.Trim()))
             .Split(' ', StringSplitOptions.RemoveEmptyEntries);
 
@@ -920,22 +1019,22 @@ internal abstract class EditOperation
 {
     public int Offset { get; protected set; }
     public string Text { get; protected set; } = string.Empty;
-    public abstract void Undo(TextBuffer buffer);
-    public abstract void Redo(TextBuffer buffer);
+    public abstract void Undo(ITextBuffer buffer);
+    public abstract void Redo(ITextBuffer buffer);
 }
 
 internal sealed class InsertOp : EditOperation
 {
     public InsertOp(int offset, string text) { Offset = offset; Text = text; }
-    public override void Undo(TextBuffer b) => b.Delete(Offset, Text.Length);
-    public override void Redo(TextBuffer b) => b.Insert(Offset, Text);
+    public override void Undo(ITextBuffer b) => b.Delete(Offset, Text.Length);
+    public override void Redo(ITextBuffer b) => b.Insert(Offset, Text);
 }
 
 internal sealed class DeleteOp : EditOperation
 {
     public DeleteOp(int offset, string text) { Offset = offset; Text = text; }
-    public override void Undo(TextBuffer b) => b.Insert(Offset, Text);
-    public override void Redo(TextBuffer b) => b.Delete(Offset, Text.Length);
+    public override void Undo(ITextBuffer b) => b.Insert(Offset, Text);
+    public override void Redo(ITextBuffer b) => b.Delete(Offset, Text.Length);
 }
 
 /// <summary>Groups multiple operations that undo/redo as a single step.</summary>
@@ -949,6 +1048,6 @@ internal sealed class CompositeOp : EditOperation
         // Store first-op offset so Undo() sets cursor correctly (Redo uses last op end).
         if (ops.Length > 0) { Offset = ops[0].Offset; Text = ops[^1].Text; }
     }
-    public override void Undo(TextBuffer b) { for (int i = _ops.Length - 1; i >= 0; i--) _ops[i].Undo(b); }
-    public override void Redo(TextBuffer b) { foreach (var op in _ops) op.Redo(b); }
+    public override void Undo(ITextBuffer b) { for (int i = _ops.Length - 1; i >= 0; i--) _ops[i].Undo(b); }
+    public override void Redo(ITextBuffer b) { foreach (var op in _ops) op.Redo(b); }
 }
