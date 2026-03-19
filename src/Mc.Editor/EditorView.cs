@@ -93,6 +93,12 @@ public sealed class EditorView : View
         MouseClick += OnMouseClicked;
         MouseEvent += OnMouseEvent;   // fires for moves (ReportMousePosition) not covered by MouseClick
         MouseWheel += (_, e) => HandleEditorWheelEvent(e);
+        // Opt in to mouse-position reports so ReportMousePosition events are
+        // delivered during drag on all platforms (Windows ConHost included).
+        WantMousePositionReports    = true;
+        // Fallback: re-fires Button1Pressed on every mouse event while held,
+        // for drivers that support continuous-press but not position reports.
+        WantContinuousButtonPressed = true;
 
         // Show a blinking underline cursor.  Terminal.Gui View defaults to
         // CursorVisibility.Invisible, which causes the cursor to be hidden on
@@ -412,7 +418,11 @@ public sealed class EditorView : View
         // Button 1 released: stop drag selection
         if (e.Flags.HasFlag(MouseFlags.Button1Released))
         {
-            _mouseButtonHeld = false;
+            if (_mouseButtonHeld)
+            {
+                _mouseButtonHeld = false;
+                Application.UngrabMouse();
+            }
             e.Handled = true;
             return;
         }
@@ -498,12 +508,23 @@ public sealed class EditorView : View
                 }
                 else if (e.Flags.HasFlag(MouseFlags.Button1Pressed))
                 {
-                    // Start of potential drag: anchor selection at click position
-                    _selecting = false;
-                    _editor.ClearSelection();
-                    _editor.StartSelection();  // anchor here; ExtendSelection on drag
-                    _mouseButtonHeld = true;
-                    _lastClickTime = DateTime.MinValue;
+                    if (_mouseButtonHeld)
+                    {
+                        // Repeated Button1Pressed during drag (WantContinuousButtonPressed
+                        // fallback) — extend selection to new position.
+                        _selecting = true;
+                        _editor.ExtendSelection();
+                    }
+                    else
+                    {
+                        // Start of drag: anchor selection at click position.
+                        _selecting = false;
+                        _editor.ClearSelection();
+                        _editor.StartSelection();
+                        _mouseButtonHeld = true;
+                        Application.GrabMouse(this);  // route all events here during drag
+                        _lastClickTime = DateTime.MinValue;
+                    }
                 }
                 SetNeedsDraw();
                 SetFocus();
@@ -518,22 +539,32 @@ public sealed class EditorView : View
         var contentHeight = viewport.Height - 1;
         var gutter = GutterWidth;
         int screenRow = e.Position.Y;
-        int screenCol = e.Position.X - gutter;
-        if (screenRow >= 0 && screenRow < contentHeight && screenCol >= 0)
+        int screenCol = Math.Max(0, e.Position.X - gutter);
+
+        // Auto-scroll when the drag leaves the visible text area.
+        if (screenRow < 0)
         {
-            long targetLine = _topLine + screenRow;
-            int targetCol   = _leftCol + screenCol;
-            if (targetLine < _editor.Buffer.GetLineCount())
-            {
-                var lineText = _editor.Buffer.GetLine(targetLine);
-                targetCol = Math.Min(targetCol, lineText.Length);
-                _editor.MoveCursor(_editor.Buffer.LineColToOffset(targetLine, targetCol));
-                _selecting = true;
-                _editor.ExtendSelection();
-                SetNeedsDraw();
-                SetFocus();
-                e.Handled = true;
-            }
+            _topLine = Math.Max(0L, _topLine - 1);
+            screenRow = 0;
+        }
+        else if (screenRow >= contentHeight)
+        {
+            _topLine = Math.Min(Math.Max(0L, _editor.Buffer.GetLineCount() - 1), _topLine + 1);
+            screenRow = contentHeight - 1;
+        }
+
+        long targetLine = _topLine + screenRow;
+        int targetCol   = _leftCol + screenCol;
+        if (targetLine < _editor.Buffer.GetLineCount())
+        {
+            var lineText = _editor.Buffer.GetLine(targetLine);
+            targetCol = Math.Min(targetCol, lineText.Length);
+            _editor.MoveCursor(_editor.Buffer.LineColToOffset(targetLine, targetCol));
+            _selecting = true;
+            _editor.ExtendSelection();
+            SetNeedsDraw();
+            SetFocus();
+            e.Handled = true;
         }
     }
 
