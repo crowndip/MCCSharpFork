@@ -121,7 +121,7 @@ public sealed class EditorView : View
         get
         {
             if (_hexMode)
-                return $"[HEX{(_hexModified ? "*" : "")}] Offset:{_hexCursorByte:X8} ({_hexCursorByte}) | {(_hexCursorInAscii ? "ASCII" : "HEX")} pane | Tab=switch Ctrl+H=exit";
+                return $"[HEX{(_hexModified ? "*" : "")}] Offset:{_hexCursorByte:X8} ({_hexCursorByte}) | {(_hexCursorInAscii ? "ASCII" : "HEX")} pane | Tab=switch F9>Command>Hex=exit";
             var (ln, col) = _editor.CursorPosition;
             char colFlag = _colBlock ? 'C' : '-';
             char modFlag = _editor.IsModified ? 'M' : '-';
@@ -1270,6 +1270,7 @@ public sealed class EditorView : View
         SetNeedsDraw();
     }
 
+    public void ExecuteToggleHexMode()       => ToggleHexMode();
     public void ExecuteToggleLineNumbers()   { _showLineNumbers = !_showLineNumbers; SetNeedsDraw(); }
     public void ExecuteMatchBracket()        => GoToMatchingBracket();
     public void ExecuteToggleSyntax()        { _syntaxHighlightingOn = !_syntaxHighlightingOn; SetNeedsDraw(); }
@@ -2400,7 +2401,7 @@ public sealed class EditorView : View
     {
         // Build the full line string first
         var sb = new System.Text.StringBuilder(80);
-        sb.Append($"{lineOffset:X8}: ");
+        sb.Append($"{lineOffset:X8}  ");
         for (int i = 0; i < HexBytesPerRow; i++)
         {
             int byteOff = lineOffset + i;

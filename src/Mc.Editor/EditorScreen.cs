@@ -118,6 +118,7 @@ public sealed class EditorScreen : Toplevel
                 new MenuItem("_Toggle line numbers",  "Alt+N",    () => _view.ExecuteToggleLineNumbers()),
                 new MenuItem("Match _bracket",        "Alt+[",    () => _view.ExecuteMatchBracket()),
                 new MenuItem("Toggle s_yntax",        "Ctrl+S",   () => _view.ExecuteToggleSyntax()),
+                new MenuItem("Toggle _hex view",      "Ctrl+H",   () => _view.ExecuteToggleHexMode()),
                 new MenuItem("Toggle right _margin",  string.Empty, () => _view.ExecuteToggleRightMargin()),
                 null!,
                 new MenuItem("_Encoding…",               "Alt+E",      () => _view.ExecuteEncodingSelect()),
