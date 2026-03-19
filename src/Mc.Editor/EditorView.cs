@@ -91,6 +91,7 @@ public sealed class EditorView : View
         };
         // Mouse support
         MouseClick += OnMouseClicked;
+        MouseEvent += OnMouseEvent;   // fires for moves (ReportMousePosition) not covered by MouseClick
         MouseWheel += (_, e) => HandleEditorWheelEvent(e);
 
         // Show a blinking underline cursor.  Terminal.Gui View defaults to
@@ -414,16 +415,8 @@ public sealed class EditorView : View
 
         if (!e.Flags.HasFlag(MouseFlags.Button1Clicked) &&
             !e.Flags.HasFlag(MouseFlags.Button1Pressed) &&
-            !e.Flags.HasFlag(MouseFlags.Button1DoubleClicked) &&
-            !e.Flags.HasFlag(MouseFlags.ReportMousePosition))
+            !e.Flags.HasFlag(MouseFlags.Button1DoubleClicked))
             return;
-
-        // Mouse drag: extend selection while button is held
-        if (e.Flags.HasFlag(MouseFlags.ReportMousePosition) && _mouseButtonHeld)
-        {
-            ExtendSelectionToMousePos(e);
-            return;
-        }
 
         var viewport = Viewport;
         var contentHeight = viewport.Height - 1;
@@ -501,9 +494,10 @@ public sealed class EditorView : View
                 }
                 else if (e.Flags.HasFlag(MouseFlags.Button1Pressed))
                 {
-                    // Start of potential drag: clear current selection
+                    // Start of potential drag: anchor selection at click position
                     _selecting = false;
                     _editor.ClearSelection();
+                    _editor.StartSelection();  // anchor here; ExtendSelection on drag
                     _mouseButtonHeld = true;
                     _lastClickTime = DateTime.MinValue;
                 }
@@ -529,18 +523,9 @@ public sealed class EditorView : View
             {
                 var lineText = _editor.Buffer.GetLine(targetLine);
                 targetCol = Math.Min(targetCol, lineText.Length);
-                var anchorOffset = _editor.CursorOffset; // save before move for correct drag-anchor
                 _editor.MoveCursor(_editor.Buffer.LineColToOffset(targetLine, targetCol));
-                if (!_selecting)
-                {
-                    _selecting = true;
-                    _selectionAnchor = anchorOffset;
-                    _editor.StartSelection();
-                }
-                else
-                {
-                    _editor.ExtendSelection();
-                }
+                _selecting = true;
+                _editor.ExtendSelection();
                 SetNeedsDraw();
                 SetFocus();
                 e.Handled = true;
@@ -548,10 +533,10 @@ public sealed class EditorView : View
         }
     }
 
-    private void OnMouseMoved(object? sender, MouseEventArgs e)
+    private void OnMouseEvent(object? sender, MouseEventArgs e)
     {
-        if (!_mouseButtonHeld || _hexMode) return;
-        ExtendSelectionToMousePos(e);
+        if (e.Flags.HasFlag(MouseFlags.ReportMousePosition) && _mouseButtonHeld && !_hexMode)
+            ExtendSelectionToMousePos(e);
     }
 
     private void HandleEditorWheelEvent(MouseEventArgs e)
