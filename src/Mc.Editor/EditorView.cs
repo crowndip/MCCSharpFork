@@ -92,17 +92,29 @@ public sealed class EditorView : View
         // Mouse support
         MouseClick += OnMouseClicked;
         MouseWheel += (_, e) => HandleEditorWheelEvent(e);
+
+        // Show a blinking underline cursor.  Terminal.Gui View defaults to
+        // CursorVisibility.Invisible, which causes the cursor to be hidden on
+        // Windows ConHost (cmd.exe) where ANSI DECSCUSR escape sequences are
+        // no-ops.  Setting this property here ensures the driver (including
+        // WindowsDriver) shows the cursor via the platform-native API.
+        CursorVisibility = CursorVisibility.Underline;
     }
 
     protected override void OnHasFocusChanged(bool newHasFocus, View previousFocused, View newFocused)
     {
         base.OnHasFocusChanged(newHasFocus, previousFocused, newFocused);
-        // Only set cursor style on gaining focus; on blur, reset only if the new focus target
-        // will not set its own style (i.e., is not another EditorView).
+        // Keep CursorVisibility in sync with focus so the driver (WindowsDriver on
+        // cmd.exe, CursesDriver on Unix) shows/hides the cursor through the platform
+        // API rather than relying solely on ANSI escape sequences that ConHost ignores.
         if (newHasFocus)
-            EscSeqUtils.CSI_SetCursorStyle(EscSeqUtils.DECSCUSR_Style.BlinkingUnderline);
+        {
+            CursorVisibility = _hexMode ? CursorVisibility.Box : CursorVisibility.Underline;
+        }
         else if (newFocused is not EditorView)
-            EscSeqUtils.CSI_SetCursorStyle(EscSeqUtils.DECSCUSR_Style.UserShape);
+        {
+            CursorVisibility = CursorVisibility.Default;
+        }
     }
 
     /// <summary>
@@ -2225,6 +2237,10 @@ public sealed class EditorView : View
         {
             EnterHexMode();
         }
+        // Reflect mode in cursor shape so the user gets a visual cue:
+        // block cursor in hex mode (byte-at-a-time navigation),
+        // underline in normal text mode.
+        CursorVisibility = _hexMode ? CursorVisibility.Box : CursorVisibility.Underline;
         SetNeedsDraw();
     }
 
