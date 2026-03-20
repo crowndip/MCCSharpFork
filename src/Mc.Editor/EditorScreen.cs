@@ -70,7 +70,6 @@ public sealed class EditorScreen : Toplevel
                 new MenuItem("Cop_y to file…",    "Ctrl+F",       () => _view.ExecuteSaveBlock()),
                 null!,
                 new MenuItem("_User menu…",       "F11",          () => _view.ExecuteUserMenu()),
-                new MenuItem("_About…",           string.Empty,   () => _view.ExecuteAbout()),
                 null!,
                 new MenuItem("_Quit",             "F10",          () => _view.ExecuteClose()),
             }),
@@ -167,6 +166,14 @@ public sealed class EditorScreen : Toplevel
                 new MenuItem("_Menu file",               string.Empty, () => _view.ExecuteEditMenuFile()),
                 null!,
                 new MenuItem("_Save setup",       string.Empty,   () => ExecuteSaveSetup()),
+            }),
+            new MenuBarItem("_About", new MenuItem[]
+            {
+                new MenuItem("_License",        string.Empty, () => _view.ExecuteAboutLicense()),
+                new MenuItem("_Github",         string.Empty, () => _view.ExecuteAboutGitHub()),
+                new MenuItem("_Fork from",      string.Empty, () => _view.ExecuteAboutForkFrom()),
+                new MenuItem("_Why forked",     string.Empty, () => _view.ExecuteAboutWhyForked()),
+                new MenuItem("_New functions",  string.Empty, () => _view.ExecuteAboutNewFunctions()),
             }),
           }
         };

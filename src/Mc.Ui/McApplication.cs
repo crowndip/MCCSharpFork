@@ -217,11 +217,16 @@ public sealed class McApplication : Toplevel
                     new("_Virtual FS...",    string.Empty, ShowVfsSettingsDialog),
                     null!,
                     new("_Save setup",       string.Empty, () => _settings.Save()),
-                    null!,
-                    new("_About...",         string.Empty, () => MessageDialog.Show("About",
-                        "Midnight Commander for .NET\n" +
-                        ".NET 8 rewrite of GNU Midnight Commander\n" +
-                        "Built with Terminal.Gui")),
+                }),
+
+                // ── About ─────────────────────────────────────────────────
+                new MenuBarItem("_About", new MenuItem[]
+                {
+                    new("_License",        string.Empty, AboutDialog.ShowLicense),
+                    new("_Github",         string.Empty, AboutDialog.ShowGitHub),
+                    new("_Fork from",      string.Empty, AboutDialog.ShowForkFrom),
+                    new("_Why forked",     string.Empty, AboutDialog.ShowWhyForked),
+                    new("_New functions",  string.Empty, AboutDialog.ShowNewFunctions),
                 }),
 
                 // ── Right ─────────────────────────────────────────────────

@@ -1214,15 +1214,11 @@ public sealed class EditorView : View
         catch (Exception ex) { MessageBox.ErrorQuery("Save Block Failed", ex.Message, "OK"); }
     }
 
-    public void ExecuteAbout()
-    {
-        MessageBox.Query("About MCEdit",
-            "MCEdit — Midnight Commander Internal Editor\n" +
-            "C# reimplementation based on mcedit specifications.\n\n" +
-            "Original: https://midnight-commander.org/\n" +
-            "License: GNU GPL v3+",
-            "OK");
-    }
+    public void ExecuteAboutLicense()     => AboutEditorHelper.ShowLicense();
+    public void ExecuteAboutGitHub()      => AboutEditorHelper.ShowGitHub();
+    public void ExecuteAboutForkFrom()    => AboutEditorHelper.ShowForkFrom();
+    public void ExecuteAboutWhyForked()   => AboutEditorHelper.ShowWhyForked();
+    public void ExecuteAboutNewFunctions()=> AboutEditorHelper.ShowNewFunctions();
 
     public void ExecuteUndo() { _editor.Undo(); SetNeedsDraw(); }
     public void ExecuteRedo() { _editor.Redo(); SetNeedsDraw(); }
