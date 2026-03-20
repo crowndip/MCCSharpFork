@@ -69,6 +69,9 @@ public sealed class McApplicationPanelModeTests
 
     private MenuBarItem GetMenu(int index) => GetMenuBar().Menus[index];
 
+    private MenuBarItem GetMenuByTitle(string titleFragment) =>
+        GetMenuBar().Menus.First(m => (m?.Title?.ToString() ?? "").Replace("_", "").Contains(titleFragment));
+
     private static string Title(MenuItem item) =>
         item.Title?.ToString()?.Replace("_", "") ?? string.Empty;
 
@@ -150,7 +153,7 @@ public sealed class McApplicationPanelModeTests
     [InlineData("Copy tagged names")]
     public void ToolsMenu_ClipboardItem_IsVisible(string partialTitle)
     {
-        var items = Items(GetMenu(6));
+        var items = Items(GetMenuByTitle("Tools"));
         Assert.Contains(items, i => Title(i).Contains(partialTitle));
     }
 
@@ -162,7 +165,7 @@ public sealed class McApplicationPanelModeTests
     [InlineData("Copy tagged names")]
     public void ToolsMenu_ClipboardItem_IsClickable(string partialTitle)
     {
-        var item = Items(GetMenu(6)).First(i => Title(i).Contains(partialTitle));
+        var item = Items(GetMenuByTitle("Tools")).First(i => Title(i).Contains(partialTitle));
         Assert.NotNull(item.Action);
     }
 
@@ -182,7 +185,7 @@ public sealed class McApplicationPanelModeTests
     [InlineData("Compare with diff tool")]
     public void ToolsMenu_Item_IsVisible(string partialTitle)
     {
-        var items = Items(GetMenu(6));
+        var items = Items(GetMenuByTitle("Tools"));
         Assert.Contains(items, i => Title(i).Contains(partialTitle));
     }
 
@@ -200,7 +203,7 @@ public sealed class McApplicationPanelModeTests
     [InlineData("Compare with diff tool")]
     public void ToolsMenu_Item_IsClickable(string partialTitle)
     {
-        var item = Items(GetMenu(6)).First(i => Title(i).Contains(partialTitle));
+        var item = Items(GetMenuByTitle("Tools")).First(i => Title(i).Contains(partialTitle));
         Assert.NotNull(item.Action);
     }
 
