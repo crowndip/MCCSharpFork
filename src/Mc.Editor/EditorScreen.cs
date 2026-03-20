@@ -127,8 +127,8 @@ public sealed class EditorScreen : Toplevel
                 null!,
                 new MenuItem("_Check word",              string.Empty, () => _view.ExecuteCheckWord()),
                 new MenuItem("Change spelling _language…", string.Empty, () => _view.ExecuteChangeSpellingLanguage()),
-                new MenuItem("_Mail…",                   "Alt+M",      () => _view.ExecuteMail()),
-                null!,
+
+
                 new MenuItem("_Refresh screen",       "Ctrl+L",   () => _view.ExecuteRefresh()),
                 null!,
                 new MenuItem("_Load full file for editing…", string.Empty, () => _view.ExecuteLoadFullFile()),
@@ -148,8 +148,8 @@ public sealed class EditorScreen : Toplevel
             }),
             new MenuBarItem("_Window", new MenuItem[]
             {
-                new MenuItem("_Toggle fullscreen", string.Empty,  () => { /* always fullscreen in this impl */ }),
-                null!,
+
+
                 new MenuItem("_List…",             string.Empty,  () => ExecuteWindowList()),
                 new MenuItem("_Open another file…", string.Empty, () => ShowOpenAnotherFile()),
             }),

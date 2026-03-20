@@ -2280,10 +2280,6 @@ public sealed class EditorView : View
         SetNeedsDraw();
     }
 
-    public void ExecuteMail()
-    {
-        MessageBox.Query("Mail", "Mail functionality requires a mail program.\nThis feature is not available in this implementation.", "OK");
-    }
 
     public void ExecuteChangeSpellingLanguage()
     {

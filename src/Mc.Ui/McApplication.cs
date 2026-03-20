@@ -96,7 +96,7 @@ public sealed class McApplication : Toplevel
             new MenuItem("_Encoding...",       string.Empty, () => ShowEncodingDialog(left)),
             null!,
             new MenuItem("_FTP link...",       string.Empty, () => ConnectVfsLink("ftp")),
-            new MenuItem("_Shell link...",     string.Empty, () => NotImplemented("Shell link (FISH protocol)")),
+
             new MenuItem("S_FTP link...",      string.Empty, () => ConnectVfsLink("sftp")),
             null!,
             new MenuItem("_Rescan",            "Ctrl+R",
