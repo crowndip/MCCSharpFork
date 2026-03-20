@@ -89,7 +89,7 @@ public sealed class SyntaxRuleSet
             if (line.Contains("ruby") || line.Contains("irb")) return Ruby();
             if (line.Contains("node") || line.Contains("js")) return JavaScript();
             if (line.Contains("lua")) return Lua();
-            if (line.Contains("perl")) return null; // Perl not yet supported
+            if (line.Contains("perl")) return Perl();
             if (line.Contains("php")) return Php();
             if (line.Contains("bash") || line.Contains("sh") || line.Contains("/env sh")) return Shell();
             if (line.Contains("r ") || line.EndsWith("/R") || line.EndsWith("/Rscript")) return R();
@@ -117,6 +117,7 @@ public sealed class SyntaxRuleSet
                 "yaml" => Yaml(),
                 "toml" => Toml(),
                 "css" => Css(),
+                "perl" => Perl(),
                 _ => null,
             };
         }
@@ -145,6 +146,7 @@ public sealed class SyntaxRuleSet
         ".r" or ".R" => R(),
         ".swift" => Swift(),
         ".kt" or ".kts" => Kotlin(),
+        ".pl" or ".pm" or ".t" => Perl(),
         _ => null,
     };
 
@@ -369,6 +371,18 @@ public sealed class SyntaxRuleSet
             Keyword(@"\b(?:fun|val|var|class|interface|object|if|else|when|for|while|do|return|import|package|public|private|protected|internal|override|data|sealed|abstract|companion|null|true|false|is|in|as|this|super|throw|try|catch|finally)\b"),
             Number(@"\b\d+(?:\.\d+)?(?:[eE][+-]?\d+)?[lLfF]?\b"),
             TypeName(@"\b[A-Z][a-zA-Z0-9]*\b")
+        )
+    };
+
+    private static SyntaxRuleSet Perl() => new()
+    {
+        Name = "Perl",
+        Rules = BuildRules(
+            Comment(@"#.*$"),
+            StringLiteral(@"""(?:\\.|[^""\\])*""|'(?:[^'\\]|\\.)*'|`(?:[^`\\]|\\.)*`"),
+            Keyword(@"\b(?:sub|my|our|local|if|else|elsif|unless|while|until|for|foreach|do|return|last|next|redo|die|warn|print|say|use|require|package|BEGIN|END|eval|chomp|chop|push|pop|shift|unshift|splice|join|split|sort|map|grep|keys|values|delete|exists|defined|undef|ref|bless|tie|untie|open|close|read|write|seek|tell|eof|binmode|length|substr|index|rindex|sprintf|printf|chdir|chmod|chown|mkdir|rmdir|rename|unlink|stat|lstat|glob|opendir|readdir|closedir|scalar|wantarray)\b"),
+            Preprocessor(@"[$@%]\w+"),
+            Number(@"\b\d+(?:\.\d+)?(?:[eE][+-]?\d+)?\b|0x[0-9a-fA-F]+|0b[01]+|0[0-7]+")
         )
     };
 
