@@ -570,6 +570,15 @@ public sealed class EditorView : View
 
     private void OnMouseEvent(object? sender, MouseEventArgs e)
     {
+        // Button1Released may arrive via MouseEvent instead of MouseClick when
+        // GrabMouse is active (platform/driver dependent).
+        if (e.Flags.HasFlag(MouseFlags.Button1Released) && _mouseButtonHeld)
+        {
+            _mouseButtonHeld = false;
+            Application.UngrabMouse();
+            e.Handled = true;
+            return;
+        }
         if (e.Flags.HasFlag(MouseFlags.ReportMousePosition) && _mouseButtonHeld && !_hexMode)
             ExtendSelectionToMousePos(e);
     }
