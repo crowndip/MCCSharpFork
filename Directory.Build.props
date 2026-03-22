@@ -1,0 +1,18 @@
+<Project>
+  <!--
+    Applied automatically to every project in the solution.
+    Strong-name signing: all assemblies are signed with the repo key pair.
+    The .snk file is committed to the repository — this is intentional for an
+    open-source project where the goal is assembly identity, not secret protection.
+  -->
+  <PropertyGroup>
+    <SignAssembly>true</SignAssembly>
+    <AssemblyOriginatorKeyFile>$(MSBuildThisFileDirectory)MCCSharpFork.snk</AssemblyOriginatorKeyFile>
+    <!-- Keep building even if the key is absent (e.g. contributor forks without the key).
+         Set to false if you want to enforce signing in CI. -->
+    <DelaySign>false</DelaySign>
+    <!-- CS8002: "referenced assembly does not have a strong name"
+         Terminal.Gui 2.0.0 is not strong-named; suppress the noise. -->
+    <NoWarn>$(NoWarn);CS8002</NoWarn>
+  </PropertyGroup>
+</Project>
