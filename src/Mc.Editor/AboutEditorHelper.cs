@@ -1,3 +1,4 @@
+using Mc.Core.Utilities;
 using Terminal.Gui;
 
 namespace Mc.Editor;
@@ -15,6 +16,7 @@ internal static class AboutEditorHelper
     public static void ShowForkFrom()    => ShowDoc("Fork From",      ForkFromText);
     public static void ShowWhyForked()   => ShowDoc("Why Forked",     WhyForkedText);
     public static void ShowNewFunctions()=> ShowDoc("New Functions",  NewFunctionsText);
+    public static void ShowSystemInfo()  => ShowDoc("System Info",    SystemInfoBuilder.Build());
 
     // ── Document viewer ──────────────────────────────────────────────────────
 

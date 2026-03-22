@@ -219,6 +219,9 @@ public sealed class McApplication : Toplevel
                     new("_Save setup",       string.Empty, () => _settings.Save()),
                 }),
 
+                // ── Right ─────────────────────────────────────────────────
+                new MenuBarItem("_Right", PanelMenuItems(left: false)),
+
                 // ── About ─────────────────────────────────────────────────
                 new MenuBarItem("_About", new MenuItem[]
                 {
@@ -227,10 +230,8 @@ public sealed class McApplication : Toplevel
                     new("_Fork from",      string.Empty, AboutDialog.ShowForkFrom),
                     new("_Why forked",     string.Empty, AboutDialog.ShowWhyForked),
                     new("_New functions",  string.Empty, AboutDialog.ShowNewFunctions),
+                    new("_System info",    string.Empty, AboutDialog.ShowSystemInfo),
                 }),
-
-                // ── Right ─────────────────────────────────────────────────
-                new MenuBarItem("_Right", PanelMenuItems(left: false)),
             },
         };
         Add(_menuBar);

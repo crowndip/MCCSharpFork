@@ -13,7 +13,7 @@ namespace Mc.Ui.Tests;
 /// Tests for every top-level menu and every menu item in McApplication.
 /// The menu structure mirrors the original GNU Midnight Commander exactly,
 /// with the addition of our custom Tools and About menus.
-/// Order: Left | File | Command | Favorites | Drives | Compression | Tools | Options | About | Right
+/// Order: Left | File | Command | Favorites | Drives | Compression | Tools | Options | Right | About
 /// </summary>
 [Collection("TUI Tests")]
 public sealed class McApplicationMenuTests
@@ -77,8 +77,8 @@ public sealed class McApplicationMenuTests
     [InlineData(5, "Compression")]
     [InlineData(6, "Tools")]
     [InlineData(7, "Options")]
-    [InlineData(8, "About")]
-    [InlineData(9, "Right")]
+    [InlineData(8, "Right")]
+    [InlineData(9, "About")]
     public void TopLevel_Menu_TitleIsCorrect(int index, string expected)
         => Assert.Contains(expected, Title(GetMenu(index)));
 

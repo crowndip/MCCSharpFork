@@ -1219,6 +1219,7 @@ public sealed class EditorView : View
     public void ExecuteAboutForkFrom()    => AboutEditorHelper.ShowForkFrom();
     public void ExecuteAboutWhyForked()   => AboutEditorHelper.ShowWhyForked();
     public void ExecuteAboutNewFunctions()=> AboutEditorHelper.ShowNewFunctions();
+    public void ExecuteAboutSystemInfo()  => AboutEditorHelper.ShowSystemInfo();
 
     public void ExecuteUndo() { _editor.Undo(); SetNeedsDraw(); }
     public void ExecuteRedo() { _editor.Redo(); SetNeedsDraw(); }

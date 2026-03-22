@@ -174,6 +174,7 @@ public sealed class EditorScreen : Toplevel
                 new MenuItem("_Fork from",      string.Empty, () => _view.ExecuteAboutForkFrom()),
                 new MenuItem("_Why forked",     string.Empty, () => _view.ExecuteAboutWhyForked()),
                 new MenuItem("_New functions",  string.Empty, () => _view.ExecuteAboutNewFunctions()),
+                new MenuItem("_System info",    string.Empty, () => _view.ExecuteAboutSystemInfo()),
             }),
           }
         };
