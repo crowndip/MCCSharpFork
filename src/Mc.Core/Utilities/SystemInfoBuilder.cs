@@ -102,16 +102,20 @@ public static class SystemInfoBuilder
 
     private static void AppendMemorySection(StringBuilder sb)
     {
-        var gcInfo   = GC.GetGCMemoryInfo();
-        long total   = gcInfo.TotalAvailableMemoryBytes;
-        long process = System.Diagnostics.Process.GetCurrentProcess().WorkingSet64;
+        var gcInfo = GC.GetGCMemoryInfo();
+        long total = gcInfo.TotalAvailableMemoryBytes;
+
+        long process = -1;
+        try { process = System.Diagnostics.Process.GetCurrentProcess().WorkingSet64; }
+        catch { }
 
         sb.AppendLine("MEMORY");
-        if (total > 0)
-            sb.AppendLine($"  Total RAM    : {FormatBytes(total)}  ({total:N0} bytes)");
-        else
-            sb.AppendLine("  Total RAM    : unknown");
-        sb.AppendLine($"  Process use  : {FormatBytes(process)}  ({process:N0} bytes)");
+        sb.AppendLine(total > 0
+            ? $"  Total RAM    : {FormatBytes(total)}  ({total:N0} bytes)"
+            : "  Total RAM    : unknown");
+        sb.AppendLine(process >= 0
+            ? $"  Process use  : {FormatBytes(process)}  ({process:N0} bytes)"
+            : "  Process use  : unknown");
     }
 
     // ── Drives ───────────────────────────────────────────────────────────────
@@ -129,13 +133,25 @@ public static class SystemInfoBuilder
         {
             if (!d.IsReady) continue;
             any = true;
-            string label = string.IsNullOrWhiteSpace(d.VolumeLabel) ? "(no label)" : d.VolumeLabel;
-            long   total = d.TotalSize;
-            long   avail = d.AvailableFreeSpace;
-            long   used  = total - avail;
-            int    pct   = total > 0 ? (int)(used * 100L / total) : 0;
-            sb.AppendLine($"  {d.Name,-12} [{d.DriveType,-10}]  Label: {label}");
-            sb.AppendLine($"    Total: {FormatBytes(total),8}   Used: {FormatBytes(used),8} ({pct,3}%)   Free: {FormatBytes(avail),8}");
+            try
+            {
+                // VolumeLabel can throw UnauthorizedAccessException on Linux when
+                // querying block-device metadata without elevated privileges.
+                string label = "(no label)";
+                try { label = string.IsNullOrWhiteSpace(d.VolumeLabel) ? "(no label)" : d.VolumeLabel; }
+                catch { }
+
+                long total = d.TotalSize;
+                long avail = d.AvailableFreeSpace;
+                long used  = total - avail;
+                int  pct   = total > 0 ? (int)(used * 100L / total) : 0;
+                sb.AppendLine($"  {d.Name,-12} [{d.DriveType,-10}]  Label: {label}");
+                sb.AppendLine($"    Total: {FormatBytes(total),8}   Used: {FormatBytes(used),8} ({pct,3}%)   Free: {FormatBytes(avail),8}");
+            }
+            catch
+            {
+                sb.AppendLine($"  {d.Name,-12} [{d.DriveType,-10}]  (access denied)");
+            }
         }
 
         if (!any)
