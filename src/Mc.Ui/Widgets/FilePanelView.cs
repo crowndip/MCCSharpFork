@@ -38,6 +38,12 @@ public sealed class FilePanelView : View
     private string _quickSearch = string.Empty;
     private bool _quickSearchActive;
 
+    // Filter mode: hides non-matching entries in-memory without reloading from VFS.
+    // Triggered by Ctrl+F. Esc clears. Navigation operates on the filtered list.
+    private string _filterText = string.Empty;
+    private bool _filterActive;
+    private List<FileEntry>? _filteredEntries; // null = no filter = show everything
+
     // Rotating dash busy indicator (#45): spinner cycles while a reload is in progress
     private static readonly char[] SpinnerChars = ['-', '\\', '|', '/'];
     private int _spinnerIndex;
@@ -87,9 +93,31 @@ public sealed class FilePanelView : View
 
     public DirectoryListing Listing => _listing;
 
+    /// <summary>
+    /// The entries currently visible in the panel: the filtered subset when a
+    /// filter is active, the full listing otherwise.
+    /// </summary>
+    private IReadOnlyList<FileEntry> VisibleEntries =>
+        _filteredEntries ?? (IReadOnlyList<FileEntry>)_listing.Entries;
+
+    /// <summary>
+    /// Converts a cursor index (into VisibleEntries) to the corresponding index
+    /// in the full _listing.Entries list. Identity when no filter is active.
+    /// </summary>
+    private int ToListingIndex(int visibleIndex)
+    {
+        if (_filteredEntries == null) return visibleIndex;
+        if (visibleIndex < 0 || visibleIndex >= _filteredEntries.Count) return -1;
+        var entry = _filteredEntries[visibleIndex];
+        var full  = _listing.Entries;
+        for (int i = 0; i < full.Count; i++)
+            if (ReferenceEquals(full[i], entry)) return i;
+        return -1;
+    }
+
     public FileEntry? CurrentEntry =>
-        _cursorIndex >= 0 && _cursorIndex < _listing.Entries.Count
-            ? _listing.Entries[_cursorIndex]
+        _cursorIndex >= 0 && _cursorIndex < VisibleEntries.Count
+            ? VisibleEntries[_cursorIndex]
             : null;
 
     public FilePanelView(DirectoryListing listing)
@@ -130,7 +158,7 @@ public sealed class FilePanelView : View
             if (e.Position.X >= col1StartX)
                 idx = _scrollOffset + contentRows + (clickY - fileAreaStart);
         }
-        return (idx >= 0 && idx < _listing.Entries.Count) ? idx : -1;
+        return (idx >= 0 && idx < VisibleEntries.Count) ? idx : -1;
     }
 
     private void OnMouseClick(object? sender, MouseEventArgs e)
@@ -153,7 +181,7 @@ public sealed class FilePanelView : View
         if (e.Flags.HasFlag(MouseFlags.Button3Clicked))
         {
             _cursorIndex = idx;
-            _listing.MarkFile(idx);
+            _listing.MarkFile(ToListingIndex(idx));
             UpdateStatus();
             CursorChanged?.Invoke(this, _cursorIndex);
             SetNeedsDraw();
@@ -164,7 +192,7 @@ public sealed class FilePanelView : View
         if (e.Flags.HasFlag(MouseFlags.Button1DoubleClicked))
         {
             _cursorIndex = idx;
-            EntryActivated?.Invoke(this, _listing.Entries[idx]);
+            EntryActivated?.Invoke(this, VisibleEntries[idx]);
         }
         else
         {
@@ -209,6 +237,10 @@ public sealed class FilePanelView : View
             _isLoading = false;  // #45: reload done — stop spinner
             _quickSearchActive = false;
             _quickSearch = string.Empty;
+            // Clear filter on directory change so the new directory shows fully.
+            _filterActive   = false;
+            _filterText     = string.Empty;
+            _filteredEntries = null;
             if (_cursorIndex >= _listing.Entries.Count)
                 _cursorIndex = Math.Max(0, _listing.Entries.Count - 1);
             EnsureCursorVisible();
@@ -254,7 +286,7 @@ public sealed class FilePanelView : View
     /// </summary>
     public void ScrollBy(int delta)
     {
-        int count = _listing.Entries.Count;
+        int count = VisibleEntries.Count;
         if (count == 0) return;
         int rows = ContentRows;
         if (rows <= 0) return;
@@ -285,6 +317,17 @@ public sealed class FilePanelView : View
 
     private void UpdateStatus()
     {
+        if (_filterActive)
+        {
+            int visible = _filteredEntries?.Count ?? _listing.Entries.Count;
+            int total   = _listing.Entries.Count;
+            var maxTextLen = Math.Max(1, Viewport.Width - 22); // reserve room for counts
+            var displayText = _filterText.Length > maxTextLen
+                ? _filterText[^maxTextLen..] : _filterText;
+            _statusText = $" Filter: {displayText}_ [{visible}/{total}]";
+            return;
+        }
+
         if (_quickSearchActive)
         {
             var maxQueryLen = Math.Max(1, Viewport.Width - 17); // " Quick search: " (16 chars) + "_"
@@ -465,7 +508,7 @@ public sealed class FilePanelView : View
             return;
         }
 
-        var entries    = _listing.Entries;
+        var entries    = VisibleEntries;
         var normalAttr = McTheme.PanelFile;
 
         for (int row = 0; row < contentRows; row++)
@@ -502,7 +545,7 @@ public sealed class FilePanelView : View
         int col2Width = innerWidth - 1 - colWidth;
         int sepX      = 1 + colWidth; // panel-local X of │ separator
         var frameAttr = _isActive ? McTheme.PanelHeader : McTheme.PanelFrame;
-        var entries   = _listing.Entries;
+        var entries   = VisibleEntries;
 
         for (int row = 0; row < contentRows; row++)
         {
@@ -746,6 +789,58 @@ public sealed class FilePanelView : View
         SetNeedsDraw();
     }
 
+    // ── Filter mode ──────────────────────────────────────────────────────────
+
+    private void ApplyFilter()
+    {
+        if (string.IsNullOrEmpty(_filterText))
+        {
+            _filteredEntries = null;
+        }
+        else
+        {
+            var cmp = QuickSearchCaseSensitive
+                ? StringComparison.Ordinal
+                : StringComparison.OrdinalIgnoreCase;
+            _filteredEntries = _listing.Entries
+                .Where(e => e.IsParentDir || e.Name.Contains(_filterText, cmp))
+                .ToList();
+        }
+        _cursorIndex  = 0;
+        _scrollOffset = 0;
+        UpdateStatus();
+        SetNeedsDraw();
+    }
+
+    private void ExitFilter(bool clearResults)
+    {
+        // Remember the name of the currently selected entry so we can restore
+        // the cursor position in the unfiltered list.
+        string? selectedName = CurrentEntry?.Name;
+
+        _filterActive    = false;
+        _filterText      = string.Empty;
+        if (clearResults)
+            _filteredEntries = null;
+
+        // If we cleared the filter, try to land the cursor on the same entry.
+        if (clearResults && selectedName != null)
+        {
+            var full = _listing.Entries;
+            for (int i = 0; i < full.Count; i++)
+            {
+                if (full[i].Name == selectedName)
+                {
+                    _cursorIndex = i;
+                    break;
+                }
+            }
+        }
+        EnsureCursorVisible();
+        UpdateStatus();
+        SetNeedsDraw();
+    }
+
     // --- Cursor positioning (#38) ---
 
     /// <summary>
@@ -754,6 +849,15 @@ public sealed class FilePanelView : View
     /// </summary>
     public override System.Drawing.Point? PositionCursor()
     {
+        if (_filterActive)
+        {
+            int h = Viewport.Height;
+            int statusRow = h - 2;
+            const string prefix = " Filter: ";
+            int col = 1 + prefix.Length + _filterText.Length;
+            Move(col, statusRow);
+            return new System.Drawing.Point(col, statusRow);
+        }
         if (_quickSearchActive)
         {
             int h = Viewport.Height;
@@ -771,6 +875,49 @@ public sealed class FilePanelView : View
 
     protected override bool OnKeyDown(Key keyEvent)
     {
+        // ── Filter mode ────────────────────────────────────────────────────
+        if (_filterActive)
+        {
+            switch (keyEvent.KeyCode)
+            {
+                case KeyCode.Esc:
+                    ExitFilter(clearResults: true);
+                    return true;
+                case KeyCode.Enter:
+                    // Leave filter results in place but stop typing; activate entry.
+                    ExitFilter(clearResults: false);
+                    EntryActivated?.Invoke(this, CurrentEntry);
+                    return true;
+                case KeyCode.Backspace:
+                    if (_filterText.Length > 0)
+                        _filterText = _filterText[..^1];
+                    if (_filterText.Length == 0)
+                        ExitFilter(clearResults: true);
+                    else
+                        ApplyFilter();
+                    return true;
+            }
+            // Printable chars extend the filter term.
+            var filterRune = keyEvent.AsRune;
+            if (filterRune.Value >= 32 && !keyEvent.IsCtrl && !keyEvent.IsAlt)
+            {
+                _filterText += (char)filterRune.Value;
+                ApplyFilter();
+                return true;
+            }
+            // Navigation keys (arrows, PgUp/Dn, Home/End) fall through to the
+            // switch below so the user can move through filtered results while
+            // still in filter mode. Anything else exits filter silently.
+            bool isNavKey = keyEvent.KeyCode is KeyCode.CursorUp or KeyCode.CursorDown
+                or KeyCode.PageUp or KeyCode.PageDown or KeyCode.Home or KeyCode.End
+                or KeyCode.CursorLeft or KeyCode.CursorRight;
+            if (!isNavKey)
+            {
+                ExitFilter(clearResults: false);
+                // Don't return — let the key be handled normally below.
+            }
+        }
+
         // ── Quick search mode ──────────────────────────────────────────────
         if (_quickSearchActive)
         {
@@ -819,7 +966,7 @@ public sealed class FilePanelView : View
                 return true;
 
             case KeyCode.CursorDown:
-                if (_cursorIndex < _listing.Entries.Count - 1)
+                if (_cursorIndex < VisibleEntries.Count - 1)
                 {
                     _cursorIndex++;
                     EnsureCursorVisible();
@@ -831,7 +978,7 @@ public sealed class FilePanelView : View
 
             // Lynx-like motion (#6): Left = go to parent dir, Right on dir = enter it
             case KeyCode.CursorLeft when LynxLikeMotion:
-                EntryActivated?.Invoke(this, _listing.Entries.FirstOrDefault(e => e.IsParentDir));
+                EntryActivated?.Invoke(this, _listing.Entries.FirstOrDefault(e => e.IsParentDir)); // always use full list for ..
                 return true;
 
             case KeyCode.CursorRight when LynxLikeMotion:
@@ -856,7 +1003,7 @@ public sealed class FilePanelView : View
             case KeyCode.PageDown:
             {
                 int step = Math.Max(1, ContentRows);
-                _cursorIndex = Math.Min(_listing.Entries.Count - 1, _cursorIndex + step);
+                _cursorIndex = Math.Min(VisibleEntries.Count - 1, _cursorIndex + step);
                 EnsureCursorVisible();
                 UpdateStatus();
                 CursorChanged?.Invoke(this, _cursorIndex);
@@ -873,7 +1020,7 @@ public sealed class FilePanelView : View
                 return true;
 
             case KeyCode.End:
-                _cursorIndex = Math.Max(0, _listing.Entries.Count - 1);
+                _cursorIndex = Math.Max(0, VisibleEntries.Count - 1);
                 EnsureCursorVisible();
                 UpdateStatus();
                 CursorChanged?.Invoke(this, _cursorIndex);
@@ -890,7 +1037,7 @@ public sealed class FilePanelView : View
                 return true;
 
             case KeyCode.Backspace:
-                EntryActivated?.Invoke(this, _listing.Entries.FirstOrDefault(e => e.IsParentDir));
+                EntryActivated?.Invoke(this, _listing.Entries.FirstOrDefault(e => e.IsParentDir)); // always use full list for ..
                 return true;
 
             // Alt+S / Alt+s → start quick search (same as typing a char). (#61)
@@ -899,6 +1046,20 @@ public sealed class FilePanelView : View
                 {
                     _quickSearch = string.Empty;
                     _quickSearchActive = true;
+                    UpdateStatus();
+                    SetNeedsDraw();
+                }
+                return true;
+
+            // Ctrl+F → start filter mode (narrows visible entries in-place).
+            case KeyCode.F | KeyCode.CtrlMask:
+                if (_isActive)
+                {
+                    _filterText      = string.Empty;
+                    _filterActive    = true;
+                    _filteredEntries = null;
+                    _cursorIndex     = 0;
+                    _scrollOffset    = 0;
                     UpdateStatus();
                     SetNeedsDraw();
                 }
@@ -945,7 +1106,7 @@ public sealed class FilePanelView : View
     private void DrawScrollbar(int w, int h)
     {
         if (!ShowScrollbar) return;
-        var entries = _listing.Entries;
+        var entries = VisibleEntries;
         int visibleRows = ContentRows;
         if (entries.Count <= visibleRows) return; // fits without scrollbar
 
@@ -968,7 +1129,7 @@ public sealed class FilePanelView : View
 
     public void MoveCursorTo(int index)
     {
-        if (index < 0 || index >= _listing.Entries.Count) return;
+        if (index < 0 || index >= VisibleEntries.Count) return;
         _cursorIndex = index;
         EnsureCursorVisible();
         UpdateStatus();
@@ -977,8 +1138,8 @@ public sealed class FilePanelView : View
 
     public void ToggleMark()
     {
-        _listing.MarkFile(_cursorIndex);
-        if (MarkMovesCursor && _cursorIndex < _listing.Entries.Count - 1) // #7
+        _listing.MarkFile(ToListingIndex(_cursorIndex));
+        if (MarkMovesCursor && _cursorIndex < VisibleEntries.Count - 1) // #7
         {
             _cursorIndex++;
             EnsureCursorVisible();
@@ -990,7 +1151,7 @@ public sealed class FilePanelView : View
     /// <summary>Jumps to the first entry in the panel (Alt+G). (#27)</summary>
     public void JumpToFirst()
     {
-        if (_listing.Entries.Count == 0) return;
+        if (VisibleEntries.Count == 0) return;
         _cursorIndex = 0;
         _scrollOffset = 0;
         UpdateStatus();
@@ -1001,8 +1162,8 @@ public sealed class FilePanelView : View
     /// <summary>Jumps to the middle entry in the panel (Alt+R). (#27)</summary>
     public void JumpToMiddle()
     {
-        if (_listing.Entries.Count == 0) return;
-        _cursorIndex = (_listing.Entries.Count - 1) / 2;
+        if (VisibleEntries.Count == 0) return;
+        _cursorIndex = (VisibleEntries.Count - 1) / 2;
         EnsureCursorVisible();
         UpdateStatus();
         CursorChanged?.Invoke(this, _cursorIndex);
@@ -1012,8 +1173,8 @@ public sealed class FilePanelView : View
     /// <summary>Jumps to the last entry in the panel (Alt+J). (#27)</summary>
     public void JumpToLast()
     {
-        if (_listing.Entries.Count == 0) return;
-        _cursorIndex = _listing.Entries.Count - 1;
+        if (VisibleEntries.Count == 0) return;
+        _cursorIndex = VisibleEntries.Count - 1;
         EnsureCursorVisible();
         UpdateStatus();
         CursorChanged?.Invoke(this, _cursorIndex);
