@@ -1544,6 +1544,17 @@ public sealed class McApplication : Toplevel
             Application.RequestStop(d);
         };
 
+        // Replace button — only useful when a content pattern was searched
+        bool hasContentPattern = !string.IsNullOrEmpty(opts.ContentPattern);
+        var replaceBtn = new Button { Text = "Replace...", Enabled = false };
+        replaceBtn.Accepting += (_, _) =>
+        {
+            var snapshot = resultPaths.ToList();
+            afterClose = () => Mc.Ui.Dialogs.FindReplaceDialog.Show(snapshot, opts);
+            cts.Cancel();
+            Application.RequestStop(d);
+        };
+
         bool restartSearch = false;
         var againBtn = new Button { Text = "Again" };
         againBtn.Accepting += (_, _) => { restartSearch = true; cts.Cancel(); Application.RequestStop(d); };
@@ -1556,6 +1567,7 @@ public sealed class McApplication : Toplevel
         d.AddButton(panelizeBtn);
         d.AddButton(viewBtn);
         d.AddButton(editBtn);
+        if (hasContentPattern) d.AddButton(replaceBtn);
         d.AddButton(againBtn);
         d.AddButton(closeBtn);
 
@@ -1682,6 +1694,7 @@ public sealed class McApplication : Toplevel
                 panelizeBtn.Enabled = n > 0;
                 viewBtn.Enabled     = n > 0;
                 editBtn.Enabled     = n > 0;
+                if (hasContentPattern) replaceBtn.Enabled = n > 0;
             });
         });
 

@@ -34,7 +34,7 @@ Effort scale: 🟢 Low · 🟡 Medium · 🔴 High
 |---|---------|--------|-------|
 | 14 | **Fuzzy finder integration (fzf-style)** — Ctrl+P quick-open across current tree | 🟡 | Can be self-contained without fzf binary |
 | 15 | **Content search with in-panel results** — find files by content, show matches in panel | 🟡 | Reuse existing search providers |
-| 16 | **Find & replace across multiple files** — from Find dialog, apply replacement to all matches | 🟡 | Extend current search; show confirmation dialog |
+| 16 | ~~**Find & replace across multiple files** — from Find dialog, apply replacement to all matches~~ | 🟡 | ~~Extend current search; show confirmation dialog~~ |
 | 17 | **Ripgrep / ag integration** — use faster external searcher when available | 🟢 | Fall back to built-in if not found |
 | 18 | **Search history** — remember previous search terms across sessions | 🟢 | Persist last N queries in settings |
 
