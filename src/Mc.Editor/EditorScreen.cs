@@ -146,6 +146,10 @@ public sealed class EditorScreen : Toplevel
                 new MenuItem("_External formatter…", string.Empty, () => _view.ExecuteExternalFormatter()),
                 null!,
                 new MenuItem("_Pretty Print (JSON/XML)", string.Empty, () => _view.ExecutePrettyPrint()),
+                null!,
+                new MenuItem("Validate _XML",                string.Empty, () => _view.ExecuteValidateXml()),
+                new MenuItem("Validate XSD _Schema",         string.Empty, () => _view.ExecuteValidateXsd()),
+                new MenuItem("Validate XML against _XSD…",   string.Empty, () => _view.ExecuteValidateXmlAgainstXsd()),
             }),
             new MenuBarItem("_Window", new MenuItem[]
             {

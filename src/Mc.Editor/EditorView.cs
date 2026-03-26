@@ -2223,6 +2223,181 @@ public sealed class EditorView : View
         catch (Exception ex) { error = ex.Message; return false; }
     }
 
+    // ─── XML / XSD Validation ────────────────────────────────────────────────
+
+    public void ExecuteValidateXml()
+    {
+        if (_editor.IsLargeFile)
+        {
+            MessageBox.ErrorQuery("Validate XML", "Validation is not available for large files (> 10 MB).", "OK");
+            return;
+        }
+        var text = _editor.Buffer.GetText();
+        if (string.IsNullOrWhiteSpace(text)) return;
+
+        var errors = CollectXmlWellFormedErrors(text);
+        if (errors.Count == 0)
+            MessageBox.Query("Validate XML", "Document is well-formed XML.", "OK");
+        else
+            ShowValidationResults("XML Validation Errors", errors);
+    }
+
+    public void ExecuteValidateXsd()
+    {
+        if (_editor.IsLargeFile)
+        {
+            MessageBox.ErrorQuery("Validate XSD", "Validation is not available for large files (> 10 MB).", "OK");
+            return;
+        }
+        var text = _editor.Buffer.GetText();
+        if (string.IsNullOrWhiteSpace(text)) return;
+
+        var errors = CollectXsdSchemaErrors(text);
+        if (errors.Count == 0)
+            MessageBox.Query("Validate XSD", "Schema is valid.", "OK");
+        else
+            ShowValidationResults("XSD Validation Errors", errors);
+    }
+
+    public void ExecuteValidateXmlAgainstXsd()
+    {
+        if (_editor.IsLargeFile)
+        {
+            MessageBox.ErrorQuery("Validate against XSD", "Validation is not available for large files (> 10 MB).", "OK");
+            return;
+        }
+        var text = _editor.Buffer.GetText();
+        if (string.IsNullOrWhiteSpace(text)) return;
+
+        var defaultXsd = Path.ChangeExtension(_editor.FilePath ?? string.Empty, ".xsd");
+        var xsdPath = PromptInput("Validate against XSD", "XSD schema file:", defaultXsd ?? string.Empty);
+        if (xsdPath == null) return;
+        xsdPath = xsdPath.Trim();
+        if (string.IsNullOrEmpty(xsdPath)) return;
+
+        if (!File.Exists(xsdPath))
+        {
+            MessageBox.ErrorQuery("Validate against XSD", $"File not found:\n{xsdPath}", "OK");
+            return;
+        }
+
+        var errors = CollectXmlAgainstXsdErrors(text, xsdPath);
+        if (errors.Count == 0)
+            MessageBox.Query("Validate against XSD", "Document is valid against the schema.", "OK");
+        else
+            ShowValidationResults("Schema Validation Errors", errors);
+    }
+
+    private static List<string> CollectXmlWellFormedErrors(string text)
+    {
+        var errors = new List<string>();
+        try
+        {
+            var settings = new System.Xml.XmlReaderSettings
+            {
+                DtdProcessing = System.Xml.DtdProcessing.Ignore,
+                XmlResolver   = null,
+            };
+            using var sr = new System.IO.StringReader(text);
+            using var xr = System.Xml.XmlReader.Create(sr, settings);
+            while (xr.Read()) { }
+        }
+        catch (System.Xml.XmlException ex)
+        {
+            errors.Add($"Line {ex.LineNumber}, Col {ex.LinePosition}: {ex.Message}");
+        }
+        return errors;
+    }
+
+    private static List<string> CollectXsdSchemaErrors(string text)
+    {
+        var errors = new List<string>();
+        try
+        {
+            var schemaSet = new System.Xml.Schema.XmlSchemaSet();
+            schemaSet.ValidationEventHandler += (_, e) =>
+            {
+                var prefix = e.Severity == System.Xml.Schema.XmlSeverityType.Error ? "Error" : "Warning";
+                errors.Add($"{prefix} (Line {e.Exception?.LineNumber}, Col {e.Exception?.LinePosition}): {e.Message}");
+            };
+            var readerSettings = new System.Xml.XmlReaderSettings
+            {
+                DtdProcessing = System.Xml.DtdProcessing.Ignore,
+                XmlResolver   = null,
+            };
+            using var sr = new System.IO.StringReader(text);
+            using var xr = System.Xml.XmlReader.Create(sr, readerSettings);
+            schemaSet.Add(null, xr);
+            schemaSet.Compile();
+        }
+        catch (System.Xml.Schema.XmlSchemaException ex)
+        {
+            errors.Add($"Line {ex.LineNumber}, Col {ex.LinePosition}: {ex.Message}");
+        }
+        catch (System.Xml.XmlException ex)
+        {
+            errors.Add($"Line {ex.LineNumber}, Col {ex.LinePosition}: {ex.Message}");
+        }
+        return errors;
+    }
+
+    private static List<string> CollectXmlAgainstXsdErrors(string xmlText, string xsdPath)
+    {
+        var errors = new List<string>();
+        try
+        {
+            var schemaSet = new System.Xml.Schema.XmlSchemaSet();
+            schemaSet.Add(null, xsdPath);
+
+            var settings = new System.Xml.XmlReaderSettings
+            {
+                DtdProcessing    = System.Xml.DtdProcessing.Ignore,
+                XmlResolver      = null,
+                ValidationType   = System.Xml.ValidationType.Schema,
+                Schemas          = schemaSet,
+            };
+            settings.ValidationEventHandler += (_, e) =>
+            {
+                var prefix = e.Severity == System.Xml.Schema.XmlSeverityType.Error ? "Error" : "Warning";
+                errors.Add($"{prefix} (Line {e.Exception?.LineNumber}, Col {e.Exception?.LinePosition}): {e.Message}");
+            };
+            using var sr = new System.IO.StringReader(xmlText);
+            using var xr = System.Xml.XmlReader.Create(sr, settings);
+            while (xr.Read()) { }
+        }
+        catch (System.Xml.Schema.XmlSchemaException ex)
+        {
+            errors.Add($"Schema error (Line {ex.LineNumber}, Col {ex.LinePosition}): {ex.Message}");
+        }
+        catch (System.Xml.XmlException ex)
+        {
+            errors.Add($"Line {ex.LineNumber}, Col {ex.LinePosition}: {ex.Message}");
+        }
+        return errors;
+    }
+
+    private static void ShowValidationResults(string title, List<string> errors)
+    {
+        var d = new Dialog { Title = title, Width = 76, Height = 20 };
+        d.Add(new Label { X = 1, Y = 0, Text = $"{errors.Count} issue(s) found:" });
+        var tv = new TextView
+        {
+            X        = 1,
+            Y        = 1,
+            Width    = Dim.Fill(1),
+            Height   = Dim.Fill(3),
+            ReadOnly = true,
+            Text     = string.Join("\n", errors),
+            WordWrap = false,
+        };
+        d.Add(tv);
+        var ok = new Button { X = Pos.Center(), Y = Pos.AnchorEnd(1), Text = "OK", IsDefault = true };
+        ok.Accepting += (_, _) => Application.RequestStop(d);
+        d.AddButton(ok);
+        Application.Run(d);
+        d.Dispose();
+    }
+
     public void ExecuteExternalFormatter()
     {
         var cmdStr = PromptInput("External Formatter", "Formatter command:", "fmt");
