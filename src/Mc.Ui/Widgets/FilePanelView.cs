@@ -1,5 +1,6 @@
 using Mc.Core.Models;
 using Mc.Core.Utilities;
+using Mc.Core.Vfs;
 using Mc.FileManager;
 using Terminal.Gui;
 
@@ -43,6 +44,11 @@ public sealed class FilePanelView : View
     private string _filterText = string.Empty;
     private bool _filterActive;
     private List<FileEntry>? _filteredEntries; // null = no filter = show everything
+
+    // Recursive (flat) view — lists all files under current dir recursively (#10).
+    // No subdirectory rows; entry Name is a relative path from the current root.
+    private bool _recursiveViewActive;
+    private List<FileEntry>? _recursiveEntries;
 
     // Rotating dash busy indicator (#45): spinner cycles while a reload is in progress
     private static readonly char[] SpinnerChars = ['-', '\\', '|', '/'];
@@ -99,11 +105,15 @@ public sealed class FilePanelView : View
     public DirectoryListing Listing => _listing;
 
     /// <summary>
-    /// The entries currently visible in the panel: the filtered subset when a
-    /// filter is active, the full listing otherwise.
+    /// The entries currently visible in the panel: recursive entries when recursive
+    /// view is active, the filtered subset when a filter is active, the full listing otherwise.
     /// </summary>
     private IReadOnlyList<FileEntry> VisibleEntries =>
-        _filteredEntries ?? (IReadOnlyList<FileEntry>)_listing.Entries;
+        _recursiveViewActive && _recursiveEntries != null
+            ? (IReadOnlyList<FileEntry>)_recursiveEntries
+            : (_filteredEntries ?? (IReadOnlyList<FileEntry>)_listing.Entries);
+
+    public bool IsRecursiveView => _recursiveViewActive;
 
     /// <summary>
     /// Converts a cursor index (into VisibleEntries) to the corresponding index
@@ -186,7 +196,7 @@ public sealed class FilePanelView : View
         if (e.Flags.HasFlag(MouseFlags.Button3Clicked))
         {
             _cursorIndex = idx;
-            _listing.MarkFile(ToListingIndex(idx));
+            ToggleMarkEntry(idx);
             UpdateStatus();
             CursorChanged?.Invoke(this, _cursorIndex);
             SetNeedsDraw();
@@ -243,11 +253,21 @@ public sealed class FilePanelView : View
             _quickSearchActive = false;
             _quickSearch = string.Empty;
             // Clear filter on directory change so the new directory shows fully.
-            _filterActive   = false;
-            _filterText     = string.Empty;
+            _filterActive    = false;
+            _filterText      = string.Empty;
             _filteredEntries = null;
-            if (_cursorIndex >= _listing.Entries.Count)
-                _cursorIndex = Math.Max(0, _listing.Entries.Count - 1);
+
+            if (_recursiveViewActive)
+            {
+                _recursiveEntries = BuildRecursiveEntries();
+                if (_cursorIndex >= _recursiveEntries.Count)
+                    _cursorIndex = Math.Max(0, _recursiveEntries.Count - 1);
+            }
+            else
+            {
+                if (_cursorIndex >= _listing.Entries.Count)
+                    _cursorIndex = Math.Max(0, _listing.Entries.Count - 1);
+            }
             EnsureCursorVisible();
             UpdateStatus();
             SetNeedsDraw();
@@ -342,12 +362,26 @@ public sealed class FilePanelView : View
             return;
         }
 
-        var marked = _listing.MarkedCount;
+        // In recursive view count marked entries directly from _recursiveEntries
+        int marked;
+        long markedSize;
+        if (_recursiveViewActive && _recursiveEntries != null)
+        {
+            var markedEntries = _recursiveEntries.Where(e => e.IsMarked).ToList();
+            marked     = markedEntries.Count;
+            markedSize = markedEntries.Sum(e => e.Size);
+        }
+        else
+        {
+            marked     = _listing.MarkedCount;
+            markedSize = _listing.TotalMarkedSize;
+        }
+
         if (marked > 0)
         {
             // Singular/plural (#34)
             string label = marked == 1 ? "file" : "files";
-            _statusText = $" {marked} {label}, {FileSizeFormatter.Format(_listing.TotalMarkedSize)} tagged";
+            _statusText = $" {marked} {label}, {FileSizeFormatter.Format(markedSize)} tagged";
         }
         else
         {
@@ -405,6 +439,7 @@ public sealed class FilePanelView : View
         // ── Top border: ┌─── ~/path/ ───┐  (trailing slash per #32) ──────
         // Spinning dash while loading (#45)
         var pathStr = PathUtils.TildePath(_listing.CurrentPath.ToString());
+        if (_recursiveViewActive) pathStr = "[Recursive] " + pathStr;
         if (_isLoading) pathStr = $"{SpinnerChars[_spinnerIndex]} {pathStr}";
         if (!pathStr.EndsWith('/')) pathStr += '/';
 
@@ -1171,7 +1206,7 @@ public sealed class FilePanelView : View
 
     public void ToggleMark()
     {
-        _listing.MarkFile(ToListingIndex(_cursorIndex));
+        ToggleMarkEntry(_cursorIndex);
         if (MarkMovesCursor && _cursorIndex < VisibleEntries.Count - 1) // #7
         {
             _cursorIndex++;
@@ -1179,6 +1214,22 @@ public sealed class FilePanelView : View
         }
         UpdateStatus();
         SetNeedsDraw();
+    }
+
+    /// <summary>Toggles the mark on the entry at <paramref name="visibleIndex"/>,
+    /// routing through _listing in normal mode and directly on the entry in recursive mode.</summary>
+    private void ToggleMarkEntry(int visibleIndex)
+    {
+        if (_recursiveViewActive)
+        {
+            if (visibleIndex < 0 || visibleIndex >= (_recursiveEntries?.Count ?? 0)) return;
+            var entry = _recursiveEntries![visibleIndex];
+            entry.IsMarked = !entry.IsMarked;
+        }
+        else
+        {
+            _listing.MarkFile(ToListingIndex(visibleIndex));
+        }
     }
 
     /// <summary>Jumps to the first entry in the panel (Alt+G). (#27)</summary>
@@ -1228,4 +1279,88 @@ public sealed class FilePanelView : View
     }
 
     public void Refresh() => _listing.Reload();
+
+    // ─── Recursive (flat) view (#10) ─────────────────────────────────────────
+
+    /// <summary>Toggles recursive view on or off for this panel.</summary>
+    public void ToggleRecursiveView()
+    {
+        if (_recursiveViewActive)
+        {
+            _recursiveViewActive = false;
+            _recursiveEntries    = null;
+            _cursorIndex  = 0;
+            _scrollOffset = 0;
+        }
+        else
+        {
+            _recursiveEntries    = BuildRecursiveEntries();
+            _recursiveViewActive = true;
+            _cursorIndex  = 0;
+            _scrollOffset = 0;
+        }
+        UpdateStatus();
+        SetNeedsDraw();
+    }
+
+    /// <summary>Enumerates all files under the current directory recursively and
+    /// returns them as <see cref="FileEntry"/> objects whose Name is the relative
+    /// path from the panel root.</summary>
+    private List<FileEntry> BuildRecursiveEntries()
+    {
+        var basePath = _listing.CurrentPath.Path;
+        var result   = new List<FileEntry>();
+        try
+        {
+            var opts = new EnumerationOptions
+            {
+                RecurseSubdirectories = true,
+                IgnoreInaccessible    = true,
+                AttributesToSkip      = FileAttributes.None,  // include hidden files
+            };
+            foreach (var filePath in Directory.EnumerateFiles(basePath, "*", opts))
+            {
+                try
+                {
+                    var info         = new FileInfo(filePath);
+                    var relativeName = Path.GetRelativePath(basePath, filePath);
+
+                    UnixFileMode perms = 0;
+                    bool isExec       = false;
+                    if (!OperatingSystem.IsWindows())
+                    {
+                        try
+                        {
+                            perms   = info.UnixFileMode;
+                            isExec  = (perms & (UnixFileMode.UserExecute |
+                                                UnixFileMode.GroupExecute |
+                                                UnixFileMode.OtherExecute)) != 0;
+                        }
+                        catch { /* not supported on this platform */ }
+                    }
+
+                    result.Add(new FileEntry
+                    {
+                        DirEntry = new VfsDirEntry
+                        {
+                            Name             = relativeName,
+                            FullPath         = VfsPath.FromLocal(filePath),
+                            Size             = info.Length,
+                            ModificationTime = info.LastWriteTime,
+                            AccessTime       = info.LastAccessTime,
+                            CreationTime     = info.CreationTime,
+                            IsHidden         = (info.Attributes & FileAttributes.Hidden) != 0,
+                            IsExecutable     = isExec,
+                            Permissions      = perms,
+                        }
+                    });
+                }
+                catch { /* skip inaccessible file */ }
+            }
+            result.Sort((a, b) =>
+                string.Compare(a.Name, b.Name, StringComparison.OrdinalIgnoreCase));
+        }
+        catch { /* best-effort — return whatever we collected */ }
+        return result;
+    }
 }

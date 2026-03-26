@@ -90,6 +90,8 @@ public sealed class McApplication : Toplevel
             new MenuItem("_Info",              "Ctrl+X I",   () => ToggleOverlayModeForPanel(left, PanelDisplayMode.Info)),
             new MenuItem("_Tree",              "Ctrl+X T",   () => ToggleOverlayModeForPanel(left, PanelDisplayMode.Tree)),
             new MenuItem("_Panelize",          string.Empty, ExternalPanelize),
+            new MenuItem("F_lat/Recursive view", string.Empty,
+                () => (left ? _leftPanelView : _rightPanelView).ToggleRecursiveView()),
             null!,
             new MenuItem("_Sort order...",     string.Empty, ShowSortDialog),
             new MenuItem("_Filter...",         string.Empty, () => ShowFilterDialog(left)),
