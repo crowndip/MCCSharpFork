@@ -252,7 +252,7 @@ public sealed class McApplication : Toplevel
         _leftPanelView.BecameActive += (_, _) => SetActivePanel(_leftPanelView);
         _leftPanelView.ScrollOtherRequested += (_, delta) => _rightPanelView.ScrollBy(delta);
         _leftPanelView.IsActive = true;
-        ApplyPanelSettings(_leftPanelView);
+        ApplyPanelSettings(_leftPanelView, left: true);
         // ApplyFilterSettings() is called after both panels are constructed (see below)
         _controller.LeftPanel.Changed += OnPanelDirectoryChanged;
 
@@ -267,7 +267,7 @@ public sealed class McApplication : Toplevel
         _rightPanelView.EntryActivated += OnPanelEntryActivated;
         _rightPanelView.BecameActive += (_, _) => SetActivePanel(_rightPanelView);
         _rightPanelView.ScrollOtherRequested += (_, delta) => _leftPanelView.ScrollBy(delta);
-        ApplyPanelSettings(_rightPanelView);
+        ApplyPanelSettings(_rightPanelView, left: false);
         _controller.RightPanel.Changed += OnPanelDirectoryChanged;
 
         // Apply filter settings now that both panels are constructed (#4)
@@ -681,7 +681,7 @@ public sealed class McApplication : Toplevel
     }
 
     /// <summary>Push McSettings values into both panel views. Called after settings change.</summary>
-    private void ApplyPanelSettings(FilePanelView panel)  // #5 #6 #7
+    private void ApplyPanelSettings(FilePanelView panel, bool left = false)  // #5 #6 #7
     {
         panel.ShowFreeSpace             = _settings.ShowFreeSpace;
         panel.LynxLikeMotion           = _settings.LynxLikeMotion;
@@ -691,6 +691,8 @@ public sealed class McApplication : Toplevel
         panel.ShowMiniStatus           = _settings.ShowMiniStatus;       // #24
         panel.ShowExecutableSuffix     = _settings.ShowExecutableSuffix; // #36
         panel.FollowSymlinks           = _settings.PanelFollowSymlinks;  // #37
+        panel.SplitNameExtension       = left ? _settings.LeftSplitNameExtension
+                                               : _settings.RightSplitNameExtension;
     }
 
     private void OnPanelEntryActivated(object? sender, FileEntry? entry)
@@ -3328,7 +3330,7 @@ public sealed class McApplication : Toplevel
         {
             Title       = "Listing Format",
             Width       = 52,
-            Height      = 14,
+            Height      = 17,
             ColorScheme = McTheme.Dialog,
         };
 
@@ -3362,8 +3364,23 @@ public sealed class McApplication : Toplevel
         };
         d.Add(fmtField);
 
+        // Split name/extension — only meaningful in Full mode
+        var splitCb = new CheckBox
+        {
+            X           = 2,
+            Y           = 9,
+            Text        = "Split name / extension into separate columns",
+            CheckedState = panel.SplitNameExtension ? CheckState.Checked : CheckState.UnChecked,
+            ColorScheme = McTheme.Dialog,
+            Enabled     = sel == 0,
+        };
+        d.Add(splitCb);
+
         rg.SelectedItemChanged += (_, args) =>
+        {
             fmtField.Enabled = args.SelectedItem == 3;
+            splitCb.Enabled  = args.SelectedItem == 0;   // Full mode only
+        };
 
         var ok = new Button { Text = "OK", IsDefault = true };
         ok.Accepting += (_, _) =>
@@ -3377,6 +3394,13 @@ public sealed class McApplication : Toplevel
             };
             if (rg.SelectedItem == 3 && !string.IsNullOrWhiteSpace(fmtField.Text?.ToString()))
                 panel.UserFormatString = fmtField.Text!.ToString()!;
+
+            bool split = splitCb.CheckedState == CheckState.Checked;
+            panel.SplitNameExtension = split;
+            if (left) _settings.LeftSplitNameExtension  = split;
+            else      _settings.RightSplitNameExtension = split;
+            _settings.Save();
+
             Application.RequestStop(d);
         };
         var cancel = new Button { Text = "Cancel" };
@@ -4751,8 +4775,8 @@ public sealed class McApplication : Toplevel
             _settings.PanelFollowSymlinks      = followLinks.CheckedState   == CheckState.Checked;  // #37
             _settings.Save();
             // Apply live settings to panels (#5 #6 #7 #9 #24)
-            ApplyPanelSettings(_leftPanelView);
-            ApplyPanelSettings(_rightPanelView);
+            ApplyPanelSettings(_leftPanelView,  left: true);
+            ApplyPanelSettings(_rightPanelView, left: false);
             // Apply filter settings (ShowHidden, ShowBackup) to both panels (#4)
             ApplyFilterSettings();
             Application.RequestStop(d);

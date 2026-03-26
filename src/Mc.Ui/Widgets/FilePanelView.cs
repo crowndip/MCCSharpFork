@@ -61,6 +61,11 @@ public sealed class FilePanelView : View
     public bool ShowMiniStatus           { get; set; } = true;  // #24
     public bool ShowExecutableSuffix     { get; set; }          // #36 append * to executables
     public bool FollowSymlinks           { get; set; }          // #37 symlink-to-dir gets dir color
+    /// <summary>
+    /// When true, the Full listing mode splits the name column into a
+    /// basename sub-column and an extension sub-column.
+    /// </summary>
+    public bool SplitNameExtension       { get; set; }
 
     public event EventHandler<FileEntry?>? EntryActivated;
     public event EventHandler<int>? CursorChanged;
@@ -474,6 +479,7 @@ public sealed class FilePanelView : View
         // Sort direction indicator on active sort column (#9, #31, #39)
         string sortInd = sort.Descending ? "↓" : "↑";
         bool sortName  = sort.Field == SortField.Name;
+        bool sortExt   = sort.Field == SortField.Extension;
         bool sortSize  = sort.Field == SortField.Size;
         bool sortDate  = sort.Field == SortField.ModificationTime;
 
@@ -486,11 +492,20 @@ public sealed class FilePanelView : View
             Driver!.AddStr(txt);
         }
 
-        string nameSeg = " Name" + (sortName ? sortInd : string.Empty);
         string sizeSeg = "Size" + (sortSize ? sortInd : string.Empty);
         string dateSeg = "Modify time" + (sortDate ? sortInd : string.Empty);
 
-        DrawSeg(nameSeg, sortName, nameWidth);
+        if (SplitNameExtension && _listingMode == PanelListingMode.Full)
+        {
+            int baseWidth = nameWidth - ExtWidth - 1;
+            DrawSeg(" Name" + (sortName ? sortInd : string.Empty), sortName, baseWidth);
+            Driver!.SetAttribute(McTheme.PanelHeader); Driver!.AddStr(" ");
+            DrawSeg("Ext" + (sortExt ? sortInd : string.Empty), sortExt, ExtWidth);
+        }
+        else
+        {
+            DrawSeg(" Name" + (sortName ? sortInd : string.Empty), sortName, nameWidth);
+        }
         DrawSeg(sizeSeg, sortSize, sizeWidth, padLeft: true);
         Driver!.SetAttribute(McTheme.PanelHeader); Driver!.AddStr(" ");
         DrawSeg(dateSeg, sortDate, dateWidth);
@@ -603,6 +618,9 @@ public sealed class FilePanelView : View
 
     // --- Entry formatting ---
 
+    /// <summary>Width reserved for the extension sub-column when SplitNameExtension is on.</summary>
+    private const int ExtWidth = 5;
+
     private static (int nameWidth, int sizeWidth, int dateWidth) ColumnWidths(int innerWidth)
     {
         const int sizeWidth = 8;
@@ -628,11 +646,26 @@ public sealed class FilePanelView : View
         var marker = entry.IsMarked ? "*" : " ";
 
         // No prefix chars for directories/symlinks — colour alone distinguishes them (#1, #2)
-        string name = entry.IsParentDir ? ".." : entry.Name;
+        string rawName = entry.IsParentDir ? ".." : entry.Name;
         // Append * suffix for executables when option is on (#36)
-        if (ShowExecutableSuffix && entry.IsExecutable && !entry.IsDirectory) name += "*";
-        if (name.Length > nameWidth) name = name[..(nameWidth - 1)] + "~";
-        name = name.PadRight(nameWidth);
+        if (ShowExecutableSuffix && entry.IsExecutable && !entry.IsDirectory) rawName += "*";
+
+        string name;
+        if (SplitNameExtension && !entry.IsParentDir && !entry.IsDirectory)
+        {
+            // Split into basename + ext sub-columns separated by a space
+            int baseWidth = nameWidth - ExtWidth - 1;
+            string ext      = entry.Extension.TrimStart('.');            // drop leading dot
+            string basename = System.IO.Path.GetFileNameWithoutExtension(rawName);
+            if (basename.Length > baseWidth) basename = basename[..(baseWidth - 1)] + "~";
+            if (ext.Length      > ExtWidth)  ext      = ext[..(ExtWidth - 1)]      + "~";
+            name = basename.PadRight(baseWidth) + " " + ext.PadRight(ExtWidth);
+        }
+        else
+        {
+            if (rawName.Length > nameWidth) rawName = rawName[..(nameWidth - 1)] + "~";
+            name = rawName.PadRight(nameWidth);
+        }
 
         // Parent dir → <UP-DIR>; regular dirs → <DIR> (#7)
         var size = (entry.IsParentDir ? "<UP-DIR>"

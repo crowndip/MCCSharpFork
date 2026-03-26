@@ -41,6 +41,19 @@ public sealed class McSettings
         set => _config.Set("Panels", "right_panel_last_dir", value);
     }
 
+    // --- Panel column layout ---
+    public bool LeftSplitNameExtension
+    {
+        get => _config.GetBool("Panels", "left_split_name_extension");
+        set => _config.Set("Panels", "left_split_name_extension", value);
+    }
+
+    public bool RightSplitNameExtension
+    {
+        get => _config.GetBool("Panels", "right_split_name_extension");
+        set => _config.Set("Panels", "right_split_name_extension", value);
+    }
+
     // --- Layout ---
     public bool HorizontalSplit
     {

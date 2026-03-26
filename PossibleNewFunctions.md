@@ -23,7 +23,7 @@ Effort scale: 🟢 Low · 🟡 Medium · 🔴 High
 | 9 | ~~**Pinned / bookmarked panel paths** — persistent across sessions~~ | 🟢 | ~~Already have FavoritesManager; extend to panels~~ |
 | 10 | **Flat / recursive view** — show all files under current dir recursively | 🟡 | "Find files mode" as a panel view |
 | 11 | ~~**Dual-pane sync** — button/key to mirror the path of the active panel into the other~~ | 🟢 | ~~One-liner in controller~~ |
-| 12 | **Split file name / extension in separate columns** | 🟢 | Layout option |
+| 12 | ~~**Split file name / extension in separate columns**~~ | 🟢 | ~~Layout option~~ |
 | 13 | **Trash/recycle bin support** — move to trash instead of immediate delete | 🟡 | `~/.local/share/Trash` on Linux; Recycle Bin on Windows |
 
 ---
