@@ -1,4 +1,5 @@
 using System.Collections.ObjectModel;
+using Mc.Ui.Helpers;
 using Terminal.Gui;
 
 namespace Mc.Ui.Widgets;
@@ -361,6 +362,7 @@ public sealed class CommandLineView : View
         };
         _popupList.SetSource(new ObservableCollection<string>(items));
         _popupList.SelectedItem = 0;
+        _popupList.EnableWheelScroll();
         popup.Add(_popupList);
 
         _popupList.KeyDown += (_, k) =>

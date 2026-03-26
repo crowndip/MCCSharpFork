@@ -1,4 +1,5 @@
 using System.Collections.Specialized;
+using Mc.Ui.Helpers;
 using Terminal.Gui;
 
 namespace Mc.Ui.Dialogs;
@@ -145,6 +146,7 @@ internal sealed class FolderAnalyzerView : Window
         _lv.SelectedItemChanged += (_, _) => UpdateStatus();
         _lv.OpenSelectedItem    += (_, _) => ToggleExpand();
         _lv.KeyDown             += OnListKey;
+        _lv.EnableWheelScroll();
         Add(_lv);
 
         // Bottom buttons — placed with AnchorEnd since we're in a Window, not a Dialog.

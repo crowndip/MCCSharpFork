@@ -1,5 +1,6 @@
 using System.Collections.ObjectModel;
 using Mc.FileManager;
+using Mc.Ui.Helpers;
 using Terminal.Gui;
 
 namespace Mc.Ui.Dialogs;
@@ -41,6 +42,7 @@ public static class HotlistDialog
             Height = Dim.Fill(7),
             ColorScheme = McTheme.Panel,
         };
+        listView.EnableWheelScroll();
         d.Add(listView);
 
         // ── helpers ──────────────────────────────────────────────────────────

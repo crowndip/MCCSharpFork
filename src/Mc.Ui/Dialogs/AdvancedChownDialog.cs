@@ -1,4 +1,5 @@
 using Mc.Core.Utilities;
+using Mc.Ui.Helpers;
 using Terminal.Gui;
 
 namespace Mc.Ui.Dialogs;
@@ -46,6 +47,7 @@ public static class AdvancedChownDialog
         ownerLv.SetSource(new System.Collections.ObjectModel.ObservableCollection<string>(users));
         var ownerIdx = users.IndexOf(currentOwner);
         if (ownerIdx >= 0) ownerLv.SelectedItem = ownerIdx;
+        ownerLv.EnableWheelScroll();
         d.Add(ownerLv);
 
         ownerLv.SelectedItemChanged += (_, a) =>
@@ -70,6 +72,7 @@ public static class AdvancedChownDialog
         groupLv.SetSource(new System.Collections.ObjectModel.ObservableCollection<string>(groups));
         var groupIdx = groups.IndexOf(currentGroup);
         if (groupIdx >= 0) groupLv.SelectedItem = groupIdx;
+        groupLv.EnableWheelScroll();
         d.Add(groupLv);
 
         groupLv.SelectedItemChanged += (_, a) =>

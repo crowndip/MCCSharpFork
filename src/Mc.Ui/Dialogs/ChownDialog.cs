@@ -1,4 +1,5 @@
 using System.Collections.ObjectModel;
+using Mc.Ui.Helpers;
 using Terminal.Gui;
 
 namespace Mc.Ui.Dialogs;
@@ -45,6 +46,7 @@ public static class ChownDialog
         ownerLv.SetSource(new ObservableCollection<string>(users));
         int ownerIdx = users.IndexOf(currentOwner);
         if (ownerIdx >= 0) ownerLv.SelectedItem = ownerIdx;
+        ownerLv.EnableWheelScroll();
         d.Add(ownerLv);
 
         // Group listbox
@@ -57,6 +59,7 @@ public static class ChownDialog
         groupLv.SetSource(new ObservableCollection<string>(groups));
         int groupIdx = groups.IndexOf(currentGroup);
         if (groupIdx >= 0) groupLv.SelectedItem = groupIdx;
+        groupLv.EnableWheelScroll();
         d.Add(groupLv);
 
         // Current owner/group text fields (editable fallback if name not in list)

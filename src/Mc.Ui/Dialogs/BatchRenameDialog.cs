@@ -25,6 +25,7 @@ using System.Collections.ObjectModel;
 using System.Globalization;
 using System.Text;
 using System.Text.RegularExpressions;
+using Mc.Ui.Helpers;
 using Terminal.Gui;
 
 namespace Mc.Ui.Dialogs;
@@ -135,6 +136,7 @@ public sealed class BatchRenameDialog : IDisposable
             ColorScheme = McTheme.Panel,
         };
         _lvPreview.SetSource(_previewItems);
+        _lvPreview.EnableWheelScroll();
         _d.Add(_lvPreview);
 
         // ── Buttons ───────────────────────────────────────────────────────────

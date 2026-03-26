@@ -102,7 +102,7 @@ Effort scale: 🟢 Low · 🟡 Medium · 🔴 High
 |---|---------|--------|-------|
 | 47 | ~~**More built-in themes / skins** — dark, light, solarized, dracula, nord presets~~ | 🟢 | ~~Pure data; add JSON skin files~~ (dark + monochrome already exist) |
 | 48 | **Theme switcher dialog** — live preview of skins without restarting | 🟡 | Apply skin and redraw in-place |
-| 49 | **Mouse scroll in menus and dialogs** | 🟢 | Terminal.Gui v2 supports mouse wheel events |
+| 49 | ~~**Mouse scroll in menus and dialogs**~~ | 🟢 | ~~Terminal.Gui v2 supports mouse wheel events~~ |
 | 50 | **Notification / status toasts** — transient messages at bottom bar for async operations | 🟢 | Timed overlay on the hints bar |
 | 51 | **Configurable function-key bar** — let user reassign F1–F10 labels and actions | 🟡 | Store mapping in settings |
 | 52 | **Panel sort memory** — remember sort column and direction per directory | 🟢 | Persist in session state |
