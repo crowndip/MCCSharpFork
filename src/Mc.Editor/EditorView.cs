@@ -2120,6 +2120,108 @@ public sealed class EditorView : View
         Application.Run(d); d.Dispose();
     }
 
+    /// <summary>
+    /// Reformats the entire buffer as pretty-printed JSON or XML.
+    /// The format is inferred from the file extension; for unknown extensions
+    /// JSON is tried first, then XML.
+    /// Uses <c>System.Text.Json</c> for JSON and <c>System.Xml.Linq</c> for XML —
+    /// both are open-source .NET runtime libraries, no extra packages required.
+    /// Supports undo via the normal SelectAll + InsertText mechanism.
+    /// </summary>
+    public void ExecutePrettyPrint()
+    {
+        if (_isReadOnly)
+        {
+            MessageBox.ErrorQuery("Pretty Print", "Cannot format a read-only file.", "OK");
+            return;
+        }
+        if (_editor.IsLargeFile)
+        {
+            MessageBox.ErrorQuery("Pretty Print", "Pretty print is not available for large files (> 10 MB).", "OK");
+            return;
+        }
+
+        var text = _editor.Buffer.GetText();
+        if (string.IsNullOrWhiteSpace(text)) return;
+
+        var ext = Path.GetExtension(_editor.FilePath ?? string.Empty).ToLowerInvariant();
+
+        string? formatted = null;
+        string? error = null;
+
+        if (ext is ".json" or ".jsonc" or ".geojson")
+        {
+            TryFormatJson(text, out formatted, out error);
+        }
+        else if (ext is ".xml" or ".xhtml" or ".svg" or ".plist" or ".resx"
+                      or ".csproj" or ".props" or ".targets" or ".config")
+        {
+            TryFormatXml(text, out formatted, out error);
+        }
+        else
+        {
+            // Unknown extension: try JSON first, then XML
+            if (!TryFormatJson(text, out formatted, out _))
+                TryFormatXml(text, out formatted, out error);
+        }
+
+        if (formatted == null)
+        {
+            MessageBox.ErrorQuery("Pretty Print",
+                $"Could not format as JSON or XML:\n{error ?? "unrecognised format"}", "OK");
+            return;
+        }
+
+        _editor.SelectAll();
+        _editor.InsertText(formatted);
+        _selecting = false;
+        _editor.ClearSelection();
+        SetNeedsDraw();
+    }
+
+    private static bool TryFormatJson(string text, out string? result, out string? error)
+    {
+        result = null;
+        error  = null;
+        try
+        {
+            var opts = new System.Text.Json.JsonDocumentOptions
+            {
+                AllowTrailingCommas = true,
+                CommentHandling     = System.Text.Json.JsonCommentHandling.Skip,
+            };
+            using var doc = System.Text.Json.JsonDocument.Parse(text, opts);
+            result = System.Text.Json.JsonSerializer.Serialize(
+                doc, new System.Text.Json.JsonSerializerOptions { WriteIndented = true });
+            return true;
+        }
+        catch (Exception ex) { error = ex.Message; return false; }
+    }
+
+    private static bool TryFormatXml(string text, out string? result, out string? error)
+    {
+        result = null;
+        error  = null;
+        try
+        {
+            var xdoc = System.Xml.Linq.XDocument.Parse(text);
+            var sb   = new System.Text.StringBuilder();
+            using var sw = new System.IO.StringWriter(sb);
+            var settings = new System.Xml.XmlWriterSettings
+            {
+                Indent             = true,
+                IndentChars        = "  ",
+                NewLineChars       = "\n",
+                OmitXmlDeclaration = xdoc.Declaration == null,
+            };
+            using (var xw = System.Xml.XmlWriter.Create(sw, settings))
+                xdoc.WriteTo(xw);
+            result = sb.ToString();
+            return true;
+        }
+        catch (Exception ex) { error = ex.Message; return false; }
+    }
+
     public void ExecuteExternalFormatter()
     {
         var cmdStr = PromptInput("External Formatter", "Formatter command:", "fmt");

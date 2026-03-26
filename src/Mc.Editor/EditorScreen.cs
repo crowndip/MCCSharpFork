@@ -144,6 +144,8 @@ public sealed class EditorScreen : Toplevel
                 new MenuItem("_Sort…",            "Alt+T",        () => _view.ExecuteSort()),
                 new MenuItem("_Paste output of…", "Alt+U",        () => _view.ExecuteExternalCommand()),
                 new MenuItem("_External formatter…", string.Empty, () => _view.ExecuteExternalFormatter()),
+                null!,
+                new MenuItem("_Pretty Print (JSON/XML)", string.Empty, () => _view.ExecutePrettyPrint()),
             }),
             new MenuBarItem("_Window", new MenuItem[]
             {
