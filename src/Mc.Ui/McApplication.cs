@@ -3772,14 +3772,19 @@ public sealed class McApplication : Toplevel
                         _                   => string.Empty,
                     };
 
-                    if (!string.IsNullOrEmpty(label) && !string.IsNullOrEmpty(typeTag))
-                        displayName = $"{rootPath.TrimEnd('/', '\\')}  {label} [{typeTag}]";
-                    else if (!string.IsNullOrEmpty(label))
-                        displayName = $"{rootPath.TrimEnd('/', '\\')}  {label}";
-                    else if (!string.IsNullOrEmpty(typeTag))
-                        displayName = $"{rootPath.TrimEnd('/', '\\')}  [{typeTag}]";
-                    else
-                        displayName = rootPath.TrimEnd('/', '\\');
+                    string spaceTag = string.Empty;
+                    try
+                    {
+                        long used  = drive.TotalSize - drive.AvailableFreeSpace;
+                        long total = drive.TotalSize;
+                        spaceTag = $"({FormatDriveSize(used)} / {FormatDriveSize(total)})";
+                    }
+                    catch { }
+
+                    string baseName = rootPath.TrimEnd('/', '\\');
+                    string meta = string.Join("  ", new[] { label, typeTag.Length > 0 ? $"[{typeTag}]" : string.Empty, spaceTag }
+                                                    .Where(s => !string.IsNullOrEmpty(s)));
+                    displayName = meta.Length > 0 ? $"{baseName}  {meta}" : baseName;
                 }
                 else
                 {
@@ -3798,6 +3803,15 @@ public sealed class McApplication : Toplevel
         items.Add(new MenuItem("_Open location...", string.Empty, OpenLocation));
 
         return new MenuBarItem("_Drives", items.ToArray());
+    }
+
+    private static string FormatDriveSize(long bytes)
+    {
+        const long GB = 1_073_741_824L;
+        const long MB = 1_048_576L;
+        if (bytes >= GB)  return $"{bytes / (double)GB:0.#} GB";
+        if (bytes >= MB)  return $"{bytes / (double)MB:0.#} MB";
+        return $"{bytes / 1024.0:0.#} KB";
     }
 
     private void OpenLocation()
