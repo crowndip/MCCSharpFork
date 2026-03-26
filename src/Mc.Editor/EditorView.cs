@@ -2154,6 +2154,7 @@ public sealed class EditorView : View
             TryFormatJson(text, out formatted, out error);
         }
         else if (ext is ".xml" or ".xhtml" or ".svg" or ".plist" or ".resx"
+                      or ".xsd" or ".xsl" or ".xslt"
                       or ".csproj" or ".props" or ".targets" or ".config")
         {
             TryFormatXml(text, out formatted, out error);

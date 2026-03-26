@@ -134,7 +134,7 @@ public sealed class SyntaxRuleSet
         ".rs" => Rust(),
         ".sh" or ".bash" => Shell(),
         ".json" => Json(),
-        ".xml" or ".html" or ".htm" => Xml(),
+        ".xml" or ".html" or ".htm" or ".xsd" or ".xsl" or ".xslt" => Xml(),
         ".md" => Markdown(),
         ".rb" => Ruby(),
         ".php" => Php(),
