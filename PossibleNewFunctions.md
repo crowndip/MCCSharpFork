@@ -13,7 +13,7 @@ Effort scale: 🟢 Low · 🟡 Medium · 🔴 High
 | # | Feature | Effort | Notes |
 |---|---------|--------|-------|
 | 1 | ~~**Filter/search-as-you-type in panel** — type to narrow visible entries in real time~~ | 🟢 | ~~Very frequently requested; like Ctrl+S but live~~ |
-| 2 | **Custom column layout** — choose which columns to show (size, date, permissions, owner) and their order | 🟡 | Stored in settings per panel |
+| 2 | ~~**Custom column layout** — choose which columns to show (size, date, permissions, owner) and their order~~ | 🟡 | ~~Stored in settings per panel; User format mode with configurable columns~~ |
 | 3 | **Panel tabs** — multiple directories open as tabs in each panel | 🟡 | High-demand feature; similar to tabbed terminals |
 | 4 | ~~**Recent directories list** — quick-jump to previously visited paths~~ | 🟢 | ~~Persist in settings; show via hotkey~~ |
 | 5 | **Git status indicators** — show M/A/? markers next to files in git repos | 🟡 | Run `git status --short` in background; cache result |
@@ -65,7 +65,7 @@ Effort scale: 🟢 Low · 🟡 Medium · 🔴 High
 | # | Feature | Effort | Notes |
 |---|---------|--------|-------|
 | 32 | **Image preview via Sixel / Kitty protocol** — render images inline in terminal | 🔴 | Terminal capability detection needed |
-| 33 | **JSON / XML pretty-print view** — auto-format structured files | 🟡 | Use System.Text.Json; detect by extension |
+| 33 | ~~**JSON / XML pretty-print view** — auto-format structured files~~ | 🟡 | ~~Format > Pretty Print (JSON/XML) in mcedit; System.Text.Json + XDocument~~ |
 | 34 | **CSV / TSV table view** — render delimited files as aligned columns | 🟡 | Split on delimiter, pad columns |
 | 35 | ~~**Syntax-highlighted read-only view** — apply mcedit highlighting in viewer~~ | 🟡 | ~~Reuse existing highlighter in read-only mode~~ |
 | 36 | **Follow mode** — auto-scroll to end as file grows (like `tail -f`) | 🟢 | FileSystemWatcher + scroll-to-end |
@@ -106,7 +106,7 @@ Effort scale: 🟢 Low · 🟡 Medium · 🔴 High
 | 50 | **Notification / status toasts** — transient messages at bottom bar for async operations | 🟢 | Timed overlay on the hints bar |
 | 51 | **Configurable function-key bar** — let user reassign F1–F10 labels and actions | 🟡 | Store mapping in settings |
 | 52 | **Panel sort memory** — remember sort column and direction per directory | 🟢 | Persist in session state |
-| 53 | **Startup directory from CLI argument** — `mc /some/path /other/path` sets both panels | 🟢 | Parse args in Mc.App entry point |
+| 53 | ~~**Startup directory from CLI argument** — `mc /some/path /other/path` sets both panels~~ | 🟢 | ~~Implemented in Program.cs / AppSetup.cs~~ |
 
 ---
 
