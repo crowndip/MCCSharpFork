@@ -253,6 +253,7 @@ public sealed class McApplication : Toplevel
         _leftPanelView.IsActive = true;
         ApplyPanelSettings(_leftPanelView);
         // ApplyFilterSettings() is called after both panels are constructed (see below)
+        _controller.LeftPanel.Changed += OnPanelDirectoryChanged;
 
         // Right panel overlaps the left panel's right border by 1 column so that
         // the shared divider is a single │ rather than a double ││. (#5)
@@ -266,6 +267,7 @@ public sealed class McApplication : Toplevel
         _rightPanelView.BecameActive += (_, _) => SetActivePanel(_rightPanelView);
         _rightPanelView.ScrollOtherRequested += (_, delta) => _leftPanelView.ScrollBy(delta);
         ApplyPanelSettings(_rightPanelView);
+        _controller.RightPanel.Changed += OnPanelDirectoryChanged;
 
         // Apply filter settings now that both panels are constructed (#4)
         ApplyFilterSettings();
@@ -3656,11 +3658,23 @@ public sealed class McApplication : Toplevel
 
     // --- Favorites menu ---
 
+    private void OnPanelDirectoryChanged(object? sender, EventArgs e)
+    {
+        var panel = sender as Mc.FileManager.DirectoryListing;
+        var path = panel?.CurrentPath.Path;
+        if (string.IsNullOrEmpty(path))
+            return;
+        if (RecentDirectoriesManager.Add(path))
+            RebuildFavoritesMenu();
+    }
+
     private MenuBarItem BuildFavoritesMenu()
     {
         var items = new List<MenuItem>
         {
             new("_Add current folder", string.Empty, AddCurrentFolderToFavorites),
+            null!,
+            BuildRecentSubmenu(),
             null!,
         };
 
@@ -3678,6 +3692,20 @@ public sealed class McApplication : Toplevel
         }
 
         return new MenuBarItem("F_avorites", items.ToArray());
+    }
+
+    private MenuBarItem BuildRecentSubmenu()
+    {
+        var recent = RecentDirectoriesManager.Load();
+        var recentItems = new List<MenuItem>();
+        foreach (var path in recent)
+        {
+            var captured = path;
+            recentItems.Add(new MenuItem(path, string.Empty, () => NavigateToFavorite(captured)));
+        }
+        if (recentItems.Count == 0)
+            recentItems.Add(new MenuItem("(no recent directories)", string.Empty, null) { CanExecute = () => false });
+        return new MenuBarItem("_Recent", recentItems.ToArray());
     }
 
     private void RebuildFavoritesMenu()

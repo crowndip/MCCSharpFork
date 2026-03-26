@@ -29,6 +29,7 @@ public static class ConfigPaths
     public static string SyntaxDir => Path.Combine(DataDir, "syntax");
     public static string PanelsStateFile => Path.Combine(CacheDir, "panels.ini");
     public static string FavoritesFile   => Path.Combine(ConfigDir, "favorites.json");
+    public static string RecentFile      => Path.Combine(ConfigDir, "recent.json");
 
     public static void EnsureDirectoriesExist()
     {
