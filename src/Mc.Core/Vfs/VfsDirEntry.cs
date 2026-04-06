@@ -8,7 +8,7 @@ public sealed class VfsDirEntry
 {
     public required string Name { get; init; }
     public required VfsPath FullPath { get; init; }
-    public long Size { get; init; }
+    public long Size { get; set; }
     public DateTime ModificationTime { get; init; }
     public DateTime AccessTime { get; init; }
     public DateTime CreationTime { get; init; }

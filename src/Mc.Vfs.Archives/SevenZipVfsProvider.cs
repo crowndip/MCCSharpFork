@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using Mc.Core.Vfs;
+using Terminal.Gui;
 
 namespace Mc.Vfs.Archives;
 
@@ -13,6 +14,9 @@ public sealed class SevenZipVfsProvider : IVfsProvider
     private static readonly string[] Candidates = ["7z", "7za", "7zz"];
     private readonly string? _configuredPath;
     private string? _exe; // resolved at Initialize()
+    
+    // Password cache: archive path -> password
+    private readonly Dictionary<string, string> _passwordCache = new();
 
     /// <param name="configuredPath">
     /// Full path to 7z.exe set by the user in Options → Configuration.
@@ -23,14 +27,21 @@ public sealed class SevenZipVfsProvider : IVfsProvider
         _configuredPath = configuredPath;
     }
 
-    public IReadOnlyList<string> Schemes => ["7z"];
-    public string Name => "7-Zip Archive";
+    public IReadOnlyList<string> Schemes => ["7z", "rar", "cab", "iso", "arj", "lha", "jar", "zip"];
+    public string Name => "7-Zip Archive (multi-format)";
 
     public bool CanHandle(VfsPath path)
     {
         if (_exe == null) return false; // 7z not installed
-        if (path.Scheme == "7z") return true;
-        return path.Extension.Equals(".7z", StringComparison.OrdinalIgnoreCase);
+        
+        // Handle by scheme
+        if (path.Scheme is "7z" or "rar" or "cab" or "iso" or "arj" or "lha" or "jar" or "zip") 
+            return true;
+        
+        // Handle by extension
+        var ext = path.Extension.ToLowerInvariant();
+        return ext is ".7z" or ".rar" or ".cab" or ".iso" or ".arj" or ".lha" or ".lzh" 
+                   or ".jar" or ".ace" or ".gz" or ".bz2" or ".xz" or ".wim" or ".vhd" or ".zip";
     }
 
     public void Initialize()
@@ -53,7 +64,7 @@ public sealed class SevenZipVfsProvider : IVfsProvider
 
     public void Dispose() { }
 
-    // Path format: scheme="7z", path="/absolute/path/archive.7z|inner/file.txt"
+    // Path format: scheme="7z"|"rar"|"cab"|etc., path="/absolute/path/archive.ext|inner/file.txt"
     private static (string archive, string inner) SplitPath(VfsPath path)
     {
         var p   = path.Path;
@@ -72,7 +83,7 @@ public sealed class SevenZipVfsProvider : IVfsProvider
         entries.Add(new VfsDirEntry
         {
             Name             = "..",
-            FullPath         = ParentPath(archive, inner),
+            FullPath         = ParentPath(path, archive, inner),
             IsDirectory      = true,
             ModificationTime = DateTime.MinValue,
         });
@@ -105,7 +116,7 @@ public sealed class SevenZipVfsProvider : IVfsProvider
             entries.Add(new VfsDirEntry
             {
                 Name             = childName,
-                FullPath         = new VfsPath("7z", null, null, null, null, archive + "|" + childInner),
+                FullPath         = new VfsPath(path.Scheme, null, null, null, null, archive + "|" + childInner),
                 Size             = isDir ? 0 : e.size,
                 IsDirectory      = isDir,
                 ModificationTime = e.modified,
@@ -134,7 +145,7 @@ public sealed class SevenZipVfsProvider : IVfsProvider
         try
         {
             // 7z e extracts flat (no subdir structure); the file lands as Path.GetFileName(inner)
-            Exec(_exe!, $"e {Q(archive)} {Q(inner)} -o{Q(tmpDir)} -y");
+            Exec(_exe!, $"e {Q(archive)} {Q(inner)} -o{Q(tmpDir)} -y", archive);
 
             var flat = Path.Combine(tmpDir, Path.GetFileName(inner));
             if (!File.Exists(flat))
@@ -179,8 +190,8 @@ public sealed class SevenZipVfsProvider : IVfsProvider
         };
     }
 
-    // Write operations — .7z archives are read-only via VFS
-    public Stream OpenWrite(VfsPath p)          => throw new NotSupportedException(".7z archives are read-only via VFS");
+    // Write operations — archives are read-only via VFS
+    public Stream OpenWrite(VfsPath p)          => throw new NotSupportedException("Archives are read-only via VFS");
     public Stream OpenAppend(VfsPath p)         => throw new NotSupportedException();
     public void DeleteFile(VfsPath p)           => throw new NotSupportedException();
     public void CopyFile(VfsPath s, VfsPath d)  => throw new NotSupportedException();
@@ -210,8 +221,38 @@ public sealed class SevenZipVfsProvider : IVfsProvider
     /// <summary>
     /// Run 7z with the given arguments, return stdout.
     /// Throws if the process cannot start.
+    /// Handles password-protected archives by prompting user if needed.
     /// </summary>
-    private static string Exec(string exe, string args)
+    private string Exec(string exe, string args, string archivePath)
+    {
+        // Try with cached password first
+        if (_passwordCache.TryGetValue(archivePath, out var cachedPassword))
+        {
+            var argsWithPassword = $"{args} -p{cachedPassword}";
+            if (TryExec(exe, argsWithPassword, out var output))
+                return output;
+        }
+
+        // Try without password
+        if (TryExec(exe, args, out var outputNoPass))
+            return outputNoPass;
+
+        // Check if it's a password error
+        // 7z returns exit code 2 for wrong password or encrypted archive
+        // Try prompting for password
+        var password = PromptForPassword(archivePath);
+        if (password != null)
+        {
+            var argsWithPassword = $"{args} -p{password}";
+            var output = ExecDirect(exe, argsWithPassword);
+            _passwordCache[archivePath] = password; // Cache successful password
+            return output;
+        }
+
+        throw new InvalidOperationException($"Failed to access archive '{archivePath}' - may be password protected");
+    }
+
+    private static string ExecDirect(string exe, string args)
     {
         using var proc = Process.Start(new ProcessStartInfo(exe, args)
         {
@@ -226,8 +267,74 @@ public sealed class SevenZipVfsProvider : IVfsProvider
 
     private static bool TryExec(string exe, string args, out string output)
     {
-        try { output = Exec(exe, args); return true; }
+        try { output = ExecDirect(exe, args); return true; }
         catch { output = string.Empty; return false; }
+    }
+
+    /// <summary>
+    /// Prompt user for archive password.
+    /// Returns null if user cancels.
+    /// </summary>
+    private static string? PromptForPassword(string archivePath)
+    {
+        string? password = null;
+        
+        var d = new Dialog
+        {
+            Title = "Password Required",
+            Width = 60,
+            Height = 9,
+        };
+
+        d.Add(new Label 
+        { 
+            X = 1, 
+            Y = 1, 
+            Text = $"Archive is password protected:\n{Path.GetFileName(archivePath)}" 
+        });
+
+        var passwordField = new TextField
+        {
+            X = 1,
+            Y = 3,
+            Width = Dim.Fill(2),
+            Height = 1,
+            Secret = true,
+        };
+        d.Add(passwordField);
+
+        var okBtn = new Button 
+        { 
+            X = Pos.Center() - 10, 
+            Y = 5, 
+            Text = "OK", 
+            IsDefault = true 
+        };
+        okBtn.Accepting += (_, _) =>
+        {
+            password = passwordField.Text?.ToString() ?? string.Empty;
+            Application.RequestStop(d);
+        };
+
+        var cancelBtn = new Button 
+        { 
+            X = Pos.Center() + 2, 
+            Y = 5, 
+            Text = "Cancel" 
+        };
+        cancelBtn.Accepting += (_, _) =>
+        {
+            password = null;
+            Application.RequestStop(d);
+        };
+
+        d.AddButton(okBtn);
+        d.AddButton(cancelBtn);
+        passwordField.SetFocus();
+        Application.Run(d);
+        d.Dispose();
+        
+        return password;
     }
 
     /// <summary>
@@ -260,7 +367,16 @@ public sealed class SevenZipVfsProvider : IVfsProvider
     private IEnumerable<(string path, long size, bool isDir, DateTime modified)> ReadEntries(string archive)
     {
         if (_exe == null) yield break;
-        if (!TryExec(_exe, $"l -slt {Q(archive)}", out var output)) yield break;
+        
+        string output;
+        try
+        {
+            output = Exec(_exe, $"l -slt {Q(archive)}", archive);
+        }
+        catch
+        {
+            yield break;
+        }
 
         string? curPath     = null;
         long    curSize     = 0;
@@ -341,14 +457,14 @@ public sealed class SevenZipVfsProvider : IVfsProvider
     /// At the archive root → exit to the local directory containing the archive file.
     /// Inside a subdirectory → go up one level within the same archive.
     /// </summary>
-    private static VfsPath ParentPath(string archive, string inner)
+    private static VfsPath ParentPath(VfsPath currentPath, string archive, string inner)
     {
         if (string.IsNullOrEmpty(inner))
             return VfsPath.FromLocal(System.IO.Path.GetDirectoryName(archive) ?? "/");
 
         var lastSlash = inner.LastIndexOf('/');
         return lastSlash < 0
-            ? new VfsPath("7z", null, null, null, null, archive + "|")
-            : new VfsPath("7z", null, null, null, null, archive + "|" + inner[..lastSlash]);
+            ? new VfsPath(currentPath.Scheme, null, null, null, null, archive + "|")
+            : new VfsPath(currentPath.Scheme, null, null, null, null, archive + "|" + inner[..lastSlash]);
     }
 }

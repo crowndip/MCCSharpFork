@@ -9,7 +9,7 @@ A full C# / .NET 8 rewrite of [GNU Midnight Commander](https://midnight-commande
 ## Features
 
 - **Dual-panel file manager** — classic Norton Commander / mc layout
-- **Virtual File System (VFS)** — local, FTP, SFTP, ZIP, TAR archives
+- **Virtual File System (VFS)** — local, FTP, SFTP, ZIP, TAR, 7Z, RAR, CAB, ISO, ARJ, LHA, JAR archives
 - **Built-in viewer** — hex + text modes with search
 - **Built-in editor** — syntax-aware text editor
 - **Diff viewer** — side-by-side file comparison

@@ -1096,7 +1096,17 @@ public sealed class FilePanelView : View
                 return true;
 
             case KeyCode.Insert:
+                ToggleMark();
+                return true;
+
             case KeyCode.Space:
+                // Space on directory: calculate and display size (Total Commander behavior)
+                if (CurrentEntry != null && CurrentEntry.IsDirectory && !CurrentEntry.IsParentDir)
+                {
+                    CalculateAndDisplayFolderSize(CurrentEntry);
+                    return true;
+                }
+                // Space on file: toggle mark
                 ToggleMark();
                 return true;
 
@@ -1156,7 +1166,8 @@ public sealed class FilePanelView : View
     {
         ".zip", ".tar", ".gz", ".bz2", ".xz", ".rar", ".7z", ".tgz", ".tbz2",
         ".txz", ".lz", ".lzma", ".z", ".ar", ".deb", ".rpm", ".cab", ".iso",
-        ".img", ".dmg", ".cpio", ".zst", ".lz4", ".ace", ".arc",
+        ".img", ".dmg", ".cpio", ".zst", ".lz4", ".ace", ".arc", ".arj", ".lha", 
+        ".lzh", ".jar",
     };
 
     private static bool IsArchiveFile(string name)
@@ -1263,6 +1274,53 @@ public sealed class FilePanelView : View
         UpdateStatus();
         CursorChanged?.Invoke(this, _cursorIndex);
         SetNeedsDraw();
+    }
+
+    /// <summary>Calculates and displays folder size in the listing (Space on directory). Total Commander behavior.</summary>
+    private void CalculateAndDisplayFolderSize(FileEntry entry)
+    {
+        if (!entry.IsDirectory || entry.IsParentDir) return;
+
+        // Show calculating status
+        _statusText = $"Calculating size of {entry.Name}…";
+        SetNeedsDraw();
+
+        // Calculate size in background
+        _ = Task.Run(() =>
+        {
+            try
+            {
+                long size = CalculateDirectorySize(entry.FullPath.Path);
+                Application.Invoke(() =>
+                {
+                    // Update the entry's size
+                    entry.Size = size;
+                    // Refresh display
+                    SetNeedsDraw();
+                    _statusText = $"{entry.Name}: {FileSizeFormatter.Format(size)}";
+                });
+            }
+            catch
+            {
+                Application.Invoke(() =>
+                {
+                    _statusText = $"{entry.Name}: (error calculating size)";
+                    SetNeedsDraw();
+                });
+            }
+        });
+    }
+
+    private static long CalculateDirectorySize(string path)
+    {
+        long total = 0;
+        try
+        {
+            foreach (var f in Directory.EnumerateFiles(path, "*", SearchOption.AllDirectories))
+                try { total += new FileInfo(f).Length; } catch { }
+        }
+        catch { }
+        return total;
     }
 
     /// <summary>Cycles the listing mode Full → Brief → Long → Full (Alt+T). (#25)</summary>

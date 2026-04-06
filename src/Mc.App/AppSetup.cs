@@ -43,8 +43,8 @@ public static class AppSetup
         vfsRegistry.Register(new FtpVfsProvider());
         vfsRegistry.Register(new SftpVfsProvider());
         vfsRegistry.Register(new TarVfsProvider());
-        vfsRegistry.Register(new ZipVfsProvider());
-        vfsRegistry.Register(new SevenZipVfsProvider(settings.SevenZipPath)); // .7z archives via 7z CLI
+        vfsRegistry.Register(new SevenZipVfsProvider(settings.SevenZipPath)); // Multi-format archives via 7z CLI (includes ZIP when 7z available)
+        vfsRegistry.Register(new ZipVfsProvider()); // Fallback for ZIP when 7z not available
         vfsRegistry.Register(new CpioVfsProvider()); // #32
         vfsRegistry.Register(new ExtfsVfsProvider()); // #33
         vfsRegistry.Register(new SfsVfsProvider());   // #34

@@ -769,10 +769,16 @@ public sealed class McApplication : Toplevel
     {
         ".zip"                 => new VfsPath("zip",  null, null, null, null, filePath + "|"),
         ".7z"                  => new VfsPath("7z",   null, null, null, null, filePath + "|"),
+        ".rar"                 => new VfsPath("rar",  null, null, null, null, filePath + "|"),
+        ".cab"                 => new VfsPath("cab",  null, null, null, null, filePath + "|"),
+        ".iso"                 => new VfsPath("iso",  null, null, null, null, filePath + "|"),
+        ".arj"                 => new VfsPath("arj",  null, null, null, null, filePath + "|"),
+        ".lha" or ".lzh"       => new VfsPath("lha",  null, null, null, null, filePath + "|"),
+        ".jar"                 => new VfsPath("jar",  null, null, null, null, filePath + "|"),
         ".tar"                 => new VfsPath("tar",  null, null, null, null, filePath + "|"),
-        ".tgz" or ".tar.gz"   => new VfsPath("tar",  null, null, null, null, filePath + "|"),
-        ".tar.bz2" or ".tbz2" => new VfsPath("tar",  null, null, null, null, filePath + "|"),
-        ".tar.xz"  or ".txz"  => new VfsPath("tar",  null, null, null, null, filePath + "|"),
+        ".tgz" or ".tar.gz"    => new VfsPath("tar",  null, null, null, null, filePath + "|"),
+        ".tar.bz2" or ".tbz2"  => new VfsPath("tar",  null, null, null, null, filePath + "|"),
+        ".tar.xz"  or ".txz"   => new VfsPath("tar",  null, null, null, null, filePath + "|"),
         _                      => null,
     };
 

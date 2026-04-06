@@ -18,7 +18,11 @@ public sealed class FileEntry
 
     // --- Delegates to underlying VfsDirEntry ---
     public string Name => DirEntry.Name;
-    public long Size => DirEntry.Size;
+    public long Size 
+    { 
+        get => DirEntry.Size;
+        set => DirEntry.Size = value;
+    }
     public DateTime ModificationTime => DirEntry.ModificationTime;
     public bool IsDirectory => DirEntry.IsDirectory;
     public bool IsSymlink => DirEntry.IsSymlink;

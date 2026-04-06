@@ -1,14 +1,18 @@
 // Dialogs/BatchRenameDialog.cs
-// Ported from MCCompanion's BatchRenameCommand.cs, adapted for Terminal.Gui v2.
+// Enhanced multi-rename tool with Total Commander parity + superior UX
 //
 // ┌─ Rename mask placeholders ─────────────────────────────────────────────┐
 // │  [N]      entire original filename (no extension)                      │
 // │  [N1-5]   characters 1–5 (1-indexed, inclusive)                        │
 // │  [N-5]    last 5 characters of the name                                │
+// │  [N1,5]   5 characters starting from position 1                        │
 // │  [P]      immediate parent folder name                                  │
+// │  [P2]     2nd level parent folder                                       │
 // │  [C]      counter  (uses global Start / Step / Digits settings)        │
 // │  [C:3]    counter with inline digit-width (overrides global Digits)    │
 // │  [C:A]    alphabetic counter  (A, B … Z, AA, AB …)                    │
+// │  [C:a]    lowercase alphabetic counter (a, b … z, aa, ab …)           │
+// │  [C:I]    Roman numerals (I, II, III, IV, V …)                        │
 // │  [Y][M][D] file modification year / month / day                        │
 // │  [h][m][s] file modification hour / minute / second                    │
 // │  [T]      current date+time at rename time  (yyyyMMdd_HHmmss)          │
@@ -16,6 +20,11 @@
 // │  [E]      original extension without the leading dot                   │
 // │  [U]      convert the preceding placeholder's result to UPPERCASE      │
 // │  [c][L]   convert the preceding placeholder's result to lowercase      │
+// │  [F]      capitalize First letter of each word                         │
+// │  [W]      file size in bytes                                           │
+// │  [W:K]    file size in KB                                              │
+// │  [W:M]    file size in MB                                              │
+// │  [#]      original file number in selection (1-based)                  │
 // └────────────────────────────────────────────────────────────────────────┘
 //
 // Search / Replace: use  |  to separate multiple pairs at once.
@@ -80,9 +89,11 @@ public sealed class BatchRenameDialog : IDisposable
 
         // ── Placeholder quick-ref ─────────────────────────────────────────────
         y++;
-        _d.Add(new Label { X = 1, Y = y, Text = "Name: [N]  [N1-5]  [N-5]  [P]     Counter: [C]  [C:3]  [C:A]     Ext: [E]" });
+        _d.Add(new Label { X = 1, Y = y, Text = "Name: [N] [N1-5] [N-5] [N1,5]  Parent: [P] [P2]  Counter: [C] [C:3] [C:A] [C:a] [C:I]  Num: [#]" });
         y++;
-        _d.Add(new Label { X = 1, Y = y, Text = "Date: [Y][M][D]  [h][m][s]    Now: [T]    GUID: [G]    Case: [U] [c][L]" });
+        _d.Add(new Label { X = 1, Y = y, Text = "Date: [Y][M][D] [h][m][s]  Now: [T]  GUID: [G]  Ext: [E]  Size: [W] [W:K] [W:M]" });
+        y++;
+        _d.Add(new Label { X = 1, Y = y, Text = "Case: [U]=UPPER [c][L]=lower [F]=First  (apply to preceding placeholder)" });
         y++;
 
         // ── Search / Replace ──────────────────────────────────────────────────
@@ -191,7 +202,7 @@ public sealed class BatchRenameDialog : IDisposable
         {
             string orig  = Path.GetFileName(_files[i]);
             int    cval  = start + i * step;
-            string next  = ApplyRules(_files[i], cval, digits, now);
+            string next  = ApplyRules(_files[i], cval, digits, now, i + 1);
             string arrow = orig == next ? "(unchanged)" : $"→ {next}";
             _previewItems.Add($"{orig.PadRight(34)} {arrow}");
         }
@@ -199,7 +210,7 @@ public sealed class BatchRenameDialog : IDisposable
 
     // ── Core rename logic ─────────────────────────────────────────────────────
 
-    private string ApplyRules(string fullPath, int counterVal, int digits, DateTime now)
+    private string ApplyRules(string fullPath, int counterVal, int digits, DateTime now, int fileIndex)
     {
         string name       = Path.GetFileName(fullPath);
         string origExt    = Path.GetExtension(name);
@@ -208,13 +219,18 @@ public sealed class BatchRenameDialog : IDisposable
             Path.GetDirectoryName(fullPath) ?? string.Empty) ?? string.Empty;
 
         DateTime modified;
-        try   { modified = File.GetLastWriteTime(fullPath); }
+        long fileSize = 0;
+        try   
+        { 
+            modified = File.GetLastWriteTime(fullPath);
+            fileSize = new FileInfo(fullPath).Length;
+        }
         catch { modified = now; }
 
         string maskText = _tfMask.Text ?? string.Empty;
         if (string.IsNullOrEmpty(maskText)) maskText = "[N]";
         string newStem = ApplyMask(maskText, stem, origExt, parentName,
-                                   counterVal, digits, modified, now);
+                                   counterVal, digits, modified, now, fileIndex, fileSize, fullPath);
 
         string extMaskText = _tfExtMask.Text ?? string.Empty;
         string newExt;
@@ -225,7 +241,7 @@ public sealed class BatchRenameDialog : IDisposable
         else
         {
             string resolved = ApplyMask(extMaskText, stem, origExt, parentName,
-                                        counterVal, digits, modified, now);
+                                        counterVal, digits, modified, now, fileIndex, fileSize, fullPath);
             newExt = string.IsNullOrEmpty(resolved)
                 ? string.Empty
                 : resolved.StartsWith('.') ? resolved : '.' + resolved;
@@ -272,7 +288,7 @@ public sealed class BatchRenameDialog : IDisposable
 
     private static string ApplyMask(
         string mask, string stem, string origExt, string parentName,
-        int counterVal, int digits, DateTime modified, DateTime now)
+        int counterVal, int digits, DateTime modified, DateTime now, int fileIndex, long fileSize, string fullPath)
     {
         var result = new StringBuilder(mask.Length + 16);
         int lastPlaceholderStart = 0;
@@ -301,10 +317,17 @@ public sealed class BatchRenameDialog : IDisposable
                     i = close + 1;
                     continue;
                 }
+                if (token == "F")
+                {
+                    CapitalizeFirstLetters(result, lastPlaceholderStart);
+                    lastPlaceholderStart = result.Length;
+                    i = close + 1;
+                    continue;
+                }
 
                 lastPlaceholderStart = result.Length;
                 result.Append(ResolveToken(token, stem, origExt, parentName,
-                                           counterVal, digits, modified, now));
+                                           counterVal, digits, modified, now, fileIndex, fileSize, fullPath));
                 i = close + 1;
             }
             else
@@ -322,9 +345,30 @@ public sealed class BatchRenameDialog : IDisposable
             sb[k] = upper ? char.ToUpperInvariant(sb[k]) : char.ToLowerInvariant(sb[k]);
     }
 
+    private static void CapitalizeFirstLetters(StringBuilder sb, int from)
+    {
+        bool capitalizeNext = true;
+        for (int k = from; k < sb.Length; k++)
+        {
+            if (char.IsWhiteSpace(sb[k]) || char.IsPunctuation(sb[k]))
+            {
+                capitalizeNext = true;
+            }
+            else if (capitalizeNext)
+            {
+                sb[k] = char.ToUpperInvariant(sb[k]);
+                capitalizeNext = false;
+            }
+            else
+            {
+                sb[k] = char.ToLowerInvariant(sb[k]);
+            }
+        }
+    }
+
     private static string ResolveToken(
         string token, string stem, string origExt, string parentName,
-        int counterVal, int digits, DateTime modified, DateTime now)
+        int counterVal, int digits, DateTime modified, DateTime now, int fileIndex, long fileSize, string fullPath)
     {
         switch (token)
         {
@@ -339,19 +383,45 @@ public sealed class BatchRenameDialog : IDisposable
             case "h": return modified.Hour.ToString("D2");
             case "m": return modified.Minute.ToString("D2");
             case "s": return modified.Second.ToString("D2");
+            case "#": return fileIndex.ToString();
+            case "W": return fileSize.ToString();
         }
 
-        // Counter: [C], [C:3], [C:A]
+        // Parent folder levels: [P2], [P3], etc.
+        if (token.Length > 1 && token[0] == 'P' && int.TryParse(token.Substring(1), out int level))
+        {
+            var parts = fullPath.Split(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+            int idx = parts.Length - 2 - level; // -2 for filename and immediate parent
+            return idx >= 0 && idx < parts.Length ? parts[idx] : string.Empty;
+        }
+
+        // File size with units: [W:K], [W:M], [W:G]
+        if (token.StartsWith("W:") && token.Length == 3)
+        {
+            return token[2] switch
+            {
+                'K' or 'k' => (fileSize / 1024).ToString(),
+                'M' or 'm' => (fileSize / (1024 * 1024)).ToString(),
+                'G' or 'g' => (fileSize / (1024 * 1024 * 1024)).ToString(),
+                _ => fileSize.ToString()
+            };
+        }
+
+        // Counter: [C], [C:3], [C:A], [C:a], [C:I]
         if (token == "C" || token.StartsWith("C:"))
         {
             string spec = token.Length > 2 ? token.Substring(2) : string.Empty;
-            if (string.Equals(spec, "A", StringComparison.OrdinalIgnoreCase))
-                return ToAlphaCounter(counterVal);
+            if (string.Equals(spec, "A", StringComparison.Ordinal))
+                return ToAlphaCounter(counterVal, true);
+            if (string.Equals(spec, "a", StringComparison.Ordinal))
+                return ToAlphaCounter(counterVal, false);
+            if (string.Equals(spec, "I", StringComparison.OrdinalIgnoreCase))
+                return ToRomanNumeral(counterVal);
             int effectiveDigits = int.TryParse(spec, out int d) ? d : digits;
             return counterVal.ToString().PadLeft(effectiveDigits, '0');
         }
 
-        // Name slices: [N1-5], [N-5], [N3]
+        // Name slices: [N1-5], [N-5], [N3], [N1,5]
         if (token.Length > 1 && token[0] == 'N')
         {
             string range = token.Substring(1);
@@ -362,6 +432,21 @@ public sealed class BatchRenameDialog : IDisposable
             {
                 int startIdx = Math.Max(0, stem.Length - lastN);
                 return stem.Substring(startIdx);
+            }
+
+            // [N1,5] → 5 chars starting from position 1 (1-indexed)
+            int comma = range.IndexOf(',');
+            if (comma > 0 &&
+                int.TryParse(range.Substring(0, comma), out int startPos) &&
+                int.TryParse(range.Substring(comma + 1), out int length))
+            {
+                startPos = Math.Max(1, startPos) - 1;
+                if (startPos < stem.Length)
+                {
+                    length = Math.Min(length, stem.Length - startPos);
+                    return stem.Substring(startPos, length);
+                }
+                return string.Empty;
             }
 
             // [N1-5] → chars 1..5 (1-indexed)
@@ -386,17 +471,37 @@ public sealed class BatchRenameDialog : IDisposable
         return $"[{token}]"; // unknown token → pass through
     }
 
-    private static string ToAlphaCounter(int value)
+    private static string ToAlphaCounter(int value, bool uppercase)
     {
         if (value <= 0) value = 1;
         var stack = new Stack<char>();
         while (value > 0)
         {
             value--;
-            stack.Push((char)('A' + value % 26));
+            char baseChar = uppercase ? 'A' : 'a';
+            stack.Push((char)(baseChar + value % 26));
             value /= 26;
         }
         return new string(stack.ToArray());
+    }
+
+    private static string ToRomanNumeral(int value)
+    {
+        if (value <= 0 || value > 3999) return value.ToString();
+        
+        var result = new StringBuilder();
+        var values = new[] { 1000, 900, 500, 400, 100, 90, 50, 40, 10, 9, 5, 4, 1 };
+        var numerals = new[] { "M", "CM", "D", "CD", "C", "XC", "L", "XL", "X", "IX", "V", "IV", "I" };
+        
+        for (int i = 0; i < values.Length; i++)
+        {
+            while (value >= values[i])
+            {
+                value -= values[i];
+                result.Append(numerals[i]);
+            }
+        }
+        return result.ToString();
     }
 
     // ── Commit ────────────────────────────────────────────────────────────────
@@ -413,7 +518,7 @@ public sealed class BatchRenameDialog : IDisposable
         for (int i = 0; i < _files.Count; i++)
         {
             int cv = start + i * step;
-            if (ApplyRules(_files[i], cv, digits, now) != Path.GetFileName(_files[i]))
+            if (ApplyRules(_files[i], cv, digits, now, i + 1) != Path.GetFileName(_files[i]))
                 changedCount++;
         }
 
@@ -431,7 +536,7 @@ public sealed class BatchRenameDialog : IDisposable
         {
             int    cv      = start + i * step;
             string orig    = Path.GetFileName(_files[i]);
-            string newName = ApplyRules(_files[i], cv, digits, now);
+            string newName = ApplyRules(_files[i], cv, digits, now, i + 1);
             if (newName == orig) continue;
 
             string dir     = Path.GetDirectoryName(_files[i])!;
