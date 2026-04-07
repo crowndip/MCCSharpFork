@@ -37,10 +37,10 @@ public sealed class EditorScreen : Toplevel
     {
         _editorContainer = new View
         {
-            X = 0, Y = 1,
+            X = 0, Y = 0,  // Start at top since no MenuBar initially
             Width = Dim.Fill(),
             Height = Dim.Fill(1),
-            CanFocus = false,  // Container should not take focus
+            CanFocus = false,
         };
 
         var view = CreateEditorView(filePath, readOnly);
@@ -58,11 +58,11 @@ public sealed class EditorScreen : Toplevel
         _settings = EditorSettings.Load();
         view.ApplySettings(_settings);
 
-        // Add MenuBar, container, and button bar
-        // MenuBar is added but we'll prevent it from processing keys
-        Add(_menuBar, _editorContainer, _buttonBar);
+        // DON'T add MenuBar - it steals keyboard input in Terminal.Gui v2
+        // Only add container and button bar
+        Add(_editorContainer, _buttonBar);
         
-        // CRITICAL: Set focus to editor
+        // Set focus to editor
         view.SetFocus();
     }
 
@@ -85,22 +85,28 @@ public sealed class EditorScreen : Toplevel
         // F9 opens menu
         if (keyEvent.KeyCode == KeyCode.F9)
         {
+            if (!Subviews.Contains(_menuBar))
+            {
+                Add(_menuBar);
+                _editorContainer.Y = 1;
+                _editorContainer.Height = Dim.Fill(1);
+            }
             _menuBar.OpenMenu();
             return true;
         }
         
-        // Intercept ALL keys before MenuBar can see them
-        // MenuBar in Terminal.Gui has special handling that intercepts hotkeys
-        // We need to prevent that by handling keys here first
-        var editor = ActiveEditor;
-        if (editor != null)
+        // Escape closes menu if open
+        if (keyEvent.KeyCode == KeyCode.Esc && Subviews.Contains(_menuBar))
         {
-            // Let the focused view (editor) handle the key
-            // Don't call base.OnKeyDown which would let MenuBar intercept
-            return false;
+            Remove(_menuBar);
+            _editorContainer.Y = 0;
+            _editorContainer.Height = Dim.Fill(1);
+            ActiveEditor?.SetFocus();
+            return true;
         }
         
-        return base.OnKeyDown(keyEvent);
+        // All other keys go to the editor
+        return false;
     }
 
     private void CloseCurrentTab()
