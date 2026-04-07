@@ -24,6 +24,7 @@ public sealed class McApplication : Toplevel
     private readonly FileManagerController _controller;
     private readonly McSettings _settings;
     private readonly VfsRegistry _vfsRegistry;
+    private readonly HotlistManager _hotlist;
 
     private FilePanelView _leftPanelView = null!;
     private FilePanelView _rightPanelView = null!;
@@ -63,6 +64,7 @@ public sealed class McApplication : Toplevel
         _controller = controller;
         _settings = settings;
         _vfsRegistry = vfsRegistry;
+        _hotlist = controller.Hotlist;
 
         controller.StatusMessage += (_, msg) => ShowStatus(msg);
         controller.OperationError += (_, ex) => MessageDialog.Error(ex.Message);
@@ -489,7 +491,36 @@ public sealed class McApplication : Toplevel
                     ToggleSplitDirection();
                     return true;
                 }
+                // Alt+1..9 → jump to favorite/recent directory
+                if (keyEvent.IsAlt && keyEvent.AsRune.Value >= '1' && keyEvent.AsRune.Value <= '9')
+                {
+                    int index = keyEvent.AsRune.Value - '1';
+                    JumpToFavorite(index);
+                    return true;
+                }
                 return base.OnKeyDown(keyEvent);
+        }
+    }
+
+    private void JumpToFavorite(int index)
+    {
+        var favorites = _hotlist.Entries.Take(9).ToList();
+        var allPaths = new List<string>();
+        
+        // Add favorites first
+        allPaths.AddRange(favorites.Select(f => f.Path));
+        
+        // Add recent directories (skip duplicates)
+        foreach (var path in _hotlist.RecentDirectories)
+        {
+            if (!allPaths.Contains(path))
+                allPaths.Add(path);
+            if (allPaths.Count >= 9) break;
+        }
+        
+        if (index < allPaths.Count)
+        {
+            NavigateToPath(allPaths[index]);
         }
     }
 
@@ -3923,48 +3954,76 @@ public sealed class McApplication : Toplevel
         var path = panel?.CurrentPath.Path;
         if (string.IsNullOrEmpty(path))
             return;
-        if (RecentDirectoriesManager.Add(path))
-            RebuildFavoritesMenu();
+        
+        // Track in recent directories
+        _hotlist.AddRecent(path);
+        RebuildFavoritesMenu();
     }
 
     private MenuBarItem BuildFavoritesMenu()
     {
         var items = new List<MenuItem>
         {
-            new("_Add current folder", string.Empty, AddCurrentFolderToFavorites),
-            null!,
-            BuildRecentSubmenu(),
+            new("_Add current folder", "Ctrl+X H", AddCurrentDirToHotlist),
+            new("_Clear recent", string.Empty, () => { _hotlist.ClearRecent(); RebuildFavoritesMenu(); }),
             null!,
         };
 
-        var favorites = FavoritesManager.Load();
-        foreach (var path in favorites)
+        var currentPath = _leftPanelView?.Listing?.CurrentPath?.Path ?? "";
+        int shortcutNum = 1;
+
+        // Pinned favorites (from hotlist)
+        var favorites = _hotlist.Entries.Take(9).ToList();
+        foreach (var entry in favorites)
         {
-            var captured = path;
-            items.Add(new MenuItem(path, string.Empty, () => NavigateToFavorite(captured)));
+            var captured = entry.Path;
+            var isCurrent = captured == currentPath;
+            var label = (isCurrent ? "★ " : "  ") + entry.Label;
+            var shortcut = shortcutNum <= 9 ? $"Alt+{shortcutNum}" : "";
+            items.Add(new MenuItem(label, shortcut, () => NavigateToPath(captured)));
+            shortcutNum++;
         }
 
-        if (favorites.Count == 0)
+        // Separator if we have recent directories
+        if (_hotlist.RecentDirectories.Count > 0)
         {
-            var placeholder = new MenuItem("(no favorites)", string.Empty, null) { CanExecute = () => false };
-            items.Add(placeholder);
+            items.Add(null!);
+            items.Add(new MenuItem("Recent:", string.Empty, null) { CanExecute = () => false });
+        }
+
+        // Recent directories (non-pinned)
+        var maxRecent = Math.Min(9 - shortcutNum + 1, _hotlist.RecentDirectories.Count);
+        for (int i = 0; i < maxRecent; i++)
+        {
+            var path = _hotlist.RecentDirectories[i];
+            // Skip if already in favorites
+            if (favorites.Any(f => f.Path == path)) continue;
+            
+            var isCurrent = path == currentPath;
+            var label = (isCurrent ? "★ " : "  ") + Path.GetFileName(path) + " (" + Path.GetDirectoryName(path) + ")";
+            var shortcut = shortcutNum <= 9 ? $"Alt+{shortcutNum}" : "";
+            items.Add(new MenuItem(label, shortcut, () => NavigateToPath(path)));
+            shortcutNum++;
+        }
+
+        if (favorites.Count == 0 && _hotlist.RecentDirectories.Count == 0)
+        {
+            items.Add(new MenuItem("(no favorites or recent)", string.Empty, null) { CanExecute = () => false });
         }
 
         return new MenuBarItem("F_avorites", items.ToArray());
     }
 
-    private MenuBarItem BuildRecentSubmenu()
+    private void NavigateToPath(string path)
     {
-        var recent = RecentDirectoriesManager.Load();
-        var recentItems = new List<MenuItem>();
-        foreach (var path in recent)
+        try
         {
-            var captured = path;
-            recentItems.Add(new MenuItem(path, string.Empty, () => NavigateToFavorite(captured)));
+            _controller.NavigateTo(Mc.Core.Vfs.VfsPath.FromLocal(path));
         }
-        if (recentItems.Count == 0)
-            recentItems.Add(new MenuItem("(no recent directories)", string.Empty, null) { CanExecute = () => false });
-        return new MenuBarItem("_Recent", recentItems.ToArray());
+        catch (Exception ex)
+        {
+            MessageDialog.Error($"Cannot navigate to {path}: {ex.Message}");
+        }
     }
 
     private void RebuildFavoritesMenu()

@@ -34,10 +34,25 @@ public sealed class HotlistManager
     /// <summary>Flat list of all entries (for legacy callers).</summary>
     public IReadOnlyList<HotlistEntry> Entries => GetAllEntries(Root);
 
+    /// <summary>Recent directories (non-persistent, per session).</summary>
+    public List<string> RecentDirectories { get; } = [];
+
     public HotlistManager()
     {
         LoadFromFile(ConfigPaths.HotlistFile);
     }
+
+    // ── Recent directories ───────────────────────────────────────────────────
+
+    public void AddRecent(string path)
+    {
+        RecentDirectories.Remove(path);
+        RecentDirectories.Insert(0, path);
+        if (RecentDirectories.Count > 10)
+            RecentDirectories.RemoveAt(10);
+    }
+
+    public void ClearRecent() => RecentDirectories.Clear();
 
     // ── Flat API (backwards-compat) ──────────────────────────────────────────
 
