@@ -54,6 +54,18 @@ public sealed class McSettings
         set => _config.Set("Panels", "right_split_name_extension", value);
     }
 
+    public PanelColumnConfig LeftPanelColumns
+    {
+        get => PanelColumnConfig.Deserialize(_config.GetString("Panels", "left_columns", ""));
+        set => _config.Set("Panels", "left_columns", value.Serialize());
+    }
+
+    public PanelColumnConfig RightPanelColumns
+    {
+        get => PanelColumnConfig.Deserialize(_config.GetString("Panels", "right_columns", ""));
+        set => _config.Set("Panels", "right_columns", value.Serialize());
+    }
+
     // --- Layout ---
     public bool HorizontalSplit
     {

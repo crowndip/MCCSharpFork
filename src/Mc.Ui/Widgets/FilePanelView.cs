@@ -73,6 +73,8 @@ public sealed class FilePanelView : View
     /// </summary>
     public bool SplitNameExtension       { get; set; }
 
+    public Mc.Core.Config.PanelColumnConfig? ColumnConfig { get; set; }
+
     public event EventHandler<FileEntry?>? EntryActivated;
     public event EventHandler<int>? CursorChanged;
     public event EventHandler? BecameActive;

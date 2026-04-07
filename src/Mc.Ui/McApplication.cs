@@ -88,6 +88,7 @@ public sealed class McApplication : Toplevel
         [
             new MenuItem("_File listing",      string.Empty, () => ToggleOverlayModeForPanel(left, PanelDisplayMode.Normal)),
             new MenuItem("_Listing format...", string.Empty, () => ShowListingFormatDialog(left)),
+            new MenuItem("_Column config...",  string.Empty, () => ShowColumnConfigDialog(left)),
             new MenuItem("_Quick view",        "Ctrl+X Q",   () => ToggleOverlayModeForPanel(left, PanelDisplayMode.QuickView)),
             new MenuItem("_Info",              "Ctrl+X I",   () => ToggleOverlayModeForPanel(left, PanelDisplayMode.Info)),
             new MenuItem("_Tree",              "Ctrl+X T",   () => ToggleOverlayModeForPanel(left, PanelDisplayMode.Tree)),
@@ -698,6 +699,8 @@ public sealed class McApplication : Toplevel
         panel.FollowSymlinks           = _settings.PanelFollowSymlinks;  // #37
         panel.SplitNameExtension       = left ? _settings.LeftSplitNameExtension
                                                : _settings.RightSplitNameExtension;
+        panel.ColumnConfig             = left ? _settings.LeftPanelColumns
+                                               : _settings.RightPanelColumns;
     }
 
     private void OnPanelEntryActivated(object? sender, FileEntry? entry)
@@ -3597,18 +3600,34 @@ public sealed class McApplication : Toplevel
             if (rg.SelectedItem == 3 && !string.IsNullOrWhiteSpace(fmtField.Text?.ToString()))
                 panel.UserFormatString = fmtField.Text!.ToString()!;
 
-            bool split = splitCb.CheckedState == CheckState.Checked;
-            panel.SplitNameExtension = split;
-            if (left) _settings.LeftSplitNameExtension  = split;
-            else      _settings.RightSplitNameExtension = split;
+            panel.SplitNameExtension = splitCb.CheckedState == CheckState.Checked;
+            if (left) _settings.LeftSplitNameExtension = panel.SplitNameExtension;
+            else      _settings.RightSplitNameExtension = panel.SplitNameExtension;
             _settings.Save();
-
             Application.RequestStop(d);
         };
         var cancel = new Button { Text = "Cancel" };
         cancel.Accepting += (_, _) => Application.RequestStop(d);
         d.AddButton(ok); d.AddButton(cancel);
         Application.Run(d); d.Dispose();
+    }
+
+    private void ShowColumnConfigDialog(bool left)
+    {
+        var panel = left ? _leftPanelView : _rightPanelView;
+        var config = panel.ColumnConfig ?? (left ? _settings.LeftPanelColumns : _settings.RightPanelColumns);
+
+        var dialog = new Dialogs.ColumnConfigDialog(config);
+        Application.Run(dialog);
+        dialog.Dispose();
+
+        if (dialog.Result != null)
+        {
+            panel.ColumnConfig = dialog.Result;
+            if (left) _settings.LeftPanelColumns = dialog.Result;
+            else      _settings.RightPanelColumns = dialog.Result;
+            _settings.Save();
+        }
     }
 
     private void ShowFilterDialog(bool left)
