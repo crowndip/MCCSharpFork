@@ -920,6 +920,30 @@ public sealed class McApplication : Toplevel
 
     private void ViewCurrent()
     {
+        var marked = _controller.ActivePanel.GetMarkedEntries();
+        
+        // If multiple files are marked, open them all
+        if (marked.Count > 1)
+        {
+            foreach (var markedEntry in marked.Where(e => !e.IsDirectory && !e.IsParentDir))
+            {
+                var markedPath = ResolveArchiveEntryToLocalPath(markedEntry.FullPath.Path, out var markedTempDir);
+                if (markedPath == null) continue;
+                try
+                {
+                    if (_settings.UseInternalViewer)
+                        ViewFile(markedPath);
+                    else
+                        LaunchExternalProgram(_settings.ExternalViewer, markedPath);
+                }
+                finally
+                {
+                    if (markedTempDir != null) try { Directory.Delete(markedTempDir, recursive: true); } catch { }
+                }
+            }
+            return;
+        }
+
         var entry = GetCurrentEntry();
         if (entry == null) return;
         // Directories are viewed by navigating into them (matches original MC do_view_cmd behaviour)
@@ -1018,6 +1042,40 @@ public sealed class McApplication : Toplevel
 
     private void EditCurrent()
     {
+        var marked = _controller.ActivePanel.GetMarkedEntries();
+        
+        // If multiple files are marked, open them all
+        if (marked.Count > 1)
+        {
+            foreach (var markedEntry in marked.Where(e => !e.IsDirectory && !e.IsParentDir))
+            {
+                var markedPath = ResolveArchiveEntryToLocalPath(markedEntry.FullPath.Path, out var markedTempDir);
+                if (markedPath == null) continue;
+                _editedFiles.Remove(markedPath);
+                _editedFiles.Insert(0, markedPath);
+                
+                try
+                {
+                    if (!_settings.UseInternalEditor)
+                    {
+                        LaunchExternalProgram(_settings.ExternalEditor, markedPath);
+                    }
+                    else
+                    {
+                        var screen = new EditorScreen(markedPath, readOnly: markedTempDir != null);
+                        Application.Run(screen);
+                        screen.Dispose();
+                    }
+                }
+                finally
+                {
+                    if (markedTempDir != null) try { Directory.Delete(markedTempDir, recursive: true); } catch { }
+                }
+            }
+            RefreshPanels();
+            return;
+        }
+
         var entry = GetCurrentEntry();
         string? path;
         string? tempDir = null;

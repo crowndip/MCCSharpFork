@@ -1158,11 +1158,49 @@ public sealed class EditorView : View
             if (choice == 2) return;
             if (choice == 0) ExecuteSave();
         }
-        var path = PromptInput("Open File", "File name:", _editor.FilePath ?? string.Empty);
-        if (path == null) return;
+
+        // Show dialog with Browse button
+        var d = new Dialog { Title = "Open File", Width = 70, Height = 10 };
+        d.Add(new Label { X = 1, Y = 1, Text = "File name:" });
+        var pathField = new TextField
+        {
+            X = 1, Y = 2,
+            Width = Dim.Fill(1),
+            Text = _editor.FilePath ?? string.Empty
+        };
+        d.Add(pathField);
+
+        var browseBtn = new Button { X = 1, Y = 4, Text = "Browse..." };
+        browseBtn.Accepting += (_, _) =>
+        {
+            var browser = new FileBrowserDialog(pathField.Text?.ToString() ?? "");
+            Application.Run(browser);
+            if (browser.SelectedFile != null)
+                pathField.Text = browser.SelectedFile;
+            browser.Dispose();
+        };
+        d.Add(browseBtn);
+
+        var ok = new Button { X = 15, Y = 4, Text = "OK", IsDefault = true };
+        var cancel = new Button { X = 22, Y = 4, Text = "Cancel" };
+        
+        string? selectedPath = null;
+        ok.Accepting += (_, _) =>
+        {
+            selectedPath = pathField.Text?.ToString();
+            Application.RequestStop(d);
+        };
+        cancel.Accepting += (_, _) => Application.RequestStop(d);
+        
+        d.Add(ok, cancel);
+        Application.Run(d);
+        d.Dispose();
+
+        if (string.IsNullOrEmpty(selectedPath)) return;
+
         try
         {
-            _editor.LoadFile(path);
+            _editor.LoadFile(selectedPath);
             EditorTitleChanged?.Invoke(this, EventArgs.Empty);
             SetNeedsDraw();
         }
