@@ -13,9 +13,12 @@ This document identifies features present in Total Commander that are currently 
 3. **Folder Size Display** - Space on folder calculates size (matches TC exactly)
 4. **Basic File Operations** - Copy, move, delete, rename with all options
 5. **VFS Support** - Local, FTP, SFTP, multiple archive formats
-6. **Built-in Editor** - Syntax highlighting, large file support
+6. **Built-in Editor (mcedit)** - SUPERIOR with multi-tab, split view, text/binary compare, git integration
 7. **Built-in Viewer** - Hex/text modes with search
 8. **Diff Viewer** - Side-by-side comparison
+9. **Search Features** - Search in archives, duplicate finder, panelize results
+10. **File Properties** - Touch (timestamps), Chmod, Chown, Chattr
+11. **Panel Customization** - Configurable columns with reordering
 
 ### 🔄 Major Features Still Missing
 1. **Tabbed Interface** - No tab support within panels
@@ -69,25 +72,36 @@ This document identifies features present in Total Commander that are currently 
 - ❌ **Plugins for content search** (Office files, PDF, etc.)
 
 ### 7. **File Comparison Tools**
-- ❌ **Text compare** with syntax highlighting
-- ❌ **Binary compare** with hex view
+- ✅ **Text compare** with syntax highlighting (IMPLEMENTED in mcedit)
+- ✅ **Binary compare** with hex view (IMPLEMENTED in mcedit)
 - ❌ **Directory comparison** with visual diff
 - ❌ **Three-way merge** tool
 - ❌ **Synchronize by content** (byte-by-byte)
 
 ### 8. **Viewing & Editing**
+- ✅ **Built-in editor (mcedit)** with advanced features:
+  - ✅ **Multi-tab viewer** for multiple files
+  - ✅ **Split view** (horizontal/vertical)
+  - ✅ **Text compare** with syntax highlighting
+  - ✅ **Binary compare** with hex view
+  - ✅ **Git integration** (blame, diff, stage)
+  - ✅ **Syntax highlighting** for 20+ languages
+  - ✅ **Macro recording/playback**
+  - ✅ **Word completion**
+  - ✅ **JSON/XML pretty print and validation**
 - ❌ **Built-in viewers for 300+ file formats**
 - ❌ **Image viewer** with thumbnail support
-- ❌ **Multi-tab viewer** for multiple files
 - ❌ **Quick view panel** (F3) enhancements
 - ❌ **Office file preview** (Word, Excel, PDF)
 
 ### 9. **Advanced Customization**
+- ✅ **Panel column configuration** with reordering (IMPLEMENTED)
+- ✅ **Column types**: Name, Size, ModifyTime, AccessTime, ChangeTime, Permissions, Owner, Group, Extension, Type
 - ❌ **Toolbar customization** with custom commands
 - ❌ **Button bar** with user-defined commands
 - ❌ **Start menu** customization
 - ❌ **Mouse gestures** support
-- ❌ **Color schemes** and theme engine
+- ❌ **Color schemes** and theme engine (partial - skins exist)
 
 ### 10. **Automation & Scripting**
 - ❌ **Button bar** with custom commands
@@ -118,11 +132,14 @@ This document identifies features present in Total Commander that are currently 
 - ❌ **Transfer speed limiting** and scheduling
 
 ### 14. **Advanced Tools**
+- ✅ **File timestamp modification** with Touch dialog (IMPLEMENTED)
+- ✅ **File permissions** management with Chmod (IMPLEMENTED)
+- ✅ **File ownership** management with Chown/Advanced Chown (IMPLEMENTED)
+- ✅ **File attributes** management with Chattr (IMPLEMENTED)
+- ✅ **Checksum calculator** (MD5, SHA-1, SHA-256) (IMPLEMENTED)
 - ❌ **File splitting/joining** with CRC verification
-- ❌ **File properties** with multiple hash algorithms
-- ❌ **File timestamp** modification with precision
 - ❌ **File comments** via NTFS streams
-- ❌ **File attribute** management (extended attributes)
+- ❌ **Extended attributes** management
 
 ### 15. **User Interface Enhancements**
 - ❌ **Tabbed interface** with drag-and-drop
@@ -201,7 +218,7 @@ This document identifies features present in Total Commander that are currently 
    - Extended 7zip provider to handle RAR, CAB, ISO, ARJ, LHA, JAR
    - Password-protected archive support for all formats
    - 7zip as primary ZIP handler with fallback to .NET built-in
-   - Status: **SUPERIOR** to basic Total Commander (includes GUID, Roman numerals)
+   - Status: **COMPLETE**
 
 2. **Enhanced Multi-Rename Tool**
    - Added 10+ new placeholders (file size, parent folders, file index, etc.)
@@ -217,6 +234,27 @@ This document identifies features present in Total Commander that are currently 
    - Background calculation (non-blocking)
    - Persistent display until refresh
    - Status: **MATCHES** Total Commander exactly
+
+4. **Search Enhancements**
+   - Search in archives (ZIP, RAR, 7Z, TAR, etc.)
+   - Duplicate file finder with SHA256 content comparison
+   - Search results virtual folder (Panelize)
+   - Status: **COMPLETE**
+
+5. **Advanced mcedit Features**
+   - Multi-tab viewer for multiple files
+   - Split view (horizontal/vertical panes)
+   - Text compare with syntax highlighting
+   - Binary compare with hex view
+   - Git integration (blame, diff, stage, unstage, status)
+   - Status: **SUPERIOR** to basic editors
+
+6. **Panel Column Configuration**
+   - Configurable columns with visual reordering
+   - 10 column types available
+   - Per-panel configuration (left/right independent)
+   - Persistent settings
+   - Status: **COMPLETE**
 
 ## Implementation Considerations
 
