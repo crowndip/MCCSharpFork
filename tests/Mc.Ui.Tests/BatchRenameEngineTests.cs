@@ -27,7 +27,10 @@ public sealed class BatchRenameEngineTests
         int    counter   = 1,
         int    digits    = 3,
         DateTime? modified = null,
-        DateTime? now      = null)
+        DateTime? now      = null,
+        int    fileIndex = 1,
+        long   fileSize  = 1024,
+        string fullPath  = "/test/docs/file.txt")
     {
         var method = typeof(BatchRenameDialog)
             .GetMethod("ApplyMask", BindingFlags.NonPublic | BindingFlags.Static)
@@ -35,7 +38,7 @@ public sealed class BatchRenameEngineTests
 
         return (string)method.Invoke(null, [
             mask, stem, origExt, parent, counter, digits,
-            modified ?? T, now ?? T
+            modified ?? T, now ?? T, fileIndex, fileSize, fullPath
         ])!;
     }
 
