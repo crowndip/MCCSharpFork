@@ -58,6 +58,9 @@ public sealed class EditorScreen : Toplevel
         view.ApplySettings(_settings);
 
         Add(_menuBar, _editorContainer, _buttonBar);
+        
+        // Set focus to editor view
+        view.SetFocus();
     }
 
     private EditorView CreateEditorView(string? filePath, bool readOnly = false)
