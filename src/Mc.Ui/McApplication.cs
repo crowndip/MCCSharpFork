@@ -23,6 +23,7 @@ public sealed class McApplication : Toplevel
 {
     private readonly FileManagerController _controller;
     private readonly McSettings _settings;
+    private readonly VfsRegistry _vfsRegistry;
 
     private FilePanelView _leftPanelView = null!;
     private FilePanelView _rightPanelView = null!;
@@ -57,10 +58,11 @@ public sealed class McApplication : Toplevel
     private View _leftOverlay  = null!;
     private View _rightOverlay = null!;
 
-    public McApplication(FileManagerController controller, McSettings settings)
+    public McApplication(FileManagerController controller, McSettings settings, VfsRegistry vfsRegistry)
     {
         _controller = controller;
         _settings = settings;
+        _vfsRegistry = vfsRegistry;
 
         controller.StatusMessage += (_, msg) => ShowStatus(msg);
         controller.OperationError += (_, ex) => MessageDialog.Error(ex.Message);
@@ -203,6 +205,7 @@ public sealed class McApplication : Toplevel
                     new("Directory _size...",            string.Empty, ShowDirSize),
                     new("Folder size anal_yzer...",     string.Empty, ShowFolderAnalyzer),
                     new("_Batch rename...",              string.Empty, ShowBatchRename),
+                    new("Find _duplicates...",           string.Empty, ShowDuplicateFinder),
                     null!,
                     new("Op_en terminal here",           "Ctrl+T",     OpenTerminalHere),
                     new("_Compare with diff tool",       string.Empty, CompareWithDiffTool),
@@ -1689,6 +1692,12 @@ public sealed class McApplication : Toplevel
                         statusLabel.Text = $" Found {displayItems.Count} file(s)...";
                     });
                 }
+
+                // Search in archives if requested
+                if (opts.SearchInArchives)
+                {
+                    SearchInArchives(startDir, opts, token, resultPaths, displayItems, statusLabel);
+                }
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
@@ -1717,6 +1726,72 @@ public sealed class McApplication : Toplevel
         // "Again": show the options dialog again so user can tweak and re-run
         if (restartSearch)
             ShowFindDialog();
+    }
+
+    /// <summary>Search inside archive files for matching files.</summary>
+    private void SearchInArchives(string startDir, FindOptions opts, CancellationToken token,
+        List<string> resultPaths, ObservableCollection<string> displayItems, Label statusLabel)
+    {
+        var archiveExtensions = new[] { ".zip", ".7z", ".rar", ".tar", ".gz", ".bz2", ".xz", ".cab", ".iso", ".arj", ".lha", ".lzh", ".jar" };
+        var archives = Directory.EnumerateFiles(startDir, "*.*", opts.SearchInSubdirs ? SearchOption.AllDirectories : SearchOption.TopDirectoryOnly)
+            .Where(f => archiveExtensions.Contains(Path.GetExtension(f).ToLowerInvariant()));
+
+        foreach (var archivePath in archives)
+        {
+            if (token.IsCancellationRequested) break;
+            
+            Application.Invoke(() => statusLabel.Text = $" Scanning archive: {Path.GetFileName(archivePath)}");
+
+            try
+            {
+                var vfsPath = new VfsPath(GetArchiveScheme(archivePath), null, null, null, null, archivePath + "|");
+                var provider = _vfsRegistry.Resolve(vfsPath);
+                var entries = provider.ListDirectory(vfsPath);
+
+                foreach (var entry in entries.Where(e => !e.IsDirectory && !e.IsParentDir))
+                {
+                    if (token.IsCancellationRequested) break;
+
+                    // Match file pattern
+                    if (!string.IsNullOrEmpty(opts.FilePattern) && opts.FilePattern != "*")
+                    {
+                        var pattern = opts.FilePattern.Replace("*", ".*").Replace("?", ".");
+                        if (!System.Text.RegularExpressions.Regex.IsMatch(entry.Name, pattern, 
+                            opts.CaseSensitive ? System.Text.RegularExpressions.RegexOptions.None : System.Text.RegularExpressions.RegexOptions.IgnoreCase))
+                            continue;
+                    }
+
+                    var displayPath = $"{Path.GetFileName(archivePath)}|{entry.Name}";
+                    var fullPath = $"{archivePath}|{entry.Name}";
+                    
+                    Application.Invoke(() =>
+                    {
+                        resultPaths.Add(fullPath);
+                        displayItems.Add(displayPath);
+                        statusLabel.Text = $" Found {displayItems.Count} file(s)...";
+                    });
+                }
+            }
+            catch { /* Skip archives that can't be read */ }
+        }
+    }
+
+    private static string GetArchiveScheme(string path)
+    {
+        var ext = Path.GetExtension(path).ToLowerInvariant();
+        return ext switch
+        {
+            ".zip" => "zip",
+            ".7z" => "7z",
+            ".rar" => "rar",
+            ".tar" or ".gz" or ".bz2" or ".xz" => "tar",
+            ".cab" => "cab",
+            ".iso" => "iso",
+            ".arj" => "arj",
+            ".lha" or ".lzh" => "lha",
+            ".jar" => "jar",
+            _ => "7z"
+        };
     }
 
     /// <summary>
@@ -2743,6 +2818,125 @@ public sealed class McApplication : Toplevel
             RefreshPanels();
             MessageDialog.Show("Batch Rename", $"{count} file(s) renamed successfully.");
         }
+    }
+
+    // --- Tools: Duplicate finder ---
+
+    private void ShowDuplicateFinder()
+    {
+        var startDir = _controller.ActivePanel.CurrentPath.Path;
+        var duplicates = FindDuplicates(startDir);
+        
+        if (duplicates.Count == 0)
+        {
+            MessageDialog.Show("Find Duplicates", "No duplicate files found.");
+            return;
+        }
+
+        // Show results in a dialog
+        var displayItems = new ObservableCollection<string>();
+        var resultPaths = new List<string>();
+        
+        foreach (var group in duplicates)
+        {
+            displayItems.Add($"--- {group.Count} duplicates, {FileSizeFormatter.Format(group.First().Size)} each ---");
+            resultPaths.Add(string.Empty); // Placeholder for header
+            foreach (var file in group)
+            {
+                displayItems.Add($"  {file.Path}");
+                resultPaths.Add(file.Path);
+            }
+        }
+
+        var d = new Dialog
+        {
+            Title = $"Duplicate Files ({duplicates.Count} groups)",
+            Width = Dim.Fill(4),
+            Height = Dim.Fill(4),
+            ColorScheme = McTheme.Dialog,
+        };
+
+        var lv = new ListView
+        {
+            X = 1, Y = 1,
+            Width = Dim.Fill(1), Height = Dim.Fill(3),
+            ColorScheme = McTheme.Panel,
+        };
+        lv.SetSource(displayItems);
+        d.Add(lv);
+
+        var goBtn = new Button { Text = "Go to", IsDefault = true };
+        goBtn.Accepting += (_, _) =>
+        {
+            var idx = lv.SelectedItem;
+            if (idx >= 0 && idx < resultPaths.Count && !string.IsNullOrEmpty(resultPaths[idx]))
+            {
+                var path = resultPaths[idx];
+                var dir = Path.GetDirectoryName(path) ?? startDir;
+                _controller.NavigateTo(VfsPath.FromLocal(dir));
+                RefreshPanels();
+            }
+            Application.RequestStop(d);
+        };
+
+        var closeBtn = new Button { Text = "Close" };
+        closeBtn.Accepting += (_, _) => Application.RequestStop(d);
+
+        d.AddButton(goBtn);
+        d.AddButton(closeBtn);
+        Application.Run(d);
+        d.Dispose();
+    }
+
+    private List<List<(string Path, long Size)>> FindDuplicates(string startDir)
+    {
+        var filesBySize = new Dictionary<long, List<string>>();
+        
+        // Group files by size
+        foreach (var file in Directory.EnumerateFiles(startDir, "*", SearchOption.AllDirectories))
+        {
+            try
+            {
+                var size = new FileInfo(file).Length;
+                if (!filesBySize.ContainsKey(size))
+                    filesBySize[size] = new List<string>();
+                filesBySize[size].Add(file);
+            }
+            catch { }
+        }
+
+        // For files with same size, compare content
+        var duplicates = new List<List<(string Path, long Size)>>();
+        foreach (var group in filesBySize.Where(g => g.Value.Count > 1))
+        {
+            var byHash = new Dictionary<string, List<string>>();
+            foreach (var file in group.Value)
+            {
+                try
+                {
+                    var hash = ComputeFileHash(file);
+                    if (!byHash.ContainsKey(hash))
+                        byHash[hash] = new List<string>();
+                    byHash[hash].Add(file);
+                }
+                catch { }
+            }
+
+            foreach (var hashGroup in byHash.Where(g => g.Value.Count > 1))
+            {
+                duplicates.Add(hashGroup.Value.Select(p => (p, group.Key)).ToList());
+            }
+        }
+
+        return duplicates;
+    }
+
+    private static string ComputeFileHash(string path)
+    {
+        using var stream = File.OpenRead(path);
+        using var sha256 = System.Security.Cryptography.SHA256.Create();
+        var hash = sha256.ComputeHash(stream);
+        return Convert.ToHexString(hash);
     }
 
     // --- Tools: External apps ---

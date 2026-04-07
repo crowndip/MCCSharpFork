@@ -1,4 +1,5 @@
 using Mc.Core.Config;
+using Mc.Core.Vfs;
 using Mc.FileManager;
 using Mc.Ui;
 using Microsoft.Extensions.DependencyInjection;
@@ -37,13 +38,14 @@ internal sealed class Program
             // Get required services
             var controller = services.GetRequiredService<FileManagerController>();
             var settings   = services.GetRequiredService<McSettings>();
+            var vfsRegistry = services.GetRequiredService<VfsRegistry>();
 
             // Initialize Terminal.Gui then apply the saved (or default) color theme
             Application.Init();
             McTheme.Apply(settings.ActiveSkin);
 
             // Create and run the main application
-            var app = new McApplication(controller, settings);
+            var app = new McApplication(controller, settings, vfsRegistry);
             Application.Run(app);
             Application.Shutdown();
 

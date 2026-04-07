@@ -41,7 +41,7 @@ public sealed class McApplicationPanelModeTests
 
         var controller = new FileManagerController(vfs);
         var settings   = new McSettings(new McConfig());
-        _app = new McApplication(controller, settings);
+        _app = new McApplication(controller, settings, vfs);
     }
 
     // ── Reflection helpers ────────────────────────────────────────────────────
