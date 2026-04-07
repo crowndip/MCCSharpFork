@@ -15,6 +15,7 @@ public sealed class ColumnConfigDialog : Dialog
     private readonly List<PanelColumn> _selected;
 
     public PanelColumnConfig Result => _config;
+    public bool WasAccepted { get; private set; }
 
     public ColumnConfigDialog(PanelColumnConfig config)
     {
@@ -41,6 +42,7 @@ public sealed class ColumnConfigDialog : Dialog
         };
         _availableList.SetSource(new System.Collections.ObjectModel.ObservableCollection<string>(
             _available.Select(FormatColumn)));
+        _availableList.OpenSelectedItem += (_, _) => AddColumn();
         Add(_availableList);
 
         // Buttons
@@ -60,6 +62,7 @@ public sealed class ColumnConfigDialog : Dialog
         };
         _selectedList.SetSource(new System.Collections.ObjectModel.ObservableCollection<string>(
             _selected.Select(FormatColumn)));
+        _selectedList.OpenSelectedItem += (_, _) => RemoveColumn();
         Add(_selectedList);
 
         // Actions
@@ -74,9 +77,14 @@ public sealed class ColumnConfigDialog : Dialog
         ok.Accepting += (_, _) =>
         {
             _config.Columns = new List<PanelColumn>(_selected);
+            WasAccepted = true;
             Application.RequestStop(this);
         };
-        cancel.Accepting += (_, _) => Application.RequestStop(this);
+        cancel.Accepting += (_, _) =>
+        {
+            WasAccepted = false;
+            Application.RequestStop(this);
+        };
         AddButton(ok);
         AddButton(cancel);
     }

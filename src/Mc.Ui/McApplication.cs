@@ -3708,15 +3708,20 @@ public sealed class McApplication : Toplevel
 
         var dialog = new Dialogs.ColumnConfigDialog(config);
         Application.Run(dialog);
-        dialog.Dispose();
-
-        if (dialog.Result != null)
+        
+        if (dialog.Result != null && dialog.WasAccepted)
         {
             panel.ColumnConfig = dialog.Result;
             if (left) _settings.LeftPanelColumns = dialog.Result;
             else      _settings.RightPanelColumns = dialog.Result;
             _settings.Save();
+            
+            // Refresh panel to show new columns
+            panel.SetNeedsDraw();
+            _controller.ActivePanel.Reload();
         }
+        
+        dialog.Dispose();
     }
 
     private void ShowFilterDialog(bool left)
