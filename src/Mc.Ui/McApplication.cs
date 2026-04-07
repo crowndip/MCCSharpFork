@@ -385,6 +385,7 @@ public sealed class McApplication : Toplevel
             case KeyCode.F1:  HelpDialog.Show(); return true;
             case KeyCode.F3:  ViewCurrent(); return true;
             case KeyCode.F4:  EditCurrent(); return true;
+            case KeyCode.F4 | KeyCode.ShiftMask: EditNewFile(); return true;
             case KeyCode.F5:  CopyFiles(); return true;
             case KeyCode.F6:  MoveFiles(); return true;
             case KeyCode.F7:  MakeDir(); return true;
@@ -1115,6 +1116,20 @@ public sealed class McApplication : Toplevel
         {
             if (tempDir != null) try { Directory.Delete(tempDir, recursive: true); } catch { }
         }
+    }
+
+    private void EditNewFile()
+    {
+        if (!_settings.UseInternalEditor)
+        {
+            LaunchExternalProgram(_settings.ExternalEditor, string.Empty);
+            return;
+        }
+
+        var screen = new EditorScreen(null, readOnly: false);
+        Application.Run(screen);
+        screen.Dispose();
+        RefreshPanels();
     }
 
     private void CopyFiles()

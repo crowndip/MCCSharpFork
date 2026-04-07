@@ -59,8 +59,8 @@ public sealed class EditorScreen : Toplevel
 
         Add(_menuBar, _editorContainer, _buttonBar);
         
-        // Set focus to editor view
-        view.SetFocus();
+        // Set focus after layout is complete
+        Loaded += (_, _) => view.SetFocus();
     }
 
     private EditorView CreateEditorView(string? filePath, bool readOnly = false)
@@ -79,14 +79,21 @@ public sealed class EditorScreen : Toplevel
 
     protected override bool OnKeyDown(Key keyEvent)
     {
-        // Let editor handle all keys except F9 (menu) and F10 (quit)
+        // F9 opens menu
         if (keyEvent.KeyCode == KeyCode.F9)
         {
             _menuBar.SetFocus();
             return true;
         }
         
-        // Don't let MenuBar intercept keys - pass to focused view (editor)
+        // If editor has focus, don't let MenuBar process the key
+        var editor = ActiveEditor;
+        if (editor != null && editor.HasFocus)
+        {
+            // Return false to let the key propagate to the focused view
+            return false;
+        }
+        
         return base.OnKeyDown(keyEvent);
     }
 
@@ -119,7 +126,7 @@ public sealed class EditorScreen : Toplevel
 
     private MenuBar BuildMenuBar()
     {
-        return new MenuBar
+        var menuBar = new MenuBar
         {
           Menus = new[]
           {
@@ -268,6 +275,12 @@ public sealed class EditorScreen : Toplevel
             }),
           }
         };
+        
+        // Disable MenuBar hotkey processing so it doesn't steal keyboard input
+        menuBar.UseKeysUpDownAsKeysLeftRight = false;
+        menuBar.WantMousePositionReports = false;
+        
+        return menuBar;
     }
 
     // ── Button Bar ───────────────────────────────────────────────────────────
