@@ -679,6 +679,8 @@ public sealed class McApplication : Toplevel
                     long size = CalculateDirectorySize(entry.FullPath.Path);
                     Application.Invoke(() =>
                     {
+                        entry.Size = size;
+                        GetActivePanel().SetNeedsDraw();
                         ShowStatus($"{entry.Name}: {FileSizeFormatter.Format(size)}");
                     });
                 }
