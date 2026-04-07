@@ -62,9 +62,9 @@ This document identifies features present in Total Commander that are currently 
 - ❌ **Mapped drives** integration (Windows)
 
 ### 6. **Advanced Search Features**
-- ❌ **Search in archives** capability
-- ❌ **Duplicate file finder** with content comparison
-- ❌ **Search results** in virtual folder
+- ✅ **Search in archives** capability (all VFS-supported formats)
+- ✅ **Duplicate file finder** with content comparison (SHA256)
+- ✅ **Search results** in virtual folder (via Panelize)
 - ❌ **Save/load search results** for later use
 - ❌ **Plugins for content search** (Office files, PDF, etc.)
 
