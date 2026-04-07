@@ -40,6 +40,7 @@ public sealed class EditorScreen : Toplevel
             X = 0, Y = 1,
             Width = Dim.Fill(),
             Height = Dim.Fill(1),
+            CanFocus = false,  // Container should not take focus
         };
 
         var view = CreateEditorView(filePath, readOnly);
@@ -57,10 +58,12 @@ public sealed class EditorScreen : Toplevel
         _settings = EditorSettings.Load();
         view.ApplySettings(_settings);
 
+        // Add MenuBar, container, and button bar
+        // MenuBar is added but we'll prevent it from processing keys
         Add(_menuBar, _editorContainer, _buttonBar);
         
-        // Set focus after layout is complete
-        Loaded += (_, _) => view.SetFocus();
+        // CRITICAL: Set focus to editor
+        view.SetFocus();
     }
 
     private EditorView CreateEditorView(string? filePath, bool readOnly = false)
@@ -82,15 +85,18 @@ public sealed class EditorScreen : Toplevel
         // F9 opens menu
         if (keyEvent.KeyCode == KeyCode.F9)
         {
-            _menuBar.SetFocus();
+            _menuBar.OpenMenu();
             return true;
         }
         
-        // If editor has focus, don't let MenuBar process the key
+        // Intercept ALL keys before MenuBar can see them
+        // MenuBar in Terminal.Gui has special handling that intercepts hotkeys
+        // We need to prevent that by handling keys here first
         var editor = ActiveEditor;
-        if (editor != null && editor.HasFocus)
+        if (editor != null)
         {
-            // Return false to let the key propagate to the focused view
+            // Let the focused view (editor) handle the key
+            // Don't call base.OnKeyDown which would let MenuBar intercept
             return false;
         }
         
@@ -276,9 +282,8 @@ public sealed class EditorScreen : Toplevel
           }
         };
         
-        // Disable MenuBar hotkey processing so it doesn't steal keyboard input
-        menuBar.UseKeysUpDownAsKeysLeftRight = false;
-        menuBar.WantMousePositionReports = false;
+        // Prevent MenuBar from stealing keyboard input
+        menuBar.CanFocus = false;
         
         return menuBar;
     }
