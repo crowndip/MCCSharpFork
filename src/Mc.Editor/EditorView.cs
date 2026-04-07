@@ -167,6 +167,9 @@ public sealed class EditorView : View
         set { _isReadOnly = value; _editor.IsReadOnly = value; SetNeedsDraw(); }
     }
 
+    public string? FilePath => _editor.FilePath;
+    public bool IsModified => _editor.IsModified;
+
     public new string Title => _editor.FilePath != null
         ? $"Edit: {Path.GetFileName(_editor.FilePath)}{(_editor.IsModified ? " *" : string.Empty)}"
         : "Edit: [new file]";

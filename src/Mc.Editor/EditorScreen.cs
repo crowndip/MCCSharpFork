@@ -13,9 +13,16 @@ namespace Mc.Editor;
 /// </summary>
 public sealed class EditorScreen : Toplevel
 {
-    private readonly EditorView _view;
+    private readonly List<EditorView> _editors = [];
+    private int _currentTab;
+    private readonly View _editorContainer;
     private readonly MenuBar _menuBar;
     private readonly EditorButtonBar _buttonBar;
+    private View? _splitContainer;
+    private EditorView? _splitView1;
+    private EditorView? _splitView2;
+    private bool _isSplitMode;
+    private bool _isVerticalSplit;
 
     // File history (most-recently-used first) for File > History
     private readonly List<string> _fileHistory = [];
@@ -23,30 +30,73 @@ public sealed class EditorScreen : Toplevel
 
     private EditorSettings _settings = new();
 
+    private EditorView ActiveEditor => _isSplitMode && _splitView1 != null ? _splitView1 : 
+                                       _editors.Count > 0 ? _editors[_currentTab] : _editors[0];
+
     public EditorScreen(string? filePath = null, bool readOnly = false)
     {
+        _editorContainer = new View
+        {
+            X = 0, Y = 1,
+            Width = Dim.Fill(),
+            Height = Dim.Fill(1),
+        };
+
+        var view = CreateEditorView(filePath, readOnly);
+        _editors.Add(view);
+        _currentTab = 0;
+        _editorContainer.Add(view);
+
         if (filePath != null && File.Exists(filePath))
             AddToHistory(filePath);
 
-        _view = new EditorView(filePath)
-        {
-            X = 0, Y = 1,
-            Width  = Dim.Fill(),
-            Height = Dim.Fill(1),   // leave 1 row at bottom for button bar
-        };
-        if (readOnly) _view.IsReadOnly = true;
-        _view.RequestClose       += (_, _) => Application.RequestStop(this);
-        _view.EditorTitleChanged += (_, _) => { /* title lives in status bar */ };
-
-        _menuBar   = BuildMenuBar();
+        _menuBar = BuildMenuBar();
         _buttonBar = BuildButtonBar();
 
         // Load and apply settings
         _settings = EditorSettings.Load();
-        _view.ApplySettings(_settings);
+        view.ApplySettings(_settings);
 
-        // Menu bar sits at the very top (Terminal.Gui puts MenuBar at Y=0 automatically when added to Toplevel)
-        Add(_menuBar, _view, _buttonBar);
+        Add(_menuBar, _editorContainer, _buttonBar);
+    }
+
+    private EditorView CreateEditorView(string? filePath, bool readOnly = false)
+    {
+        var view = new EditorView(filePath)
+        {
+            X = 0, Y = 0,
+            Width = Dim.Fill(),
+            Height = Dim.Fill(),
+        };
+        if (readOnly) view.IsReadOnly = true;
+        view.RequestClose += (_, _) => CloseCurrentTab();
+        view.EditorTitleChanged += (_, _) => SetNeedsDraw();
+        return view;
+    }
+
+    private void CloseCurrentTab()
+    {
+        if (_isSplitMode)
+        {
+            ExitSplitMode();
+            return;
+        }
+        
+        if (_editors.Count == 1)
+        {
+            Application.RequestStop(this);
+            return;
+        }
+
+        var editor = _editors[_currentTab];
+        _editorContainer.Remove(editor);
+        _editors.RemoveAt(_currentTab);
+        
+        if (_editors.Count > 0)
+        {
+            _currentTab = Math.Min(_currentTab, _editors.Count - 1);
+            _editorContainer.Add(_editors[_currentTab]);
+        }
     }
 
     // ── Menu Bar ─────────────────────────────────────────────────────────────
@@ -59,128 +109,138 @@ public sealed class EditorScreen : Toplevel
           {
             new MenuBarItem("_File", new MenuItem[]
             {
-                new MenuItem("_Open file…",       "Ctrl+O",       () => _view.ExecuteOpenFile()),
-                new MenuItem("_New",              "Ctrl+N",       () => _view.ExecuteNewFile()),
-                new MenuItem("_Close",            string.Empty,   () => _view.ExecuteClose()),
+                new MenuItem("_Open file…",       "Ctrl+O",       () => ActiveEditor.ExecuteOpenFile()),
+                new MenuItem("_New",              "Ctrl+N",       () => OpenNewTab()),
+                new MenuItem("_Close",            string.Empty,   () => ActiveEditor.ExecuteClose()),
                 new MenuItem("_History…",         "Alt+Shift+E",  () => ShowFileHistory()),
                 null!,
-                new MenuItem("_Save",             "F2",           () => _view.ExecuteSave()),
-                new MenuItem("Save _as…",         "Shift+F2",     () => _view.ExecuteSaveAs()),
-                new MenuItem("_Insert file…",     "Shift+F5",     () => _view.ExecuteInsertFile()),
-                new MenuItem("Cop_y to file…",    "Ctrl+F",       () => _view.ExecuteSaveBlock()),
+                new MenuItem("_Save",             "F2",           () => ActiveEditor.ExecuteSave()),
+                new MenuItem("Save _as…",         "Shift+F2",     () => ActiveEditor.ExecuteSaveAs()),
+                new MenuItem("_Insert file…",     "Shift+F5",     () => ActiveEditor.ExecuteInsertFile()),
+                new MenuItem("Cop_y to file…",    "Ctrl+F",       () => ActiveEditor.ExecuteSaveBlock()),
                 null!,
-                new MenuItem("_User menu…",       "F11",          () => _view.ExecuteUserMenu()),
+                new MenuItem("_User menu…",       "F11",          () => ActiveEditor.ExecuteUserMenu()),
                 null!,
-                new MenuItem("_Quit",             "F10",          () => _view.ExecuteClose()),
+                new MenuItem("_Quit",             "F10",          () => ActiveEditor.ExecuteClose()),
             }),
             new MenuBarItem("_Edit", new MenuItem[]
             {
-                new MenuItem("_Undo",             "Ctrl+Z",       () => _view.ExecuteUndo()),
-                new MenuItem("_Redo",             "Ctrl+Shift+Z", () => _view.ExecuteRedo()),
+                new MenuItem("_Undo",             "Ctrl+Z",       () => ActiveEditor.ExecuteUndo()),
+                new MenuItem("_Redo",             "Ctrl+Shift+Z", () => ActiveEditor.ExecuteRedo()),
                 null!,
-                new MenuItem("_Toggle ins/overw", "Ins",          () => _view.ExecuteToggleInsert()),
+                new MenuItem("_Toggle ins/overw", "Ins",          () => ActiveEditor.ExecuteToggleInsert()),
                 null!,
-                new MenuItem("Toggle _mark",      "F3",           () => _view.ExecuteToggleMark()),
-                new MenuItem("Mark colu_mns",     "Shift+F3",     () => _view.ExecuteMarkColumn()),
-                new MenuItem("Mark _all",         "Ctrl+A",       () => _view.ExecuteMarkAll()),
-                new MenuItem("Un_mark",           string.Empty,   () => _view.ExecuteUnmark()),
+                new MenuItem("Toggle _mark",      "F3",           () => ActiveEditor.ExecuteToggleMark()),
+                new MenuItem("Mark colu_mns",     "Shift+F3",     () => ActiveEditor.ExecuteMarkColumn()),
+                new MenuItem("Mark _all",         "Ctrl+A",       () => ActiveEditor.ExecuteMarkAll()),
+                new MenuItem("Un_mark",           string.Empty,   () => ActiveEditor.ExecuteUnmark()),
                 null!,
-                new MenuItem("_Copy",             "F5",           () => _view.ExecuteCopyBlock()),
-                new MenuItem("Mo_ve",             "F6",           () => _view.ExecuteMoveBlock()),
-                new MenuItem("_Delete",           "F8",           () => _view.ExecuteDeleteBlock()),
+                new MenuItem("_Copy",             "F5",           () => ActiveEditor.ExecuteCopyBlock()),
+                new MenuItem("Mo_ve",             "F6",           () => ActiveEditor.ExecuteMoveBlock()),
+                new MenuItem("_Delete",           "F8",           () => ActiveEditor.ExecuteDeleteBlock()),
                 null!,
-                new MenuItem("Copy to clip_file", "Ctrl+Ins",     () => _view.ExecuteCopyToClipfile()),
-                new MenuItem("Cut _to clipfile",  "Shift+Del",    () => _view.ExecuteCutToClipfile()),
-                new MenuItem("Paste from clip_file","Shift+Ins",  () => _view.ExecutePasteFromClipfile()),
+                new MenuItem("Copy to clip_file", "Ctrl+Ins",     () => ActiveEditor.ExecuteCopyToClipfile()),
+                new MenuItem("Cut _to clipfile",  "Shift+Del",    () => ActiveEditor.ExecuteCutToClipfile()),
+                new MenuItem("Paste from clip_file","Shift+Ins",  () => ActiveEditor.ExecutePasteFromClipfile()),
                 null!,
-                new MenuItem("_Copy to desktop",  "Ctrl+C",       () => _view.ExecuteCopyToSystemClipboard()),
-                new MenuItem("C_ut to desktop",   "Ctrl+X",       () => _view.ExecuteCutToSystemClipboard()),
-                new MenuItem("_Paste from desktop","Ctrl+V",      () => _view.ExecutePasteFromSystemClipboard()),
+                new MenuItem("_Copy to desktop",  "Ctrl+C",       () => ActiveEditor.ExecuteCopyToSystemClipboard()),
+                new MenuItem("C_ut to desktop",   "Ctrl+X",       () => ActiveEditor.ExecuteCutToSystemClipboard()),
+                new MenuItem("_Paste from desktop","Ctrl+V",      () => ActiveEditor.ExecutePasteFromSystemClipboard()),
                 null!,
-                new MenuItem("_Beginning",        "Ctrl+Home",    () => _view.ExecuteGotoTop()),
-                new MenuItem("_End",              "Ctrl+End",     () => _view.ExecuteGotoBottom()),
+                new MenuItem("_Beginning",        "Ctrl+Home",    () => ActiveEditor.ExecuteGotoTop()),
+                new MenuItem("_End",              "Ctrl+End",     () => ActiveEditor.ExecuteGotoBottom()),
             }),
             new MenuBarItem("_Search", new MenuItem[]
             {
-                new MenuItem("_Search…",          "F7",           () => _view.ExecuteSearch()),
-                new MenuItem("Search _again",     "Shift+F7",     () => _view.ExecuteSearchContinue()),
-                new MenuItem("_Replace…",         "F4",           () => _view.ExecuteReplace()),
+                new MenuItem("_Search…",          "F7",           () => ActiveEditor.ExecuteSearch()),
+                new MenuItem("Search _again",     "Shift+F7",     () => ActiveEditor.ExecuteSearchContinue()),
+                new MenuItem("_Replace…",         "F4",           () => ActiveEditor.ExecuteReplace()),
                 null!,
-                new MenuItem("_Toggle bookmark",  "Alt+K",        () => _view.ExecuteToggleBookmark()),
-                new MenuItem("_Next bookmark",    "Alt+J",        () => _view.ExecuteNextBookmark()),
-                new MenuItem("_Prev bookmark",    "Alt+I",        () => _view.ExecutePrevBookmark()),
-                new MenuItem("_Flush bookmarks",  "Alt+O",        () => _view.ExecuteFlushBookmarks()),
+                new MenuItem("_Toggle bookmark",  "Alt+K",        () => ActiveEditor.ExecuteToggleBookmark()),
+                new MenuItem("_Next bookmark",    "Alt+J",        () => ActiveEditor.ExecuteNextBookmark()),
+                new MenuItem("_Prev bookmark",    "Alt+I",        () => ActiveEditor.ExecutePrevBookmark()),
+                new MenuItem("_Flush bookmarks",  "Alt+O",        () => ActiveEditor.ExecuteFlushBookmarks()),
             }),
             new MenuBarItem("_Command", new MenuItem[]
             {
-                new MenuItem("_Go to line…",          "Ctrl+G",   () => _view.ExecuteGotoLine()),
-                new MenuItem("_Toggle line numbers",  "Alt+N",    () => _view.ExecuteToggleLineNumbers()),
-                new MenuItem("Match _bracket",        "Alt+[",    () => _view.ExecuteMatchBracket()),
-                new MenuItem("Toggle s_yntax",        "Ctrl+S",   () => _view.ExecuteToggleSyntax()),
-                new MenuItem("Toggle _hex view",      "Ctrl+H",   () => _view.ExecuteToggleHexMode()),
-                new MenuItem("Toggle right _margin",  string.Empty, () => _view.ExecuteToggleRightMargin()),
+                new MenuItem("_Go to line…",          "Ctrl+G",   () => ActiveEditor.ExecuteGotoLine()),
+                new MenuItem("_Toggle line numbers",  "Alt+N",    () => ActiveEditor.ExecuteToggleLineNumbers()),
+                new MenuItem("Match _bracket",        "Alt+[",    () => ActiveEditor.ExecuteMatchBracket()),
+                new MenuItem("Toggle s_yntax",        "Ctrl+S",   () => ActiveEditor.ExecuteToggleSyntax()),
+                new MenuItem("Toggle _hex view",      "Ctrl+H",   () => ActiveEditor.ExecuteToggleHexMode()),
+                new MenuItem("Toggle right _margin",  string.Empty, () => ActiveEditor.ExecuteToggleRightMargin()),
                 null!,
-                new MenuItem("_Encoding…",               "Alt+E",      () => _view.ExecuteEncodingSelect()),
+                new MenuItem("_Encoding…",               "Alt+E",      () => ActiveEditor.ExecuteEncodingSelect()),
                 null!,
-                new MenuItem("_Delete macro…",           string.Empty, () => _view.ExecuteDeleteMacro()),
+                new MenuItem("_Delete macro…",           string.Empty, () => ActiveEditor.ExecuteDeleteMacro()),
                 null!,
-                new MenuItem("_Check word",              string.Empty, () => _view.ExecuteCheckWord()),
-                new MenuItem("Change spelling _language…", string.Empty, () => _view.ExecuteChangeSpellingLanguage()),
+                new MenuItem("_Check word",              string.Empty, () => ActiveEditor.ExecuteCheckWord()),
+                new MenuItem("Change spelling _language…", string.Empty, () => ActiveEditor.ExecuteChangeSpellingLanguage()),
 
 
-                new MenuItem("_Refresh screen",       "Ctrl+L",   () => _view.ExecuteRefresh()),
+                new MenuItem("_Refresh screen",       "Ctrl+L",   () => ActiveEditor.ExecuteRefresh()),
                 null!,
-                new MenuItem("_Load full file for editing…", string.Empty, () => _view.ExecuteLoadFullFile()),
+                new MenuItem("_Load full file for editing…", string.Empty, () => ActiveEditor.ExecuteLoadFullFile()),
                 null!,
-                new MenuItem("Start/Stop macro _record", "Ctrl+R",() => _view.ExecuteStartStopMacro()),
+                new MenuItem("Start/Stop macro _record", "Ctrl+R",() => ActiveEditor.ExecuteStartStopMacro()),
                 null!,
-                new MenuItem("_Spell check word",    "Ctrl+F5",   () => _view.ExecuteSpellCheck()),
+                new MenuItem("_Spell check word",    "Ctrl+F5",   () => ActiveEditor.ExecuteSpellCheck()),
             }),
             new MenuBarItem("For_mat", new MenuItem[]
             {
-                new MenuItem("Insert _literal…",  "Ctrl+Q",       () => _view.ExecuteInsertLiteral()),
-                new MenuItem("Insert _date/time", "Ctrl+D",       () => _view.ExecuteInsertDateTime()),
-                new MenuItem("_Format paragraph", "Alt+P",        () => _view.ExecuteFormatParagraph()),
-                new MenuItem("_Sort…",            "Alt+T",        () => _view.ExecuteSort()),
-                new MenuItem("_Paste output of…", "Alt+U",        () => _view.ExecuteExternalCommand()),
-                new MenuItem("_External formatter…", string.Empty, () => _view.ExecuteExternalFormatter()),
+                new MenuItem("Insert _literal…",  "Ctrl+Q",       () => ActiveEditor.ExecuteInsertLiteral()),
+                new MenuItem("Insert _date/time", "Ctrl+D",       () => ActiveEditor.ExecuteInsertDateTime()),
+                new MenuItem("_Format paragraph", "Alt+P",        () => ActiveEditor.ExecuteFormatParagraph()),
+                new MenuItem("_Sort…",            "Alt+T",        () => ActiveEditor.ExecuteSort()),
+                new MenuItem("_Paste output of…", "Alt+U",        () => ActiveEditor.ExecuteExternalCommand()),
+                new MenuItem("_External formatter…", string.Empty, () => ActiveEditor.ExecuteExternalFormatter()),
                 null!,
-                new MenuItem("_Pretty Print (JSON/XML)", string.Empty, () => _view.ExecutePrettyPrint()),
+                new MenuItem("_Pretty Print (JSON/XML)", string.Empty, () => ActiveEditor.ExecutePrettyPrint()),
                 null!,
-                new MenuItem("Validate _XML",                string.Empty, () => _view.ExecuteValidateXml()),
-                new MenuItem("Validate XSD _Schema",         string.Empty, () => _view.ExecuteValidateXsd()),
-                new MenuItem("Validate XML against _XSD…",   string.Empty, () => _view.ExecuteValidateXmlAgainstXsd()),
+                new MenuItem("Validate _XML",                string.Empty, () => ActiveEditor.ExecuteValidateXml()),
+                new MenuItem("Validate XSD _Schema",         string.Empty, () => ActiveEditor.ExecuteValidateXsd()),
+                new MenuItem("Validate XML against _XSD…",   string.Empty, () => ActiveEditor.ExecuteValidateXmlAgainstXsd()),
             }),
             new MenuBarItem("_Window", new MenuItem[]
             {
-
-
+                new MenuItem("_New tab",           "Ctrl+T",      () => OpenNewTab()),
+                new MenuItem("_Close tab",         "Ctrl+W",      () => CloseCurrentTab()),
+                new MenuItem("_Next tab",          "Ctrl+Tab",    () => NextTab()),
+                new MenuItem("_Previous tab",      "Ctrl+Shift+Tab", () => PrevTab()),
+                null!,
+                new MenuItem("Split _horizontal",  "Ctrl+_",      () => SplitHorizontal()),
+                new MenuItem("Split _vertical",    "Ctrl+|",      () => SplitVertical()),
+                new MenuItem("_Unsplit",           "Ctrl+U",      () => ExitSplitMode()),
+                null!,
+                new MenuItem("_Compare files…",    "Ctrl+D",      () => ShowCompareDialog()),
+                new MenuItem("_Binary compare…",   "Ctrl+B",      () => ShowBinaryCompareDialog()),
+                null!,
                 new MenuItem("_List…",             string.Empty,  () => ExecuteWindowList()),
                 new MenuItem("_Open another file…", string.Empty, () => ShowOpenAnotherFile()),
             }),
             new MenuBarItem("_Options", new MenuItem[]
             {
-                new MenuItem("_General…",         string.Empty,   () => _view.ExecuteOptions()),
-                new MenuItem("Save _mode…",       string.Empty,   () => _view.ExecuteSaveMode()),
+                new MenuItem("_General…",         string.Empty,   () => ActiveEditor.ExecuteOptions()),
+                new MenuItem("Save _mode…",       string.Empty,   () => ActiveEditor.ExecuteSaveMode()),
                 null!,
-                new MenuItem("S_yntax highlighting…", string.Empty, () => _view.ExecuteSyntaxChoose()),
+                new MenuItem("S_yntax highlighting…", string.Empty, () => ActiveEditor.ExecuteSyntaxChoose()),
                 null!,
-                new MenuItem("Toggle _visible tabs","Alt+_",       () => _view.ExecuteToggleShowTabs()),
+                new MenuItem("Toggle _visible tabs","Alt+_",       () => ActiveEditor.ExecuteToggleShowTabs()),
                 null!,
-                new MenuItem("_Learn keys…",             string.Empty, () => _view.ExecuteLearnKeys()),
-                new MenuItem("_Syntax file",             string.Empty, () => _view.ExecuteEditSyntaxFile()),
-                new MenuItem("_Menu file",               string.Empty, () => _view.ExecuteEditMenuFile()),
+                new MenuItem("_Learn keys…",             string.Empty, () => ActiveEditor.ExecuteLearnKeys()),
+                new MenuItem("_Syntax file",             string.Empty, () => ActiveEditor.ExecuteEditSyntaxFile()),
+                new MenuItem("_Menu file",               string.Empty, () => ActiveEditor.ExecuteEditMenuFile()),
                 null!,
                 new MenuItem("_Save setup",       string.Empty,   () => ExecuteSaveSetup()),
             }),
             new MenuBarItem("_About", new MenuItem[]
             {
-                new MenuItem("_License",        string.Empty, () => _view.ExecuteAboutLicense()),
-                new MenuItem("_Github",         string.Empty, () => _view.ExecuteAboutGitHub()),
-                new MenuItem("_Fork from",      string.Empty, () => _view.ExecuteAboutForkFrom()),
-                new MenuItem("_Why forked",     string.Empty, () => _view.ExecuteAboutWhyForked()),
-                new MenuItem("_New functions",  string.Empty, () => _view.ExecuteAboutNewFunctions()),
-                new MenuItem("_System info",    string.Empty, () => _view.ExecuteAboutSystemInfo()),
+                new MenuItem("_License",        string.Empty, () => ActiveEditor.ExecuteAboutLicense()),
+                new MenuItem("_Github",         string.Empty, () => ActiveEditor.ExecuteAboutGitHub()),
+                new MenuItem("_Fork from",      string.Empty, () => ActiveEditor.ExecuteAboutForkFrom()),
+                new MenuItem("_Why forked",     string.Empty, () => ActiveEditor.ExecuteAboutWhyForked()),
+                new MenuItem("_New functions",  string.Empty, () => ActiveEditor.ExecuteAboutNewFunctions()),
+                new MenuItem("_System info",    string.Empty, () => ActiveEditor.ExecuteAboutSystemInfo()),
             }),
           }
         };
@@ -197,15 +257,15 @@ public sealed class EditorScreen : Toplevel
                                                "F9=Menu  F10=Quit\n" +
                                                "Ctrl+Z=Undo  Alt+K=Bookmark\n" +
                                                "Ctrl+G=GoToLine  Alt+[=MatchBracket", "OK")),
-            ("Save",    () => _view.ExecuteSave()),
-            ("Mark",    () => _view.ExecuteToggleMark()),
-            ("Replac",  () => _view.ExecuteReplace()),
-            ("Copy",    () => _view.ExecuteCopyBlock()),
-            ("Move",    () => _view.ExecuteMoveBlock()),
-            ("Search",  () => _view.ExecuteSearch()),
-            ("Delete",  () => _view.ExecuteDeleteBlock()),
+            ("Save",    () => ActiveEditor.ExecuteSave()),
+            ("Mark",    () => ActiveEditor.ExecuteToggleMark()),
+            ("Replac",  () => ActiveEditor.ExecuteReplace()),
+            ("Copy",    () => ActiveEditor.ExecuteCopyBlock()),
+            ("Move",    () => ActiveEditor.ExecuteMoveBlock()),
+            ("Search",  () => ActiveEditor.ExecuteSearch()),
+            ("Delete",  () => ActiveEditor.ExecuteDeleteBlock()),
             ("PullDn",  () => _menuBar.SetFocus()),
-            ("Quit",    () => _view.ExecuteClose())
+            ("Quit",    () => ActiveEditor.ExecuteClose())
         );
     }
 
@@ -254,7 +314,7 @@ public sealed class EditorScreen : Toplevel
             // Open chosen file in the same screen (load into current view)
             try
             {
-                _view.ExecuteOpenFile();
+                ActiveEditor.ExecuteOpenFile();
             }
             catch { }
         }
@@ -262,22 +322,220 @@ public sealed class EditorScreen : Toplevel
 
     private void ShowOpenAnotherFile()
     {
-        _view.ExecuteOpenFile();
+        ActiveEditor.ExecuteOpenFile();
     }
 
     private void ExecuteWindowList()
     {
-        // Since only one file at a time is supported, just show the current filename
-        var view = _view;
-        var title = view.Title;
-        MessageBox.Query("Window List", title, "OK");
+        if (_editors.Count == 0) return;
+        var items = _editors.Select((e, i) => 
+            $"{(i == _currentTab ? "*" : " ")} {i + 1}. {Path.GetFileName(e.FilePath ?? "untitled")}").ToArray();
+        int choice = MessageBox.Query("Window List", $"{_editors.Count} file(s) open", items);
+        if (choice >= 0 && choice < _editors.Count)
+            SwitchToTab(choice);
     }
 
     private void ExecuteSaveSetup()
     {
-        _settings = _view.CaptureSettings();
+        _settings = ActiveEditor.CaptureSettings();
         _settings.Save();
         MessageBox.Query("Save Setup", "Settings saved to ~/.config/mc/ini", "OK");
+    }
+
+    // ── Multi-tab operations ─────────────────────────────────────────────────
+
+    private void OpenNewTab()
+    {
+        if (_isSplitMode) ExitSplitMode();
+        
+        var view = CreateEditorView(null);
+        _editors.Add(view);
+        view.ApplySettings(_settings);
+        
+        SwitchToTab(_editors.Count - 1);
+    }
+
+    private void SwitchToTab(int index)
+    {
+        if (index < 0 || index >= _editors.Count || index == _currentTab) return;
+        
+        _editorContainer.Remove(_editors[_currentTab]);
+        _currentTab = index;
+        _editorContainer.Add(_editors[_currentTab]);
+        SetNeedsDraw();
+    }
+
+    private void NextTab()
+    {
+        if (_isSplitMode || _editors.Count <= 1) return;
+        SwitchToTab((_currentTab + 1) % _editors.Count);
+    }
+
+    private void PrevTab()
+    {
+        if (_isSplitMode || _editors.Count <= 1) return;
+        SwitchToTab((_currentTab - 1 + _editors.Count) % _editors.Count);
+    }
+
+    // ── Split view operations ────────────────────────────────────────────────
+
+    private void SplitHorizontal()
+    {
+        if (_isSplitMode) return;
+        EnterSplitMode(false);
+    }
+
+    private void SplitVertical()
+    {
+        if (_isSplitMode) return;
+        EnterSplitMode(true);
+    }
+
+    private void EnterSplitMode(bool vertical)
+    {
+        _isSplitMode = true;
+        _isVerticalSplit = vertical;
+
+        Remove(_editorContainer);
+
+        _splitView1 = ActiveEditor;
+        _splitView2 = CreateEditorView(_splitView1.FilePath);
+        _splitView2.ApplySettings(_settings);
+
+        if (vertical)
+        {
+            _splitView1.X = 0; _splitView1.Y = 0;
+            _splitView1.Width = Dim.Percent(50);
+            _splitView1.Height = Dim.Fill();
+
+            _splitView2.X = Pos.Right(_splitView1) + 1;
+            _splitView2.Y = 0;
+            _splitView2.Width = Dim.Fill();
+            _splitView2.Height = Dim.Fill();
+        }
+        else
+        {
+            _splitView1.X = 0; _splitView1.Y = 0;
+            _splitView1.Width = Dim.Fill();
+            _splitView1.Height = Dim.Percent(50);
+
+            _splitView2.X = 0;
+            _splitView2.Y = Pos.Bottom(_splitView1) + 1;
+            _splitView2.Width = Dim.Fill();
+            _splitView2.Height = Dim.Fill();
+        }
+
+        _splitContainer = new View
+        {
+            X = 0, Y = 1,
+            Width = Dim.Fill(),
+            Height = Dim.Fill(1),
+        };
+        _splitContainer.Add(_splitView1, _splitView2);
+        Add(_splitContainer);
+    }
+
+    private void ExitSplitMode()
+    {
+        if (!_isSplitMode) return;
+
+        if (_splitContainer != null)
+            Remove(_splitContainer);
+
+        _splitView1 = null;
+        _splitView2 = null;
+        _splitContainer = null;
+        _isSplitMode = false;
+
+        Add(_editorContainer);
+    }
+
+    // ── Compare operations ───────────────────────────────────────────────────
+
+    private void ShowCompareDialog()
+    {
+        var d = new Dialog { Title = "Compare Files", Width = 70, Height = 12 };
+        d.Add(new Label { X = 1, Y = 1, Text = "Left file:" });
+        var tf1 = new TextField { X = 1, Y = 2, Width = Dim.Fill(1), Text = ActiveEditor.FilePath ?? "" };
+        d.Add(tf1);
+        d.Add(new Label { X = 1, Y = 4, Text = "Right file:" });
+        var tf2 = new TextField { X = 1, Y = 5, Width = Dim.Fill(1) };
+        d.Add(tf2);
+
+        var ok = new Button { Text = "Compare", IsDefault = true };
+        var cancel = new Button { Text = "Cancel" };
+        ok.Accepting += (_, _) =>
+        {
+            var left = tf1.Text?.ToString();
+            var right = tf2.Text?.ToString();
+            if (!string.IsNullOrEmpty(left) && !string.IsNullOrEmpty(right))
+            {
+                Application.RequestStop(d);
+                ShowTextCompare(left, right);
+            }
+        };
+        cancel.Accepting += (_, _) => Application.RequestStop(d);
+        d.AddButton(ok); d.AddButton(cancel);
+        Application.Run(d); d.Dispose();
+    }
+
+    private void ShowTextCompare(string leftPath, string rightPath)
+    {
+        var compareView = new TextCompareView(leftPath, rightPath);
+        var compareWindow = new Window
+        {
+            Title = $"Compare: {Path.GetFileName(leftPath)} <> {Path.GetFileName(rightPath)}",
+            X = 0, Y = 0,
+            Width = Dim.Fill(),
+            Height = Dim.Fill(),
+        };
+        compareWindow.Add(compareView);
+        compareView.RequestClose += (_, _) => Application.RequestStop(compareWindow);
+        Application.Run(compareWindow);
+        compareWindow.Dispose();
+    }
+
+    private void ShowBinaryCompareDialog()
+    {
+        var d = new Dialog { Title = "Binary Compare", Width = 70, Height = 12 };
+        d.Add(new Label { X = 1, Y = 1, Text = "Left file:" });
+        var tf1 = new TextField { X = 1, Y = 2, Width = Dim.Fill(1), Text = ActiveEditor.FilePath ?? "" };
+        d.Add(tf1);
+        d.Add(new Label { X = 1, Y = 4, Text = "Right file:" });
+        var tf2 = new TextField { X = 1, Y = 5, Width = Dim.Fill(1) };
+        d.Add(tf2);
+
+        var ok = new Button { Text = "Compare", IsDefault = true };
+        var cancel = new Button { Text = "Cancel" };
+        ok.Accepting += (_, _) =>
+        {
+            var left = tf1.Text?.ToString();
+            var right = tf2.Text?.ToString();
+            if (!string.IsNullOrEmpty(left) && !string.IsNullOrEmpty(right))
+            {
+                Application.RequestStop(d);
+                ShowBinaryCompare(left, right);
+            }
+        };
+        cancel.Accepting += (_, _) => Application.RequestStop(d);
+        d.AddButton(ok); d.AddButton(cancel);
+        Application.Run(d); d.Dispose();
+    }
+
+    private void ShowBinaryCompare(string leftPath, string rightPath)
+    {
+        var compareView = new BinaryCompareView(leftPath, rightPath);
+        var compareWindow = new Window
+        {
+            Title = $"Binary Compare: {Path.GetFileName(leftPath)} <> {Path.GetFileName(rightPath)}",
+            X = 0, Y = 0,
+            Width = Dim.Fill(),
+            Height = Dim.Fill(),
+        };
+        compareWindow.Add(compareView);
+        compareView.RequestClose += (_, _) => Application.RequestStop(compareWindow);
+        Application.Run(compareWindow);
+        compareWindow.Dispose();
     }
 }
 
