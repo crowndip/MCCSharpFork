@@ -77,6 +77,19 @@ public sealed class EditorScreen : Toplevel
         return view;
     }
 
+    protected override bool OnKeyDown(Key keyEvent)
+    {
+        // Let editor handle all keys except F9 (menu) and F10 (quit)
+        if (keyEvent.KeyCode == KeyCode.F9)
+        {
+            _menuBar.SetFocus();
+            return true;
+        }
+        
+        // Don't let MenuBar intercept keys - pass to focused view (editor)
+        return base.OnKeyDown(keyEvent);
+    }
+
     private void CloseCurrentTab()
     {
         if (_isSplitMode)
