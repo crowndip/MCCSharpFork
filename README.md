@@ -11,9 +11,20 @@ A full C# / .NET 8 rewrite of [GNU Midnight Commander](https://midnight-commande
 - **Dual-panel file manager** — classic Norton Commander / mc layout
 - **Virtual File System (VFS)** — local, FTP, SFTP, ZIP, TAR, 7Z, RAR, CAB, ISO, ARJ, LHA, JAR archives
 - **Built-in viewer** — hex + text modes with search
-- **Built-in editor** — syntax-aware text editor
+- **Built-in editor (mcedit)** — advanced programmer's editor:
+  - Syntax highlighting for 20+ languages
+  - Multi-tab support for multiple files
+  - Split view (horizontal/vertical)
+  - Text compare with syntax highlighting
+  - Binary compare with hex view
+  - Git integration (blame, diff, stage)
+  - Macro recording/playback
+  - Word completion
+  - JSON/XML pretty print and validation
 - **Diff viewer** — side-by-side file comparison
 - **Find files** — glob pattern + content search with regex support
+- **Search in archives** — find files inside ZIP, RAR, 7Z, TAR, etc.
+- **Duplicate file finder** — content-based with SHA256
 - **Hotlist** — bookmarked directory shortcuts
 - **Shell integration** — drop to shell (Ctrl+O), run commands from the command line
 - **Tools menu** (MCCompanion features):
