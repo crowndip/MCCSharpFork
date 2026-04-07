@@ -201,6 +201,14 @@ public sealed class EditorScreen : Toplevel
                 new MenuItem("Validate XSD _Schema",         string.Empty, () => ActiveEditor.ExecuteValidateXsd()),
                 new MenuItem("Validate XML against _XSD…",   string.Empty, () => ActiveEditor.ExecuteValidateXmlAgainstXsd()),
             }),
+            new MenuBarItem("_Git", new MenuItem[]
+            {
+                new MenuItem("_Blame…",            "Ctrl+G B",    () => ShowGitBlame()),
+                new MenuItem("_Diff…",             "Ctrl+G D",    () => ShowGitDiff()),
+                new MenuItem("_Stage file",        "Ctrl+G S",    () => GitStageFile()),
+                new MenuItem("_Unstage file",      "Ctrl+G U",    () => GitUnstageFile()),
+                new MenuItem("_Status",            "Ctrl+G T",    () => ShowGitStatus()),
+            }),
             new MenuBarItem("_Window", new MenuItem[]
             {
                 new MenuItem("_New tab",           "Ctrl+T",      () => OpenNewTab()),
@@ -536,6 +544,127 @@ public sealed class EditorScreen : Toplevel
         compareView.RequestClose += (_, _) => Application.RequestStop(compareWindow);
         Application.Run(compareWindow);
         compareWindow.Dispose();
+    }
+
+    // ── Git operations ───────────────────────────────────────────────────────
+
+    private void ShowGitBlame()
+    {
+        var filePath = ActiveEditor.FilePath;
+        if (string.IsNullOrEmpty(filePath))
+        {
+            MessageBox.ErrorQuery("Git Blame", "No file open", "OK");
+            return;
+        }
+
+        if (!GitHelper.IsGitRepository(filePath))
+        {
+            MessageBox.ErrorQuery("Git Blame", "Not a git repository", "OK");
+            return;
+        }
+
+        var blameView = new GitBlameView(filePath);
+        var blameWindow = new Window
+        {
+            Title = $"Git Blame: {Path.GetFileName(filePath)}",
+            X = 0, Y = 0,
+            Width = Dim.Fill(),
+            Height = Dim.Fill(),
+        };
+        blameWindow.Add(blameView);
+        blameView.RequestClose += (_, _) => Application.RequestStop(blameWindow);
+        Application.Run(blameWindow);
+        blameWindow.Dispose();
+    }
+
+    private void ShowGitDiff()
+    {
+        var filePath = ActiveEditor.FilePath;
+        if (string.IsNullOrEmpty(filePath))
+        {
+            MessageBox.ErrorQuery("Git Diff", "No file open", "OK");
+            return;
+        }
+
+        if (!GitHelper.IsGitRepository(filePath))
+        {
+            MessageBox.ErrorQuery("Git Diff", "Not a git repository", "OK");
+            return;
+        }
+
+        var diffView = new GitDiffView(filePath);
+        var diffWindow = new Window
+        {
+            Title = $"Git Diff: {Path.GetFileName(filePath)}",
+            X = 0, Y = 0,
+            Width = Dim.Fill(),
+            Height = Dim.Fill(),
+        };
+        diffWindow.Add(diffView);
+        diffView.RequestClose += (_, _) => Application.RequestStop(diffWindow);
+        Application.Run(diffWindow);
+        diffWindow.Dispose();
+    }
+
+    private void GitStageFile()
+    {
+        var filePath = ActiveEditor.FilePath;
+        if (string.IsNullOrEmpty(filePath))
+        {
+            MessageBox.ErrorQuery("Git Stage", "No file open", "OK");
+            return;
+        }
+
+        if (!GitHelper.IsGitRepository(filePath))
+        {
+            MessageBox.ErrorQuery("Git Stage", "Not a git repository", "OK");
+            return;
+        }
+
+        if (GitHelper.StageFile(filePath))
+            MessageBox.Query("Git Stage", $"Staged: {Path.GetFileName(filePath)}", "OK");
+        else
+            MessageBox.ErrorQuery("Git Stage", "Failed to stage file", "OK");
+    }
+
+    private void GitUnstageFile()
+    {
+        var filePath = ActiveEditor.FilePath;
+        if (string.IsNullOrEmpty(filePath))
+        {
+            MessageBox.ErrorQuery("Git Unstage", "No file open", "OK");
+            return;
+        }
+
+        if (!GitHelper.IsGitRepository(filePath))
+        {
+            MessageBox.ErrorQuery("Git Unstage", "Not a git repository", "OK");
+            return;
+        }
+
+        if (GitHelper.UnstageFile(filePath))
+            MessageBox.Query("Git Unstage", $"Unstaged: {Path.GetFileName(filePath)}", "OK");
+        else
+            MessageBox.ErrorQuery("Git Unstage", "Failed to unstage file", "OK");
+    }
+
+    private void ShowGitStatus()
+    {
+        var filePath = ActiveEditor.FilePath;
+        if (string.IsNullOrEmpty(filePath))
+        {
+            MessageBox.ErrorQuery("Git Status", "No file open", "OK");
+            return;
+        }
+
+        if (!GitHelper.IsGitRepository(filePath))
+        {
+            MessageBox.ErrorQuery("Git Status", "Not a git repository", "OK");
+            return;
+        }
+
+        var status = GitHelper.GetStatus(filePath);
+        MessageBox.Query("Git Status", $"{Path.GetFileName(filePath)}\n\nStatus: {status}", "OK");
     }
 }
 
