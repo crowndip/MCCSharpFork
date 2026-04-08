@@ -37,7 +37,7 @@ public sealed class EditorScreen : Toplevel
     {
         _editorContainer = new View
         {
-            X = 0, Y = 0,  // Start at top since no MenuBar initially
+            X = 0, Y = 0,
             Width = Dim.Fill(),
             Height = Dim.Fill(1),
             CanFocus = false,
@@ -58,12 +58,18 @@ public sealed class EditorScreen : Toplevel
         _settings = EditorSettings.Load();
         view.ApplySettings(_settings);
 
-        // DON'T add MenuBar - it steals keyboard input in Terminal.Gui v2
-        // Only add container and button bar
+        // Add container and button bar (no MenuBar)
         Add(_editorContainer, _buttonBar);
-        
-        // Set focus to editor
-        view.SetFocus();
+    }
+    
+    protected override bool OnDrawingContent(DrawContext? context)
+    {
+        // Ensure editor has focus after screen is ready
+        if (_editors.Count > 0 && !_editors[_currentTab].HasFocus)
+        {
+            _editors[_currentTab].SetFocus();
+        }
+        return base.OnDrawingContent(context);
     }
 
     private EditorView CreateEditorView(string? filePath, bool readOnly = false)
