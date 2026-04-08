@@ -65,7 +65,7 @@ public sealed class EditorScreen : Toplevel
     protected override bool OnDrawingContent(DrawContext? context)
     {
         // Force cursor to be visible and positioned at the editor's cursor location
-        // Since focus chain is broken, we must manually position the cursor
+        // Since focus chain is broken, we must manually show and position the cursor
         var editor = ActiveEditor;
         if (editor != null)
         {
@@ -75,7 +75,15 @@ public sealed class EditorScreen : Toplevel
                 // Position cursor at editor's location (accounting for container offset)
                 var absX = _editorContainer.Frame.X + cursorPos.Value.X;
                 var absY = _editorContainer.Frame.Y + cursorPos.Value.Y;
-                Application.Driver?.Move(absX, absY);
+                
+                // Force cursor visible using the driver directly
+                var driver = Application.Driver;
+                if (driver != null)
+                {
+                    driver.Move(absX, absY);
+                    // Make cursor visible - this is the critical part
+                    driver.SetCursorVisibility(CursorVisibility.Underline);
+                }
             }
         }
         return base.OnDrawingContent(context);
