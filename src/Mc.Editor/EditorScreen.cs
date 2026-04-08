@@ -35,6 +35,9 @@ public sealed class EditorScreen : Toplevel
 
     public EditorScreen(string? filePath = null, bool readOnly = false)
     {
+        // Set cursor visibility so Terminal.Gui shows the cursor
+        CursorVisibility = CursorVisibility.Underline;
+        
         _editorContainer = new View
         {
             X = 0, Y = 0,
@@ -62,31 +65,23 @@ public sealed class EditorScreen : Toplevel
         Add(_editorContainer, _buttonBar);
     }
     
-    protected override bool OnDrawingContent(DrawContext? context)
+    public override System.Drawing.Point? PositionCursor()
     {
-        // Force cursor to be visible and positioned at the editor's cursor location
-        // Since focus chain is broken, we must manually show and position the cursor
         var editor = ActiveEditor;
-        if (editor != null)
-        {
-            var cursorPos = editor.PositionCursor();
-            if (cursorPos.HasValue)
-            {
-                // Position cursor at editor's location (accounting for container offset)
-                var absX = _editorContainer.Frame.X + cursorPos.Value.X;
-                var absY = _editorContainer.Frame.Y + cursorPos.Value.Y;
-                
-                // Force cursor visible using the driver directly
-                var driver = Application.Driver;
-                if (driver != null)
-                {
-                    driver.Move(absX, absY);
-                    // Make cursor visible - this is the critical part
-                    driver.SetCursorVisibility(CursorVisibility.Underline);
-                }
-            }
-        }
-        return base.OnDrawingContent(context);
+        if (editor == null) return null;
+
+        // Get cursor position from the editor (viewport-relative)
+        var cursorPos = editor.PositionCursor();
+        if (!cursorPos.HasValue) return null;
+
+        // Translate from editor-local coords to EditorScreen coords
+        // EditorView is inside _editorContainer, so add container's offset
+        int absX = _editorContainer.Frame.X + editor.Frame.X + cursorPos.Value.X;
+        int absY = _editorContainer.Frame.Y + editor.Frame.Y + cursorPos.Value.Y;
+
+        // Move the cursor to the absolute position
+        Move(absX, absY);
+        return new System.Drawing.Point(absX, absY);
     }
 
     private EditorView CreateEditorView(string? filePath, bool readOnly = false)
