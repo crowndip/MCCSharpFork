@@ -61,16 +61,6 @@ public sealed class EditorScreen : Toplevel
         // Add container and button bar (no MenuBar)
         Add(_editorContainer, _buttonBar);
     }
-    
-    protected override bool OnDrawingContent(DrawContext? context)
-    {
-        // Ensure editor has focus after screen is ready
-        if (_editors.Count > 0 && !_editors[_currentTab].HasFocus)
-        {
-            _editors[_currentTab].SetFocus();
-        }
-        return base.OnDrawingContent(context);
-    }
 
     private EditorView CreateEditorView(string? filePath, bool readOnly = false)
     {
@@ -111,7 +101,11 @@ public sealed class EditorScreen : Toplevel
             return true;
         }
         
-        // All other keys go to the editor
+        // Forward all other keys directly to the active editor
+        // This bypasses the broken focus chain caused by _editorContainer.CanFocus = false
+        if (_editors.Count > 0)
+            return _editors[_currentTab].NewKeyDownEvent(keyEvent);
+        
         return false;
     }
 
