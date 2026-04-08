@@ -60,6 +60,9 @@ public sealed class EditorScreen : Toplevel
 
         // Add container and button bar (no MenuBar)
         Add(_editorContainer, _buttonBar);
+        
+        // Force cursor visibility since focus chain is broken
+        view.CursorVisibility = CursorVisibility.Underline;
     }
 
     private EditorView CreateEditorView(string? filePath, bool readOnly = false)
