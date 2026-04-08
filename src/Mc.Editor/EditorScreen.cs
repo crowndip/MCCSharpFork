@@ -60,9 +60,25 @@ public sealed class EditorScreen : Toplevel
 
         // Add container and button bar (no MenuBar)
         Add(_editorContainer, _buttonBar);
-        
-        // Force cursor visibility since focus chain is broken
-        view.CursorVisibility = CursorVisibility.Underline;
+    }
+    
+    protected override bool OnDrawingContent(DrawContext? context)
+    {
+        // Force cursor to be visible and positioned at the editor's cursor location
+        // Since focus chain is broken, we must manually position the cursor
+        var editor = ActiveEditor;
+        if (editor != null)
+        {
+            var cursorPos = editor.PositionCursor();
+            if (cursorPos.HasValue)
+            {
+                // Position cursor at editor's location (accounting for container offset)
+                var absX = _editorContainer.Frame.X + cursorPos.Value.X;
+                var absY = _editorContainer.Frame.Y + cursorPos.Value.Y;
+                Application.Driver?.Move(absX, absY);
+            }
+        }
+        return base.OnDrawingContent(context);
     }
 
     private EditorView CreateEditorView(string? filePath, bool readOnly = false)
